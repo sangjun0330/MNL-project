@@ -1,4 +1,4 @@
-export type OpenAIRequestScope = "recovery" | "med_safety";
+export type OpenAIRequestScope = "recovery" | "med_safety" | "social_group_brief";
 
 export type OpenAIResponsesRequestConfig = {
   requestUrl: string;
@@ -70,16 +70,25 @@ function resolveGatewayToken(scope: OpenAIRequestScope) {
           process.env.OPENAI_GATEWAY_TOKEN,
           process.env.OPENAI_GATEWAY_API_KEY,
         ]
-      : [
-          process.env.OPENAI_RECOVERY_GATEWAY_TOKEN,
-          process.env.OPENAI_RECOVERY_CF_AIG_TOKEN,
-          process.env.OPENAI_MED_SAFETY_GATEWAY_TOKEN,
-          process.env.OPENAI_MED_SAFETY_CF_AIG_TOKEN,
-          process.env.CF_AIG_TOKEN,
-          process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
-          process.env.OPENAI_GATEWAY_TOKEN,
-          process.env.OPENAI_GATEWAY_API_KEY,
-        ];
+      : scope === "social_group_brief"
+        ? [
+            process.env.OPENAI_SOCIAL_GROUP_BRIEF_GATEWAY_TOKEN,
+            process.env.OPENAI_SOCIAL_GROUP_BRIEF_CF_AIG_TOKEN,
+            process.env.CF_AIG_TOKEN,
+            process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
+            process.env.OPENAI_GATEWAY_TOKEN,
+            process.env.OPENAI_GATEWAY_API_KEY,
+          ]
+        : [
+            process.env.OPENAI_RECOVERY_GATEWAY_TOKEN,
+            process.env.OPENAI_RECOVERY_CF_AIG_TOKEN,
+            process.env.OPENAI_MED_SAFETY_GATEWAY_TOKEN,
+            process.env.OPENAI_MED_SAFETY_CF_AIG_TOKEN,
+            process.env.CF_AIG_TOKEN,
+            process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
+            process.env.OPENAI_GATEWAY_TOKEN,
+            process.env.OPENAI_GATEWAY_API_KEY,
+          ];
   return values.map(trimEnv).find(Boolean) ?? "";
 }
 
@@ -90,11 +99,16 @@ function resolveStoredKeyFlag(scope: OpenAIRequestScope) {
           process.env.OPENAI_MED_SAFETY_GATEWAY_USE_STORED_KEY,
           process.env.OPENAI_GATEWAY_USE_STORED_KEY,
         ]
-      : [
-          process.env.OPENAI_RECOVERY_GATEWAY_USE_STORED_KEY,
-          process.env.OPENAI_MED_SAFETY_GATEWAY_USE_STORED_KEY,
-          process.env.OPENAI_GATEWAY_USE_STORED_KEY,
-        ];
+      : scope === "social_group_brief"
+        ? [
+            process.env.OPENAI_SOCIAL_GROUP_BRIEF_GATEWAY_USE_STORED_KEY,
+            process.env.OPENAI_GATEWAY_USE_STORED_KEY,
+          ]
+        : [
+            process.env.OPENAI_RECOVERY_GATEWAY_USE_STORED_KEY,
+            process.env.OPENAI_MED_SAFETY_GATEWAY_USE_STORED_KEY,
+            process.env.OPENAI_GATEWAY_USE_STORED_KEY,
+          ];
   for (const raw of values) {
     const parsed = isTruthyFlag(trimEnv(raw));
     if (parsed !== null) return parsed;
@@ -109,11 +123,16 @@ function resolveGatewayAuthMode(scope: OpenAIRequestScope, openAIApiKey: string,
           process.env.OPENAI_MED_SAFETY_GATEWAY_AUTH_MODE,
           process.env.OPENAI_GATEWAY_AUTH_MODE,
         ]
-      : [
-          process.env.OPENAI_RECOVERY_GATEWAY_AUTH_MODE,
-          process.env.OPENAI_MED_SAFETY_GATEWAY_AUTH_MODE,
-          process.env.OPENAI_GATEWAY_AUTH_MODE,
-        ];
+      : scope === "social_group_brief"
+        ? [
+            process.env.OPENAI_SOCIAL_GROUP_BRIEF_GATEWAY_AUTH_MODE,
+            process.env.OPENAI_GATEWAY_AUTH_MODE,
+          ]
+        : [
+            process.env.OPENAI_RECOVERY_GATEWAY_AUTH_MODE,
+            process.env.OPENAI_MED_SAFETY_GATEWAY_AUTH_MODE,
+            process.env.OPENAI_GATEWAY_AUTH_MODE,
+          ];
 
   for (const raw of values) {
     const normalized = normalizeGatewayAuthMode(trimEnv(raw));

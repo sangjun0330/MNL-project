@@ -45,6 +45,7 @@ import type {
 const SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION = "2026-04-04.social-group-brief.v2";
 const SOCIAL_GROUP_AI_BRIEF_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MIN_GROUP_AI_BRIEF_CONTRIBUTORS = 3;
+const DEFAULT_SOCIAL_GROUP_AI_BRIEF_MODEL = "gpt-5.4-mini";
 
 type SocialGroupAIBriefRow = {
   group_id: number;
@@ -124,6 +125,11 @@ type GroupBriefContext = {
     offCountToday: number;
   };
 };
+
+function resolveSocialGroupAIBriefModel() {
+  const configured = String(process.env.OPENAI_SOCIAL_GROUP_BRIEF_MODEL ?? "").trim();
+  return configured || DEFAULT_SOCIAL_GROUP_AI_BRIEF_MODEL;
+}
 
 function isOffOrVac(shift: string | null | undefined) {
   return shift === "OFF" || shift === "VAC";
@@ -2278,7 +2284,7 @@ export async function generateGroupAIBriefArtifact(args: {
     promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
     existingRow,
   });
-  const model = context.hasProEligibleMember ? "gpt-5.4" : "gpt-5.2";
+  const model = resolveSocialGroupAIBriefModel();
   const controller = new AbortController();
   try {
     const { generateSocialGroupBriefCopy } = await import("@/lib/server/openaiSocialGroupBrief");
@@ -2381,7 +2387,7 @@ export async function generateGroupAIBriefArtifact(args: {
         ...existingRow,
         status: "failed",
         generator_type: args.generatorType,
-        model: context.hasProEligibleMember ? "gpt-5.4" : "gpt-5.2",
+        model,
         prompt_version: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
         cooldown_until: cooldownUntil,
         usage: {
@@ -2397,7 +2403,7 @@ export async function generateGroupAIBriefArtifact(args: {
       context,
       status: "failed",
       generatorType: args.generatorType,
-      model: context.hasProEligibleMember ? "gpt-5.4" : "gpt-5.2",
+      model,
       promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
       payload: buildDeterministicBriefPayload({
         context,

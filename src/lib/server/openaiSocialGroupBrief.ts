@@ -73,6 +73,9 @@ function trimEnv(value: unknown) {
 
 function normalizeApiKey() {
   return (
+    trimEnv(process.env.OPENAI_SOCIAL_GROUP_BRIEF_API_KEY) ||
+    trimEnv(process.env.OPENAI_SOCIAL_GROUP_BRIEF_KEY) ||
+    trimEnv(process.env.OPENAI_SOCIAL_GROUP_BRIEF_API_TOKEN) ||
     trimEnv(process.env.OPENAI_API_KEY) ||
     trimEnv(process.env.OPENAI_KEY) ||
     trimEnv(process.env.OPENAI_API_TOKEN) ||
@@ -82,8 +85,7 @@ function normalizeApiKey() {
 
 function resolveBaseUrl() {
   return normalizeOpenAIResponsesBaseUrl(
-    trimEnv(process.env.OPENAI_RECOVERY_BASE_URL) ||
-      trimEnv(process.env.OPENAI_MED_SAFETY_BASE_URL) ||
+    trimEnv(process.env.OPENAI_SOCIAL_GROUP_BRIEF_BASE_URL) ||
       trimEnv(process.env.OPENAI_BASE_URL)
   );
 }
@@ -91,8 +93,6 @@ function resolveBaseUrl() {
 function resolveStoreResponses() {
   const raw = trimEnv(
     process.env.OPENAI_SOCIAL_GROUP_BRIEF_STORE ||
-      process.env.OPENAI_RECOVERY_STORE ||
-      process.env.OPENAI_MED_SAFETY_STORE ||
       process.env.OPENAI_STORE ||
       "true"
   ).toLowerCase();
@@ -620,7 +620,7 @@ export async function generateSocialGroupBriefCopy(args: {
     apiBaseUrl: resolveBaseUrl(),
     apiKey,
     model: args.model,
-    scope: "recovery",
+    scope: "social_group_brief",
   });
   const traceId = createTraceId();
   const storeResponses = resolveStoreResponses();
@@ -706,7 +706,7 @@ export async function generateSocialGroupBriefCopy(args: {
         apiBaseUrl: "https://api.openai.com/v1",
         apiKey,
         model: args.model,
-        scope: "recovery",
+        scope: "social_group_brief",
       });
       if (directRequestConfig.requestUrl !== requestConfig.requestUrl) {
         console.warn("[SocialGroupAIBrief] openai_request_retry_direct", {
