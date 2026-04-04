@@ -74,10 +74,38 @@ function formatMetric(value: number | null, suffix = "") {
   return `${value}${suffix}`;
 }
 
+function InlineSpinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent"
+    />
+  );
+}
+
+function EligibilityStatCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-[22px] bg-ios-bg px-4 py-4">
+      <p className="text-[11px] font-semibold text-ios-muted">{label}</p>
+      <p className="mt-2 text-[22px] font-bold tracking-[-0.03em] text-ios-text">{value}</p>
+      <p className="mt-1 text-[11px] leading-5 text-ios-muted">{hint}</p>
+    </div>
+  );
+}
+
 export function SocialGroupAIBriefTab({ groupId }: Props) {
   const { user } = useAuthState();
   const currentUserId = user?.userId ?? null;
   const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [response, setResponse] = useState<SocialGroupAIBriefResponse | null>(null);
@@ -129,6 +157,17 @@ export function SocialGroupAIBriefTab({ groupId }: Props) {
   useEffect(() => {
     void loadBrief();
   }, [loadBrief]);
+
+  const handleCheck = useCallback(async () => {
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    try {
+      await loadBrief(true);
+    } finally {
+      setChecking(false);
+    }
+  }, [checking, loadBrief]);
 
   const handleRefresh = useCallback(async () => {
     if (!response?.viewer.canRefresh || refreshing) return;
@@ -219,8 +258,17 @@ export function SocialGroupAIBriefTab({ groupId }: Props) {
     return (
       <div className="rounded-[28px] bg-white px-4 py-4 shadow-apple">
         <p className="text-[13px] text-ios-muted">AI 브리프를 불러오지 못했어요.</p>
-        <Button variant="secondary" onClick={() => void loadBrief(true)} className="mt-3 h-10 rounded-2xl px-4 text-[13px]">
-          다시 시도
+        <Button
+          variant="secondary"
+          onClick={() => void handleCheck()}
+          disabled={checking}
+          aria-busy={checking}
+          className="mt-3 h-10 rounded-2xl px-4 text-[13px] transition-[transform,opacity] duration-200"
+        >
+          <span className="inline-flex items-center gap-2">
+            {checking ? <InlineSpinner /> : null}
+            {checking ? "확인 중…" : "다시 시도"}
+          </span>
         </Button>
       </div>
     );
@@ -231,6 +279,7 @@ export function SocialGroupAIBriefTab({ groupId }: Props) {
   }
 
   const brief = response.brief;
+  const eligibility = response.eligibility;
 
   return (
     <div className="space-y-4">
@@ -246,26 +295,65 @@ export function SocialGroupAIBriefTab({ groupId }: Props) {
           <h3 className="mt-4 text-[22px] font-bold tracking-[-0.03em] text-ios-text">
             이번 주 브리프를 만들기 위한 데이터가 아직 부족해요.
           </h3>
-          <div className="mt-4 space-y-2 rounded-[24px] bg-ios-bg px-4 py-4">
-            <p className="text-[12.5px] text-ios-text">건강 공유를 켠 멤버가 더 필요해요.</p>
-            <p className="text-[12.5px] text-ios-text">최근 7일 기록이 3일 이상 쌓인 멤버가 더 필요해요.</p>
-          </div>
+          {eligibility ? (
+            <>
+              <p className="mt-3 text-[13px] leading-6 text-ios-muted">
+                기여 가능 멤버가 <span className="font-semibold text-ios-text">{eligibility.contributorCount}/{eligibility.memberCount}</span>명이고,
+                브리프를 열려면 최소 <span className="font-semibold text-ios-text">{eligibility.requiredContributorCount}명</span>이 필요해요.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <EligibilityStatCard
+                  label="기여 가능 멤버"
+                  value={`${eligibility.contributorCount}/${eligibility.memberCount}`}
+                  hint={`최소 ${eligibility.requiredContributorCount}명 필요`}
+                />
+                <EligibilityStatCard
+                  label="건강 공유 ON"
+                  value={`${eligibility.healthShareCount}/${eligibility.memberCount}`}
+                  hint="health 공유 기준"
+                />
+                <EligibilityStatCard
+                  label="최근 기록 충족"
+                  value={`${eligibility.recentDataCount}/${eligibility.memberCount}`}
+                  hint="최근 7일 입력 3일 이상"
+                />
+                <EligibilityStatCard
+                  label="AI 동의 완료"
+                  value={`${eligibility.consentCount}/${eligibility.memberCount}`}
+                  hint="서비스 동의 기준"
+                />
+              </div>
+            </>
+          ) : (
+            <div className="mt-4 space-y-2 rounded-[24px] bg-ios-bg px-4 py-4">
+              <p className="text-[12.5px] text-ios-text">건강 공유를 켠 멤버가 더 필요해요.</p>
+              <p className="text-[12.5px] text-ios-text">최근 7일 기록이 3일 이상 쌓인 멤버가 더 필요해요.</p>
+            </div>
+          )}
           <div className="mt-4 flex gap-2">
             <Button
               variant="secondary"
-              onClick={() => void loadBrief(true)}
-              className="h-10 flex-1 rounded-2xl text-[13px]"
+              onClick={() => void handleCheck()}
+              disabled={checking}
+              aria-busy={checking}
+              className="h-10 flex-1 rounded-2xl text-[13px] transition-[transform,opacity] duration-200"
             >
-              다시 확인
+              <span className="inline-flex items-center gap-2">
+                {checking ? <InlineSpinner /> : null}
+                {checking ? "확인 중…" : "다시 확인"}
+              </span>
             </Button>
             {response.viewer.canRefresh ? (
               <Button
                 variant="primary"
                 onClick={() => void handleRefresh()}
-                disabled={refreshing}
+                disabled={refreshing || checking}
                 className="h-10 flex-1 rounded-2xl text-[13px]"
               >
-                {refreshing ? "브리프 갱신 중…" : "이번 주 브리프 새로고침"}
+                <span className="inline-flex items-center gap-2">
+                  {refreshing ? <InlineSpinner /> : null}
+                  {refreshing ? "브리프 갱신 중…" : "이번 주 브리프 새로고침"}
+                </span>
               </Button>
             ) : null}
           </div>
@@ -286,19 +374,27 @@ export function SocialGroupAIBriefTab({ groupId }: Props) {
           <div className="mt-5 flex gap-2">
             <Button
               variant="secondary"
-              onClick={() => void loadBrief(true)}
-              className="h-10 flex-1 rounded-2xl text-[13px]"
+              onClick={() => void handleCheck()}
+              disabled={checking}
+              aria-busy={checking}
+              className="h-10 flex-1 rounded-2xl text-[13px] transition-[transform,opacity] duration-200"
             >
-              다시 확인
+              <span className="inline-flex items-center gap-2">
+                {checking ? <InlineSpinner /> : null}
+                {checking ? "확인 중…" : "다시 확인"}
+              </span>
             </Button>
             {response.viewer.canRefresh ? (
               <Button
                 variant="primary"
                 onClick={() => void handleRefresh()}
-                disabled={refreshing}
+                disabled={refreshing || checking}
                 className="h-10 flex-1 rounded-2xl text-[13px]"
               >
-                {refreshing ? "브리프 갱신 중…" : "이번 주 브리프 새로고침"}
+                <span className="inline-flex items-center gap-2">
+                  {refreshing ? <InlineSpinner /> : null}
+                  {refreshing ? "브리프 갱신 중…" : "이번 주 브리프 새로고침"}
+                </span>
               </Button>
             ) : (
               <Button variant="secondary" disabled className="h-10 flex-1 rounded-2xl text-[13px]">

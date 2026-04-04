@@ -55,6 +55,7 @@ type BriefMemberContext = {
   visibleWeekSchedule: Record<string, string>;
   healthVisibility: HealthVisibility;
   vitals: MemberWeeklyVitals | null;
+  hasRecentData: boolean;
   personalCardOptIn: boolean;
   hasPaidBriefAccess: boolean;
   hasProBriefAccess: boolean;
@@ -77,8 +78,12 @@ type GroupBriefContext = {
   hasPaidEligibleMember: boolean;
   hasProEligibleMember: boolean;
   metrics: {
+    memberCount: number;
     contributorCount: number;
     optInCardCount: number;
+    healthShareCount: number;
+    consentCount: number;
+    recentDataCount: number;
     avgBattery: number | null;
     avgSleep: number | null;
     avgMental: number | null;
@@ -386,7 +391,8 @@ async function loadGroupBriefContext(args: {
     );
     if (offSet.size > 0) visibleOffSets.push(offSet);
 
-    const vitals = pref.healthVisibility === "full" ? computeMemberWeeklyVitals(payload, week.todayISO) : null;
+    const rawVitals = computeMemberWeeklyVitals(payload, week.todayISO);
+    const vitals = pref.healthVisibility === "full" ? rawVitals : null;
     const profile = profileMap.get(userId);
     const subscription: SocialGroupAIBriefSubscriptionSnapshot | null = subscriptionMap.get(userId) ?? null;
     const hasAIConsent = consentMap.get(userId) === true;
@@ -398,6 +404,7 @@ async function loadGroupBriefContext(args: {
       visibleWeekSchedule,
       healthVisibility: pref.healthVisibility,
       vitals,
+      hasRecentData: rawVitals !== null,
       personalCardOptIn: optInMap.get(userId) === true,
       hasPaidBriefAccess: subscription?.hasBriefAccess === true,
       hasProBriefAccess: subscription?.hasProBriefAccess === true,
@@ -416,8 +423,12 @@ async function loadGroupBriefContext(args: {
       : [];
 
   const metrics = {
+    memberCount: members.length,
     contributorCount: contributors.length,
     optInCardCount: allCardEligibleMembers.length,
+    healthShareCount: members.filter((member) => member.healthVisibility === "full").length,
+    consentCount: members.filter((member) => member.hasAIConsent).length,
+    recentDataCount: members.filter((member) => member.hasRecentData).length,
     avgBattery: averageNullable(contributors.map((member) => member.vitals?.weeklyAvgBattery ?? null)),
     avgSleep: averageNullable(contributors.map((member) => member.vitals?.weeklyAvgSleep ?? null)),
     avgMental: averageNullable(contributors.map((member) => member.vitals?.weeklyAvgMental ?? null)),
@@ -855,6 +866,16 @@ function buildResponse(args: {
 }): SocialGroupAIBriefResponse {
   const cooldownUntil = args.row?.cooldown_until ? Date.parse(args.row.cooldown_until) : null;
   const canRefresh = args.viewer.hasEntitlement && (!cooldownUntil || cooldownUntil <= Date.now());
+  const eligibility = args.context
+    ? {
+        memberCount: args.context.metrics.memberCount,
+        requiredContributorCount: 3,
+        contributorCount: args.context.metrics.contributorCount,
+        healthShareCount: args.context.metrics.healthShareCount,
+        consentCount: args.context.metrics.consentCount,
+        recentDataCount: args.context.metrics.recentDataCount,
+      }
+    : null;
 
   if (!args.viewer.hasEntitlement) {
     return {
@@ -867,6 +888,7 @@ function buildResponse(args: {
         healthShareEnabled: args.viewer.healthShareEnabled,
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
+      eligibility,
       brief: null,
       errorCode: null,
     };
@@ -883,6 +905,7 @@ function buildResponse(args: {
         healthShareEnabled: args.viewer.healthShareEnabled,
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
+      eligibility,
       brief: null,
       errorCode: "insufficient_group_ai_brief_data",
     };
@@ -899,6 +922,7 @@ function buildResponse(args: {
         healthShareEnabled: args.viewer.healthShareEnabled,
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
+      eligibility,
       brief: null,
       errorCode: "group_ai_brief_missing",
     };
@@ -915,6 +939,7 @@ function buildResponse(args: {
         healthShareEnabled: args.viewer.healthShareEnabled,
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
+      eligibility,
       brief: null,
       errorCode: "insufficient_group_ai_brief_data",
     };
@@ -932,6 +957,7 @@ function buildResponse(args: {
           healthShareEnabled: args.viewer.healthShareEnabled,
           personalCardOptIn: args.viewer.personalCardOptIn,
         },
+        eligibility,
         brief: filterPayloadForReadTimePrivacy(args.row.payload, args.context),
         errorCode: "group_ai_brief_generation_failed",
       };
@@ -946,6 +972,7 @@ function buildResponse(args: {
         healthShareEnabled: args.viewer.healthShareEnabled,
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
+      eligibility,
       brief: null,
       errorCode: "group_ai_brief_generation_failed",
     };
@@ -961,6 +988,7 @@ function buildResponse(args: {
       healthShareEnabled: args.viewer.healthShareEnabled,
       personalCardOptIn: args.viewer.personalCardOptIn,
     },
+    eligibility,
     brief: args.row.payload && args.context ? filterPayloadForReadTimePrivacy(args.row.payload, args.context) : args.row.payload,
     errorCode: null,
   };
@@ -997,6 +1025,7 @@ export async function getCurrentGroupAIBrief(args: {
       generatedAt: null,
       stale: false,
       viewer: { hasEntitlement: false, canRefresh: false, healthShareEnabled: false, personalCardOptIn: false },
+      eligibility: null,
       brief: null,
       errorCode: "group_ai_brief_viewer_load_failed",
     };

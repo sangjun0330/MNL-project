@@ -294,6 +294,15 @@ export type SocialGroupAIBriefPayload = {
   personalCards: SocialGroupAIBriefPersonalCard[];
 };
 
+export type SocialGroupAIBriefEligibility = {
+  memberCount: number;
+  requiredContributorCount: number;
+  contributorCount: number;
+  healthShareCount: number;
+  consentCount: number;
+  recentDataCount: number;
+};
+
 export type SocialGroupAIBriefResponse = {
   state: SocialGroupAIBriefState;
   generatedAt: string | null;
@@ -304,6 +313,7 @@ export type SocialGroupAIBriefResponse = {
     healthShareEnabled: boolean;
     personalCardOptIn: boolean;
   };
+  eligibility: SocialGroupAIBriefEligibility | null;
   brief: SocialGroupAIBriefPayload | null;
   errorCode: string | null;
 };
