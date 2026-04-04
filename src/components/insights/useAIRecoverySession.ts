@@ -531,9 +531,13 @@ export function useAIRecoveryRouteEntry(args: RouteEntryArgs): RouteEntryState {
 export function useAIRecoverySession(args: HookArgs): HookState {
   const { user } = useAuthState();
   const { stateRevision } = useClientSyncSnapshot();
+  const resources = useCurrentAccountResources();
   const accountKey = user?.userId ?? null;
   const resourceKey = buildSessionResourceKey(args.dateISO, args.slot);
-  const memoryEntry = readCurrentAccountSession(accountKey, resourceKey);
+  const memoryEntry =
+    accountKey && resources.accountKey === accountKey
+      ? resources.sessions[resourceKey] ?? null
+      : readCurrentAccountSession(accountKey, resourceKey);
   const normalizeData = useCallback(
     (value: SessionData | null | undefined) =>
       normalizeSessionData(value, {
