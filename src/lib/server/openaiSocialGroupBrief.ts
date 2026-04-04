@@ -21,18 +21,38 @@ type SocialGroupAIBriefContent = {
   personalCards: SocialGroupAIBriefPersonalCard[];
 };
 
+type SocialGroupAIBriefRequestMetadata = Record<string, string>;
+
+type SocialGroupAIBriefRequestDebug = {
+  responseId: string | null;
+  traceId: string;
+  storeResponses: boolean;
+  requestUrl: string;
+  authMode: "direct" | "request_header" | "stored_key";
+  usesCloudflareGateway: boolean;
+  requestMetadata: SocialGroupAIBriefRequestMetadata;
+};
+
+const BANNED_PHRASES = [
+  "비교적 안정적으로 유지",
+  "먼저 고정",
+  "흔들리지 않게 유지",
+  "잘 활용하면 좋습니다",
+  "우선입니다",
+];
+
 export type SocialGroupAIBriefAIResult =
   | {
       ok: true;
       model: string;
       usage: AIRecoveryUsage | null;
       content: SocialGroupAIBriefContent;
-    }
+    } & SocialGroupAIBriefRequestDebug
   | {
       ok: false;
       model: string;
       error: string;
-    };
+    } & SocialGroupAIBriefRequestDebug;
 
 type SocialGroupAIBriefRequestResult =
   | {
@@ -40,12 +60,12 @@ type SocialGroupAIBriefRequestResult =
       model: string;
       usage: AIRecoveryUsage | null;
       content: SocialGroupAIBriefContent;
-    }
+    } & SocialGroupAIBriefRequestDebug
   | {
       ok: false;
       model: string;
       error: string;
-    };
+    } & SocialGroupAIBriefRequestDebug;
 
 function trimEnv(value: unknown) {
   return String(value ?? "").trim();
@@ -68,6 +88,17 @@ function resolveBaseUrl() {
   );
 }
 
+function resolveStoreResponses() {
+  const raw = trimEnv(
+    process.env.OPENAI_SOCIAL_GROUP_BRIEF_STORE ||
+      process.env.OPENAI_RECOVERY_STORE ||
+      process.env.OPENAI_MED_SAFETY_STORE ||
+      process.env.OPENAI_STORE ||
+      "true"
+  ).toLowerCase();
+  return !["0", "false", "no", "off"].includes(raw);
+}
+
 function readNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -75,6 +106,38 @@ function readNumber(value: unknown) {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function readString(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+}
+
+function createTraceId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `social-group-brief-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildRequestMetadata(args: {
+  traceId: string;
+  groupId: number;
+  generatorType: "cron" | "manual";
+  promptVersion: string;
+  snapshot: SocialGroupAIBriefSnapshot;
+}): SocialGroupAIBriefRequestMetadata {
+  return {
+    feature: "social_group_brief",
+    trace_id: args.traceId,
+    group_id: String(args.groupId),
+    week_start: args.snapshot.week.startISO,
+    generator: args.generatorType,
+    prompt_version: args.promptVersion,
+    archetype: args.snapshot.copyMeta.archetypeId,
+    copy_slot: args.snapshot.copyMeta.copySlotKey,
+    copy_fp: args.snapshot.copyMeta.copyFingerprint,
+  };
 }
 
 function readUsage(value: any): AIRecoveryUsage | null {
@@ -161,11 +224,49 @@ function clampText(value: unknown, fallback: string, limit: number) {
   return Array.from(clean).slice(0, limit).join("");
 }
 
+function previewForLog(value: unknown, limit = 220) {
+  const clean = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return null;
+  return Array.from(clean).slice(0, limit).join("");
+}
+
+function containsBannedPhrase(value: string) {
+  return BANNED_PHRASES.some((phrase) => value.includes(phrase));
+}
+
+function extractOpener(value: string) {
+  return value.trim().split(/\s+/)[0] ?? "";
+}
+
+function shouldPreserveNumericFact(fallback: string, candidate: string) {
+  return !/\d/.test(fallback) || /\d/.test(candidate);
+}
+
+function sanitizeCopyText(args: {
+  value: unknown;
+  fallback: string;
+  limit: number;
+  rejectRepeatedOpener?: Set<string>;
+}) {
+  const clean = clampText(args.value, args.fallback, args.limit);
+  if (!clean) return args.fallback;
+  if (containsBannedPhrase(clean)) return args.fallback;
+  if (!shouldPreserveNumericFact(args.fallback, clean)) return args.fallback;
+  if (args.rejectRepeatedOpener) {
+    const opener = extractOpener(clean);
+    if (args.rejectRepeatedOpener.has(opener)) return args.fallback;
+    args.rejectRepeatedOpener.add(opener);
+  }
+  return clean;
+}
+
 function buildSchema(snapshot: SocialGroupAIBriefSnapshot) {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["hero", "findings", "actions", "windows", "personalCards"],
+    required: ["hero", "actions"],
     properties: {
       hero: {
         type: "object",
@@ -174,21 +275,6 @@ function buildSchema(snapshot: SocialGroupAIBriefSnapshot) {
         properties: {
           headline: { type: "string" },
           subheadline: { type: "string" },
-        },
-      },
-      findings: {
-        type: "array",
-        minItems: snapshot.findings.length,
-        maxItems: snapshot.findings.length,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["id", "title", "body"],
-          properties: {
-            id: { type: "string" },
-            title: { type: "string" },
-            body: { type: "string" },
-          },
         },
       },
       actions: {
@@ -206,58 +292,29 @@ function buildSchema(snapshot: SocialGroupAIBriefSnapshot) {
           },
         },
       },
-      windows: {
-        type: "array",
-        minItems: snapshot.windows.length,
-        maxItems: snapshot.windows.length,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["dateISO", "label", "reason"],
-          properties: {
-            dateISO: { type: "string" },
-            label: { type: "string" },
-            reason: { type: "string" },
-          },
-        },
-      },
-      personalCards: {
-        type: "array",
-        minItems: snapshot.personalCards.length,
-        maxItems: snapshot.personalCards.length,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["userId", "summary", "action"],
-          properties: {
-            userId: { type: "string" },
-            summary: { type: "string" },
-            action: { type: "string" },
-          },
-        },
-      },
     },
   } as const;
 }
 
-function buildDeveloperPrompt() {
+function buildDeveloperPrompt(snapshot: SocialGroupAIBriefSnapshot) {
   return [
     "당신은 RNest 소셜의 그룹 회복 브리프 카피라이터입니다.",
     "반드시 한국어로만 작성합니다.",
-    "의료 진단, 처방, 응급 판단, 비교 우열, 랭킹 표현을 쓰지 않습니다.",
-    "같은 사실을 더 읽기 쉽게 짧고 따뜻하지 않지만 차분한 운영 문체로 정리합니다.",
-    "원본 snapshot의 사실을 바꾸지 말고, wording만 다듬습니다.",
-    "headline, subheadline, actions는 snapshot 안의 숫자와 상태 차이를 직접 반영해 상황별로 문구가 확실히 달라지게 작성합니다.",
-    "body/mental/sleep/risk/off-window/night 중 가장 중요한 축을 먼저 드러내고, 매번 비슷한 첫 문장을 반복하지 않습니다.",
-    "headline과 subheadline은 짧고 선명하게 작성합니다.",
-    "findings와 actions는 각 카드당 1~2문장으로 제한합니다.",
-    "personalCards는 낙인처럼 들리지 않게 중립적으로 씁니다.",
+    "hero와 actions만 다듬고, findings/windows/personalCards는 건드리지 않습니다.",
+    "의료 진단, 처방, 응급 판단, 비교 우열, 랭킹 표현, 감상적 위로 문장을 쓰지 않습니다.",
+    "상태 → 원인 → 이번 주 권장 방향 구조를 유지합니다.",
+    "원본 fact bundle의 숫자, 위험 인원, 야간 수, 겹치는 회복 창 수, 액션 순서를 절대 바꾸지 않습니다.",
+    "headline, subheadline, action title opener가 서로 반복되지 않게 작성합니다.",
+    `다음 표현은 피합니다: ${BANNED_PHRASES.join(", ")}`,
+    `dominantAxis=${snapshot.narrativeSpec.dominantAxis}, secondaryAxis=${snapshot.narrativeSpec.secondaryAxis}, severity=${snapshot.narrativeSpec.severityBand}`,
+    "기본 deterministic 문구보다 더 선명하고 상황 차이가 드러날 때만 바꿉니다. 애매하면 기본 문구를 유지합니다.",
+    "hero headline은 48자 이내, subheadline은 84자 이내, action title은 28자 이내, action body는 120자 이내로 유지합니다.",
   ].join("\n");
 }
 
 function buildCompatDeveloperPrompt(snapshot: SocialGroupAIBriefSnapshot) {
   return [
-    buildDeveloperPrompt(),
+    buildDeveloperPrompt(snapshot),
     "",
     "JSON 하나만 출력하라.",
     "설명, 코드블록, 마크다운 금지.",
@@ -267,7 +324,26 @@ function buildCompatDeveloperPrompt(snapshot: SocialGroupAIBriefSnapshot) {
 }
 
 function buildUserPrompt(snapshot: SocialGroupAIBriefSnapshot) {
-  return JSON.stringify(snapshot);
+  return JSON.stringify({
+    narrativeSpec: snapshot.narrativeSpec,
+    factBundle: snapshot.factBundle,
+    previousCopy: snapshot.previousCopy,
+    deterministicDefault: {
+      hero: {
+        headline: snapshot.hero.defaultHeadline,
+        subheadline: snapshot.hero.defaultSubheadline,
+        tone: snapshot.hero.tone,
+      },
+      actions: snapshot.actions.map((item) => ({
+        id: item.id,
+        title: item.defaultTitle,
+        body: item.defaultBody,
+        reason: item.reason,
+        factText: item.factText,
+      })),
+    },
+    bannedPhrases: BANNED_PHRASES,
+  });
 }
 
 function shouldRetryWithCompat(error: string) {
@@ -279,13 +355,40 @@ function shouldRetryWithCompat(error: string) {
   );
 }
 
+function shouldRetryDirectWithoutGateway(error: string) {
+  return (
+    shouldRetryWithCompat(error) ||
+    /^openai_responses_(401|403|404|408|409|422|425|429|500|502|503|504)_social_group_brief$/i.test(error) ||
+    error === "openai_social_group_brief_timeout" ||
+    error.startsWith("openai_social_group_brief_network_")
+  );
+}
+
 async function postSocialGroupBriefRequest(args: {
   snapshot: SocialGroupAIBriefSnapshot;
   requestConfig: ReturnType<typeof resolveOpenAIResponsesRequestConfig>;
   signal: AbortSignal;
+  traceId: string;
+  storeResponses: boolean;
+  requestMetadata: SocialGroupAIBriefRequestMetadata;
   compatMode?: boolean;
 }): Promise<SocialGroupAIBriefRequestResult> {
   const compatMode = args.compatMode === true;
+  const responseDebugHeaders = (response: Response) => ({
+    requestId: readString(response.headers.get("x-request-id")),
+    cfAigRequestId: readString(response.headers.get("cf-aig-request-id")),
+    cfRay: readString(response.headers.get("cf-ray")),
+  });
+  console.info("[SocialGroupAIBrief] openai_request_start", {
+    traceId: args.traceId,
+    model: args.requestConfig.model,
+    url: args.requestConfig.requestUrl,
+    compatMode,
+    storeResponses: args.storeResponses,
+    authMode: args.requestConfig.authMode,
+    usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+    metadata: args.requestMetadata,
+  });
   const response = await fetch(args.requestConfig.requestUrl, {
     method: "POST",
     headers: args.requestConfig.headers,
@@ -298,7 +401,7 @@ async function postSocialGroupBriefRequest(args: {
           content: [
             {
               type: "input_text",
-              text: compatMode ? buildCompatDeveloperPrompt(args.snapshot) : buildDeveloperPrompt(),
+              text: compatMode ? buildCompatDeveloperPrompt(args.snapshot) : buildDeveloperPrompt(args.snapshot),
             },
           ],
         },
@@ -325,17 +428,35 @@ async function postSocialGroupBriefRequest(args: {
       },
       max_output_tokens: compatMode ? 2600 : 2200,
       tools: [],
-      store: false,
+      metadata: args.requestMetadata,
+      store: args.storeResponses,
     }),
   });
 
   const raw = await response.text();
   const json = safeJsonParse<any>(raw);
+  const headerDebug = responseDebugHeaders(response);
   if (!response.ok) {
+    console.error("[SocialGroupAIBrief] openai_request_failed", {
+      traceId: args.traceId,
+      model: args.requestConfig.model,
+      url: args.requestConfig.requestUrl,
+      status: response.status,
+      compatMode,
+      ...headerDebug,
+      errorPreview: previewForLog(raw),
+    });
     return {
       ok: false,
       model: args.requestConfig.model,
       error: `openai_responses_${response.status}_social_group_brief`,
+      responseId: readString(json?.id),
+      traceId: args.traceId,
+      storeResponses: args.storeResponses,
+      requestUrl: args.requestConfig.requestUrl,
+      authMode: args.requestConfig.authMode,
+      usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+      requestMetadata: args.requestMetadata,
     };
   }
   if (!json) {
@@ -343,6 +464,13 @@ async function postSocialGroupBriefRequest(args: {
       ok: false,
       model: args.requestConfig.model,
       error: "openai_social_group_brief_invalid_json",
+      responseId: null,
+      traceId: args.traceId,
+      storeResponses: args.storeResponses,
+      requestUrl: args.requestConfig.requestUrl,
+      authMode: args.requestConfig.authMode,
+      usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+      requestMetadata: args.requestMetadata,
     };
   }
 
@@ -352,6 +480,13 @@ async function postSocialGroupBriefRequest(args: {
       ok: false,
       model: args.requestConfig.model,
       error: "openai_social_group_brief_empty_text",
+      responseId: readString(json?.id),
+      traceId: args.traceId,
+      storeResponses: args.storeResponses,
+      requestUrl: args.requestConfig.requestUrl,
+      authMode: args.requestConfig.authMode,
+      usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+      requestMetadata: args.requestMetadata,
     };
   }
 
@@ -361,25 +496,45 @@ async function postSocialGroupBriefRequest(args: {
       ok: false,
       model: args.requestConfig.model,
       error: "openai_social_group_brief_parse_failed",
+      responseId: readString(json?.id),
+      traceId: args.traceId,
+      storeResponses: args.storeResponses,
+      requestUrl: args.requestConfig.requestUrl,
+      authMode: args.requestConfig.authMode,
+      usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+      requestMetadata: args.requestMetadata,
     };
   }
 
+  const responseId = readString(json?.id);
+  console.info("[SocialGroupAIBrief] openai_request_success", {
+    traceId: args.traceId,
+    responseId,
+    model: args.requestConfig.model,
+    url: args.requestConfig.requestUrl,
+    compatMode,
+    storeResponses: args.storeResponses,
+    authMode: args.requestConfig.authMode,
+    usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+    ...headerDebug,
+    usage: readUsage(json?.usage),
+  });
   return {
     ok: true,
     model: args.requestConfig.model,
     usage: readUsage(json?.usage),
     content: mergeStructuredContent(args.snapshot, parsed),
+    responseId,
+    traceId: args.traceId,
+    storeResponses: args.storeResponses,
+    requestUrl: args.requestConfig.requestUrl,
+    authMode: args.requestConfig.authMode,
+    usesCloudflareGateway: args.requestConfig.usesCloudflareGateway,
+    requestMetadata: args.requestMetadata,
   };
 }
 
 function mergeStructuredContent(snapshot: SocialGroupAIBriefSnapshot, raw: any): SocialGroupAIBriefContent {
-  const findingMap = new Map<string, any>(
-    Array.isArray(raw?.findings)
-      ? raw.findings
-          .map((item: any) => [String(item?.id ?? ""), item] as const)
-          .filter((entry: readonly [string, any]) => Boolean(entry[0]))
-      : []
-  );
   const actionMap = new Map<string, any>(
     Array.isArray(raw?.actions)
       ? raw.actions
@@ -387,70 +542,68 @@ function mergeStructuredContent(snapshot: SocialGroupAIBriefSnapshot, raw: any):
           .filter((entry: readonly [string, any]) => Boolean(entry[0]))
       : []
   );
-  const windowMap = new Map<string, any>(
-    Array.isArray(raw?.windows)
-      ? raw.windows
-          .map((item: any) => [String(item?.dateISO ?? ""), item] as const)
-          .filter((entry: readonly [string, any]) => Boolean(entry[0]))
-      : []
-  );
-  const personalCardMap = new Map<string, any>(
-    Array.isArray(raw?.personalCards)
-      ? raw.personalCards
-          .map((item: any) => [String(item?.userId ?? ""), item] as const)
-          .filter((entry: readonly [string, any]) => Boolean(entry[0]))
-      : []
-  );
+  const usedOpeners = new Set<string>();
+  const headline = sanitizeCopyText({
+    value: raw?.hero?.headline,
+    fallback: snapshot.hero.defaultHeadline,
+    limit: 48,
+    rejectRepeatedOpener: usedOpeners,
+  });
+  const subheadline = sanitizeCopyText({
+    value: raw?.hero?.subheadline,
+    fallback: snapshot.hero.defaultSubheadline,
+    limit: 84,
+  });
 
   return {
     hero: {
-      headline: clampText(raw?.hero?.headline, snapshot.hero.defaultHeadline, 48),
-      subheadline: clampText(raw?.hero?.subheadline, snapshot.hero.defaultSubheadline, 84),
+      headline,
+      subheadline,
       tone: snapshot.hero.tone,
     },
-    findings: snapshot.findings.map((item) => {
-      const next = findingMap.get(item.id);
-      return {
-        id: item.id,
-        title: clampText(next?.title, item.defaultTitle, 28),
-        body: clampText(next?.body, item.defaultBody, 120),
-        tone: item.tone,
-        factLabel: item.factLabel,
-      };
-    }),
+    findings: snapshot.findings.map((item) => ({
+      id: item.id,
+      title: item.defaultTitle,
+      body: item.defaultBody,
+      tone: item.tone,
+      factLabel: item.factLabel,
+    })),
     actions: snapshot.actions.map((item) => {
       const next = actionMap.get(item.id);
       return {
         id: item.id,
-        title: clampText(next?.title, item.defaultTitle, 28),
-        body: clampText(next?.body, item.defaultBody, 120),
+        title: sanitizeCopyText({
+          value: next?.title,
+          fallback: item.defaultTitle,
+          limit: 28,
+          rejectRepeatedOpener: usedOpeners,
+        }),
+        body: sanitizeCopyText({
+          value: next?.body,
+          fallback: item.defaultBody,
+          limit: 120,
+        }),
         reason: item.reason,
       };
     }),
-    windows: snapshot.windows.map((item) => {
-      const next = windowMap.get(item.dateISO);
-      return {
-        dateISO: item.dateISO,
-        label: clampText(next?.label, item.label, 24),
-        reason: clampText(next?.reason, item.reason, 90),
-        members: item.members,
-      };
-    }),
-    personalCards: snapshot.personalCards.map((item) => {
-      const next = personalCardMap.get(item.userId);
-      return {
-        userId: item.userId,
-        nickname: item.nickname,
-        avatarEmoji: item.avatarEmoji,
-        statusLabel: item.statusLabel,
-        vitalScore: item.vitalScore,
-        bodyBattery: item.bodyBattery,
-        mentalBattery: item.mentalBattery,
-        sleepDebtHours: item.sleepDebtHours,
-        summary: clampText(next?.summary, item.defaultSummary, 88),
-        action: clampText(next?.action, item.defaultAction, 88),
-      };
-    }),
+    windows: snapshot.windows.map((item) => ({
+      dateISO: item.dateISO,
+      label: item.label,
+      reason: item.reason,
+      members: item.members,
+    })),
+    personalCards: snapshot.personalCards.map((item) => ({
+      userId: item.userId,
+      nickname: item.nickname,
+      avatarEmoji: item.avatarEmoji,
+      statusLabel: item.statusLabel,
+      vitalScore: item.vitalScore,
+      bodyBattery: item.bodyBattery,
+      mentalBattery: item.mentalBattery,
+      sleepDebtHours: item.sleepDebtHours,
+      summary: item.defaultSummary,
+      action: item.defaultAction,
+    })),
   };
 }
 
@@ -458,6 +611,9 @@ export async function generateSocialGroupBriefCopy(args: {
   snapshot: SocialGroupAIBriefSnapshot;
   model: string;
   signal: AbortSignal;
+  groupId: number;
+  generatorType: "cron" | "manual";
+  promptVersion: string;
 }): Promise<SocialGroupAIBriefAIResult> {
   const apiKey = normalizeApiKey();
   const requestConfig = resolveOpenAIResponsesRequestConfig({
@@ -466,9 +622,29 @@ export async function generateSocialGroupBriefCopy(args: {
     model: args.model,
     scope: "recovery",
   });
+  const traceId = createTraceId();
+  const storeResponses = resolveStoreResponses();
+  const requestMetadata = buildRequestMetadata({
+    traceId,
+    groupId: args.groupId,
+    generatorType: args.generatorType,
+    promptVersion: args.promptVersion,
+    snapshot: args.snapshot,
+  });
 
   if (requestConfig.missingCredential) {
-    return { ok: false, model: requestConfig.model, error: requestConfig.missingCredential };
+    return {
+      ok: false,
+      model: requestConfig.model,
+      error: requestConfig.missingCredential,
+      responseId: null,
+      traceId,
+      storeResponses,
+      requestUrl: requestConfig.requestUrl,
+      authMode: requestConfig.authMode,
+      usesCloudflareGateway: requestConfig.usesCloudflareGateway,
+      requestMetadata,
+    };
   }
 
   const controller = new AbortController();
@@ -481,21 +657,109 @@ export async function generateSocialGroupBriefCopy(args: {
       snapshot: args.snapshot,
       requestConfig,
       signal: controller.signal,
+      traceId,
+      storeResponses,
+      requestMetadata,
       compatMode: false,
     });
-    if (primary.ok) return primary;
+    let finalResult: SocialGroupAIBriefRequestResult = primary;
+    if (!primary.ok && shouldRetryWithCompat(primary.error)) {
+      console.warn("[SocialGroupAIBrief] openai_request_retry_compat", {
+        traceId,
+        model: requestConfig.model,
+        url: requestConfig.requestUrl,
+        error: primary.error,
+      });
 
-    if (!shouldRetryWithCompat(primary.error)) {
-      return primary;
+      const compat = await postSocialGroupBriefRequest({
+        snapshot: args.snapshot,
+        requestConfig,
+        signal: controller.signal,
+        traceId,
+        storeResponses,
+        requestMetadata,
+        compatMode: true,
+      });
+      finalResult = compat.ok
+        ? compat
+        : {
+            ok: false,
+            model: compat.model,
+            error: compat.error || primary.error,
+            responseId: compat.responseId,
+            traceId,
+            storeResponses,
+            requestUrl: requestConfig.requestUrl,
+            authMode: requestConfig.authMode,
+            usesCloudflareGateway: requestConfig.usesCloudflareGateway,
+            requestMetadata,
+          };
     }
 
-    const compat = await postSocialGroupBriefRequest({
-      snapshot: args.snapshot,
-      requestConfig,
-      signal: controller.signal,
-      compatMode: true,
-    });
-    return compat.ok ? compat : { ok: false, model: compat.model, error: compat.error || primary.error };
+    if (
+      !finalResult.ok &&
+      requestConfig.usesCloudflareGateway &&
+      apiKey &&
+      shouldRetryDirectWithoutGateway(finalResult.error)
+    ) {
+      const directRequestConfig = resolveOpenAIResponsesRequestConfig({
+        apiBaseUrl: "https://api.openai.com/v1",
+        apiKey,
+        model: args.model,
+        scope: "recovery",
+      });
+      if (directRequestConfig.requestUrl !== requestConfig.requestUrl) {
+        console.warn("[SocialGroupAIBrief] openai_request_retry_direct", {
+          traceId,
+          gatewayUrl: requestConfig.requestUrl,
+          directUrl: directRequestConfig.requestUrl,
+          gatewayError: finalResult.error,
+        });
+        const directPrimary = await postSocialGroupBriefRequest({
+          snapshot: args.snapshot,
+          requestConfig: directRequestConfig,
+          signal: controller.signal,
+          traceId,
+          storeResponses,
+          requestMetadata,
+          compatMode: false,
+        });
+        if (directPrimary.ok) return directPrimary;
+        if (shouldRetryWithCompat(directPrimary.error)) {
+          console.warn("[SocialGroupAIBrief] openai_request_retry_direct_compat", {
+            traceId,
+            model: directRequestConfig.model,
+            url: directRequestConfig.requestUrl,
+            error: directPrimary.error,
+          });
+          const directCompat = await postSocialGroupBriefRequest({
+            snapshot: args.snapshot,
+            requestConfig: directRequestConfig,
+            signal: controller.signal,
+            traceId,
+            storeResponses,
+            requestMetadata,
+            compatMode: true,
+          });
+          if (directCompat.ok) return directCompat;
+          return {
+            ok: false,
+            model: directCompat.model,
+            error: directCompat.error || directPrimary.error,
+            responseId: directCompat.responseId,
+            traceId,
+            storeResponses,
+            requestUrl: directRequestConfig.requestUrl,
+            authMode: directRequestConfig.authMode,
+            usesCloudflareGateway: directRequestConfig.usesCloudflareGateway,
+            requestMetadata,
+          };
+        }
+        return directPrimary;
+      }
+    }
+
+    return finalResult;
   } catch (error) {
     const message = String((error as any)?.message ?? error ?? "");
     const name = String((error as any)?.name ?? "");
@@ -506,6 +770,13 @@ export async function generateSocialGroupBriefCopy(args: {
         name === "AbortError" || message.includes("social_group_brief_timeout")
           ? "openai_social_group_brief_timeout"
           : `openai_social_group_brief_network_${message.slice(0, 120)}`,
+      responseId: null,
+      traceId,
+      storeResponses,
+      requestUrl: requestConfig.requestUrl,
+      authMode: requestConfig.authMode,
+      usesCloudflareGateway: requestConfig.usesCloudflareGateway,
+      requestMetadata,
     };
   } finally {
     clearTimeout(timeout);

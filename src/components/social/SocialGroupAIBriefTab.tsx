@@ -512,6 +512,29 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
     onRefresh: refreshLiveView,
   });
 
+  const handleGenerate = useCallback(async () => {
+    if (!groupId || retrying) return;
+    setRetrying(true);
+    setError(null);
+    try {
+      const apiResponse = await fetch(`/api/social/groups/${groupId}/ai-brief/refresh`, {
+        method: "POST",
+      });
+      const payload = await apiResponse.json();
+      if (!apiResponse.ok || payload?.ok !== true) {
+        throw new Error(mapRequestErrorMessage(payload?.error, "AI 브리프를 새로 만들지 못했어요."));
+      }
+      const nextResponse = payload.data as SocialGroupAIBriefResponse;
+      setResponse(nextResponse);
+      if (cacheKey) setSocialClientCache(cacheKey, nextResponse);
+      setError(null);
+    } catch (nextError: any) {
+      setError(String(nextError?.message ?? "AI 브리프를 새로 만들지 못했어요."));
+    } finally {
+      setRetrying(false);
+    }
+  }, [cacheKey, groupId, retrying]);
+
   const handleRetry = useCallback(async () => {
     if (retrying) return;
     setRetrying(true);
@@ -714,14 +737,14 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
           </h3>
           <Button
             variant="secondary"
-            onClick={() => void handleRetry()}
+            onClick={() => void (response.viewer.canRefresh ? handleGenerate() : handleRetry())}
             disabled={retrying}
             aria-busy={retrying}
             className="mt-5 h-10 rounded-2xl px-4 text-[13px]"
           >
             <span className="inline-flex items-center gap-2">
               {retrying ? <InlineSpinner /> : null}
-              {retrying ? "확인 중..." : "다시 시도"}
+              {retrying ? "생성 중..." : response.viewer.canRefresh ? "AI 브리프 다시 생성" : "다시 시도"}
             </span>
           </Button>
         </div>
@@ -745,8 +768,26 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
         <div className="relative overflow-hidden rounded-[34px] bg-white px-5 py-5 shadow-apple">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(123,111,208,0.16),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(111,208,185,0.12),transparent_34%)]" />
           <div className="relative">
-            <h3 className="text-[24px] font-bold tracking-[-0.04em] text-ios-text">{snapshot.hero.headline}</h3>
-            <p className="mt-2 text-[13px] leading-6 text-ios-muted">{snapshot.hero.subheadline}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[24px] font-bold tracking-[-0.04em] text-ios-text">{snapshot.hero.headline}</h3>
+                <p className="mt-2 text-[13px] leading-6 text-ios-muted">{snapshot.hero.subheadline}</p>
+              </div>
+              {response.viewer.canRefresh ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleGenerate()}
+                  disabled={retrying || syncing}
+                  aria-busy={retrying}
+                  className="h-9 rounded-full px-3 text-[12px]"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {retrying ? <InlineSpinner /> : null}
+                    {retrying ? "생성 중..." : "다시 생성"}
+                  </span>
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
 

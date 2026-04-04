@@ -10,7 +10,25 @@ import {
   readSocialGroupAIBriefSubscription,
   type SocialGroupAIBriefSubscriptionSnapshot,
 } from "@/lib/server/socialGroupAIBriefAccess";
-import type { SocialGroupAIBriefSnapshot } from "@/lib/server/socialGroupAIBriefModel";
+import type {
+  BriefActionPriorityProfile,
+  BriefBodyBand,
+  BriefCoordinationBand,
+  BriefCopySlotKey,
+  BriefDriftBand,
+  BriefMentalBand,
+  BriefNarrativeAxis,
+  BriefNarrativeSpec,
+  BriefNightBand,
+  BriefRiskBand,
+  BriefSecondaryAxis,
+  BriefSeverityBand,
+  BriefSleepBand,
+  BriefUsageMeta,
+  BriefVariantIds,
+  SocialGroupAIBriefFactBundle,
+  SocialGroupAIBriefSnapshot,
+} from "@/lib/server/socialGroupAIBriefModel";
 import type {
   HealthVisibility,
   MemberWeeklyVitals,
@@ -24,7 +42,7 @@ import type {
   SocialMemberPreview,
 } from "@/types/social";
 
-const SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION = "2026-04-04.social-group-brief.v1";
+const SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION = "2026-04-04.social-group-brief.v2";
 const SOCIAL_GROUP_AI_BRIEF_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MIN_GROUP_AI_BRIEF_CONTRIBUTORS = 3;
 
@@ -67,6 +85,7 @@ type BriefMemberContext = {
 };
 
 type GroupBriefContext = {
+  groupId: number;
   week: {
     startISO: string;
     endISO: string;
@@ -479,6 +498,7 @@ async function loadGroupBriefContext(args: {
   };
 
   return {
+    groupId: args.groupId,
     week,
     members,
     contributors,
@@ -526,6 +546,1113 @@ function formatHourText(value: number | null) {
 
 function formatDebtText(value: number | null) {
   return value != null && Number.isFinite(value) ? `${value}h` : "-";
+}
+
+type ActionBlueprint = {
+  id: SocialGroupAIBriefSnapshot["actions"][number]["id"];
+  priority: number;
+  factText: string;
+  reasonFact: string;
+};
+
+type CopyOption = {
+  id: string;
+  opener: string;
+  noun: string;
+  text: string;
+};
+
+type CopyLead = {
+  id: string;
+  opener: string;
+  noun: string;
+  text: string;
+};
+
+type CopyTail = {
+  id: string;
+  text: string;
+};
+
+function stableHashHex(input: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function stableHashInt(input: string) {
+  return parseInt(stableHashHex(input).slice(0, 8), 16) >>> 0;
+}
+
+function resolveCopySlotKey(now = new Date()): BriefCopySlotKey {
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return kst.getUTCHours() < 12 ? "06-slot" : "18-slot";
+}
+
+function formatFactBundle(context: GroupBriefContext): SocialGroupAIBriefFactBundle {
+  return {
+    contributorCount: context.metrics.contributorCount,
+    avgBattery: context.metrics.avgBattery,
+    avgMental: context.metrics.avgMental,
+    avgSleep: context.metrics.avgSleep,
+    warningCount: context.metrics.warningCount,
+    dangerCount: context.metrics.dangerCount,
+    commonOffCount: context.metrics.commonOffCount,
+    nightCountToday: context.metrics.nightCountToday,
+    offCountToday: context.metrics.offCountToday,
+  };
+}
+
+function classifySeverityBand(metrics: GroupBriefContext["metrics"]): BriefSeverityBand {
+  if (metrics.dangerCount > 0 || (metrics.avgBattery ?? 100) < 40 || (metrics.avgSleep ?? 99) < 5.8) return "recover";
+  if (metrics.warningCount > 0 || (metrics.avgBattery ?? 100) < 62 || (metrics.avgSleep ?? 99) < 6.7) return "watch";
+  return "steady";
+}
+
+function classifySleepBand(value: number | null): BriefSleepBand {
+  if (value == null) return "guarded";
+  if (value < 6.2) return "very_short";
+  if (value < 6.8) return "short";
+  if (value < 7.4) return "guarded";
+  return "steady";
+}
+
+function classifyBodyBand(value: number | null): BriefBodyBand {
+  if (value == null) return "guarded";
+  if (value < 40) return "very_low";
+  if (value < 58) return "low";
+  if (value < 70) return "guarded";
+  return "steady";
+}
+
+function classifyMentalBand(value: number | null): BriefMentalBand {
+  if (value == null) return "guarded";
+  if (value < 44) return "very_low";
+  if (value < 58) return "low";
+  if (value < 68) return "guarded";
+  return "steady";
+}
+
+function classifyDriftBand(avgBattery: number | null, avgMental: number | null): BriefDriftBand {
+  if (avgBattery == null || avgMental == null) return "aligned";
+  const gap = Math.round((avgBattery - avgMental) * 10) / 10;
+  if (gap >= 10) return "wide";
+  if (gap >= 7) return "visible";
+  return "aligned";
+}
+
+function classifyRiskBand(metrics: GroupBriefContext["metrics"]): BriefRiskBand {
+  if (metrics.dangerCount > 0) return "recover";
+  if (metrics.warningCount >= 2) return "watch_many";
+  if (metrics.warningCount === 1) return "watch_single";
+  return "stable";
+}
+
+function classifyCoordinationBand(commonOffCount: number): BriefCoordinationBand {
+  if (commonOffCount >= 3) return "dense";
+  if (commonOffCount >= 1) return "some";
+  return "sparse";
+}
+
+function classifyNightBand(nightCountToday: number): BriefNightBand {
+  if (nightCountToday >= 2) return "clustered";
+  if (nightCountToday === 1) return "single";
+  return "none";
+}
+
+function classifyTodayModifier(metrics: GroupBriefContext["metrics"]): BriefNarrativeSpec["todayModifier"] {
+  if (metrics.nightCountToday > 0 && metrics.offCountToday > 0) return "night_and_off";
+  if (metrics.nightCountToday > 0) return "night_only";
+  if (metrics.offCountToday > 0) return "off_only";
+  return "neutral";
+}
+
+function pickDominantAxis(args: {
+  riskBand: BriefRiskBand;
+  sleepBand: BriefSleepBand;
+  driftBand: BriefDriftBand;
+  bodyBand: BriefBodyBand;
+  coordinationBand: BriefCoordinationBand;
+  nightBand: BriefNightBand;
+}): BriefNarrativeAxis {
+  if (args.riskBand === "recover") return "recover_risk";
+  if (args.sleepBand === "very_short") return "sleep_short";
+  if (args.driftBand === "wide" || args.driftBand === "visible") return "mental_drift";
+  if (args.bodyBand === "very_low" || args.bodyBand === "low") return "body_low";
+  if (args.coordinationBand === "sparse") return "coordination_gap";
+  if (args.nightBand !== "none") return "night_reset";
+  return "steady_maintain";
+}
+
+function pickSecondaryAxis(args: {
+  dominantAxis: BriefNarrativeAxis;
+  riskBand: BriefRiskBand;
+  sleepBand: BriefSleepBand;
+  driftBand: BriefDriftBand;
+  bodyBand: BriefBodyBand;
+  coordinationBand: BriefCoordinationBand;
+  nightBand: BriefNightBand;
+}): BriefSecondaryAxis {
+  const candidates: BriefSecondaryAxis[] = [];
+  if (args.riskBand === "watch_many" || args.riskBand === "watch_single") candidates.push("risk_watch");
+  if (args.sleepBand === "short" || args.sleepBand === "very_short") candidates.push("sleep_guard");
+  if (args.driftBand === "visible" || args.driftBand === "wide") candidates.push("mental_guard");
+  if (args.bodyBand === "low" || args.bodyBand === "very_low") candidates.push("body_low");
+  if (args.coordinationBand === "some" || args.coordinationBand === "sparse") {
+    candidates.push(args.coordinationBand === "some" ? "coordination_some" : "coordination_gap");
+  }
+  if (args.nightBand !== "none") candidates.push("night_reset");
+  candidates.push("steady_maintain");
+  return candidates.find((candidate) => candidate !== args.dominantAxis) ?? "none";
+}
+
+function pickActionPriorityProfile(dominantAxis: BriefNarrativeAxis): BriefActionPriorityProfile {
+  if (dominantAxis === "recover_risk") return "risk_first";
+  if (dominantAxis === "sleep_short") return "sleep_first";
+  if (dominantAxis === "mental_drift") return "mental_first";
+  if (dominantAxis === "body_low") return "body_first";
+  if (dominantAxis === "coordination_gap") return "coordination_first";
+  if (dominantAxis === "night_reset") return "night_first";
+  return "steady_first";
+}
+
+function buildNarrativeOutline(context: GroupBriefContext) {
+  const tone = toneFromMetrics(context.metrics);
+  const severityBand = classifySeverityBand(context.metrics);
+  const sleepBand = classifySleepBand(context.metrics.avgSleep);
+  const bodyBand = classifyBodyBand(context.metrics.avgBattery);
+  const mentalBand = classifyMentalBand(context.metrics.avgMental);
+  const driftBand = classifyDriftBand(context.metrics.avgBattery, context.metrics.avgMental);
+  const riskBand = classifyRiskBand(context.metrics);
+  const coordinationBand = classifyCoordinationBand(context.metrics.commonOffCount);
+  const nightBand = classifyNightBand(context.metrics.nightCountToday);
+  const dominantAxis = pickDominantAxis({
+    riskBand,
+    sleepBand,
+    driftBand,
+    bodyBand,
+    coordinationBand,
+    nightBand,
+  });
+  const secondaryAxis = pickSecondaryAxis({
+    dominantAxis,
+    riskBand,
+    sleepBand,
+    driftBand,
+    bodyBand,
+    coordinationBand,
+    nightBand,
+  });
+  return {
+    tone,
+    dominantAxis,
+    secondaryAxis,
+    severityBand,
+    sleepBand,
+    bodyBand,
+    mentalBand,
+    driftBand,
+    riskBand,
+    coordinationBand,
+    nightBand,
+    todayModifier: classifyTodayModifier(context.metrics),
+    actionPriorityProfile: pickActionPriorityProfile(dominantAxis),
+    copySlotKey: resolveCopySlotKey(),
+  };
+}
+
+function composeOptions(leads: CopyLead[], tails: CopyTail[]) {
+  return leads.flatMap((lead) =>
+    tails.map<CopyOption>((tail) => ({
+      id: `${lead.id}.${tail.id}`,
+      opener: lead.opener,
+      noun: lead.noun,
+      text: `${lead.text} ${tail.text}`.replace(/\s+/g, " ").trim(),
+    }))
+  );
+}
+
+function pickCopyOption(args: {
+  bank: CopyOption[];
+  selectionKey: string;
+  rotation: number;
+  usedOpeners: Set<string>;
+  usedNouns: Set<string>;
+}) {
+  const start = (stableHashInt(args.selectionKey) + args.rotation) % args.bank.length;
+  const ordered = Array.from({ length: args.bank.length }, (_, offset) => args.bank[(start + offset) % args.bank.length]);
+  const strict = ordered.find((item) => !args.usedOpeners.has(item.opener) && !args.usedNouns.has(item.noun));
+  const soft = ordered.find((item) => !args.usedOpeners.has(item.opener));
+  const selected = strict ?? soft ?? ordered[0];
+  args.usedOpeners.add(selected.opener);
+  args.usedNouns.add(selected.noun);
+  return selected;
+}
+
+function buildCopyFingerprint(args: {
+  outline: ReturnType<typeof buildNarrativeOutline>;
+  topActionIds: string[];
+  context: GroupBriefContext;
+}) {
+  return stableHashHex(
+    JSON.stringify({
+      dominantAxis: args.outline.dominantAxis,
+      secondaryAxis: args.outline.secondaryAxis,
+      severityBand: args.outline.severityBand,
+      sleepBand: args.outline.sleepBand,
+      bodyBand: args.outline.bodyBand,
+      mentalBand: args.outline.mentalBand,
+      driftBand: args.outline.driftBand,
+      riskBand: args.outline.riskBand,
+      coordinationBand: args.outline.coordinationBand,
+      nightBand: args.outline.nightBand,
+      todayModifier: args.outline.todayModifier,
+      actionPriorityProfile: args.outline.actionPriorityProfile,
+      topActionIds: args.topActionIds,
+      commonOffCount: args.context.metrics.commonOffCount,
+      dangerCount: args.context.metrics.dangerCount,
+      warningCount: args.context.metrics.warningCount,
+    })
+  );
+}
+
+function buildVariationSeed(args: {
+  groupId: number;
+  weekStartISO: string;
+  copySlotKey: BriefCopySlotKey;
+  archetypeId: BriefNarrativeAxis;
+  topActionIds: string[];
+}) {
+  return stableHashHex(
+    `${args.groupId}:${args.weekStartISO}:${args.copySlotKey}:${args.archetypeId}:${args.topActionIds.join(",")}`
+  );
+}
+
+function readBriefUsageMeta(row: SocialGroupAIBriefRow | null | undefined): BriefUsageMeta | null {
+  const usage = row?.usage;
+  if (!usage || typeof usage !== "object") return null;
+  const copyFingerprint = String((usage as any).copyFingerprint ?? "").trim();
+  if (!copyFingerprint) return null;
+  return usage as BriefUsageMeta;
+}
+
+function readStoredTraceMeta(row: SocialGroupAIBriefRow | null | undefined) {
+  const usage = row?.usage;
+  if (!usage || typeof usage !== "object") {
+    return {
+      traceId: null,
+      responseId: null,
+      storeResponses: null,
+      requestUrl: null,
+      authMode: null,
+      usesCloudflareGateway: null,
+    };
+  }
+  return {
+    traceId: String((usage as any).traceId ?? "").trim() || null,
+    responseId: String((usage as any).responseId ?? "").trim() || null,
+    storeResponses: typeof (usage as any).storeResponses === "boolean" ? (usage as any).storeResponses : null,
+    requestUrl: String((usage as any).requestUrl ?? "").trim() || null,
+    authMode: String((usage as any).authMode ?? "").trim() || null,
+    usesCloudflareGateway:
+      typeof (usage as any).usesCloudflareGateway === "boolean" ? (usage as any).usesCloudflareGateway : null,
+  };
+}
+
+function readPreviousCopySummary(row: SocialGroupAIBriefRow | null | undefined) {
+  const usage = readBriefUsageMeta(row);
+  return {
+    fingerprint: usage?.copyFingerprint ?? null,
+    heroHeadline: row?.payload?.hero?.headline ?? null,
+    actionTitles: Array.isArray(row?.payload?.actions) ? row!.payload!.actions.map((item) => item.title) : [],
+  };
+}
+
+function extractVariantRotation(previousUsage: BriefUsageMeta | null, nextFingerprint: string) {
+  if (!previousUsage || previousUsage.copyFingerprint !== nextFingerprint) return 0;
+  const match = /(\d+)$/.exec(previousUsage.variantIds?.heroHeadline ?? "");
+  return match ? Number(match[1]) + 1 : 1;
+}
+
+function applyPriorityProfileBoost(profile: BriefActionPriorityProfile, actionId: ActionBlueprint["id"]) {
+  if (profile === "risk_first" && actionId === "load_guard") return -3;
+  if (profile === "sleep_first" && (actionId === "sleep_restore" || actionId === "sleep_guard")) return -3;
+  if (profile === "mental_first" && actionId === "mental_buffer") return -3;
+  if (profile === "body_first" && actionId === "body_buffer") return -3;
+  if (profile === "coordination_first" && (actionId === "shared_window" || actionId === "micro_window")) return -3;
+  if (profile === "night_first" && actionId === "night_reset") return -3;
+  if (profile === "steady_first" && (actionId === "maintain_rhythm" || actionId === "anchor_window")) return -2;
+  return 0;
+}
+
+function buildCopyLabels(context: GroupBriefContext) {
+  return {
+    avgBattery: formatPointText(context.metrics.avgBattery),
+    avgMental: formatPointText(context.metrics.avgMental),
+    avgSleep: formatHourText(context.metrics.avgSleep),
+    risk: `주의 ${context.metrics.warningCount}명 · 회복 우선 ${context.metrics.dangerCount}명`,
+    sharedWindow: `겹치는 회복 창 ${context.metrics.commonOffCount}일`,
+    night: `오늘 야간 ${context.metrics.nightCountToday}명`,
+    off: `오늘 OFF/VAC ${context.metrics.offCountToday}명`,
+  };
+}
+
+function buildHeroHeadlineOptions(context: GroupBriefContext, spec: BriefNarrativeSpec) {
+  const labels = buildCopyLabels(context);
+  switch (spec.dominantAxis) {
+    case "recover_risk":
+      return composeOptions(
+        [
+          { id: "recover", opener: "회복", noun: "회복", text: "회복 우선 신호를 먼저 기준으로 잡아야 하는" },
+          { id: "risk", opener: "경고", noun: "경고", text: "경고 신호를 평균보다 크게 읽어야 하는" },
+          { id: "pace", opener: "속도", noun: "속도", text: "운영 속도를 낮춰야 버틸 수 있는" },
+          { id: "buffer", opener: "완충", noun: "완충", text: "완충 여백을 먼저 열어 둬야 하는" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "zone", text: "구간입니다." },
+        ]
+      );
+    case "sleep_short":
+      return composeOptions(
+        [
+          { id: "sleep", opener: "수면", noun: "수면", text: "수면 길이가 리듬을 붙잡고 있는" },
+          { id: "restore", opener: "회복", noun: "수면", text: "회복 속도보다 수면 부족이 먼저 보이는" },
+          { id: "night", opener: "야간", noun: "야간", text: spec.nightBand !== "none" ? "야간 변수와 짧은 수면이 같이 올라온" : "짧은 수면을 먼저 복구해야 하는" },
+          { id: "guard", opener: "취침", noun: "취침", text: "취침 리듬을 먼저 보호해야 하는" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "phase", text: "흐름입니다." },
+        ]
+      );
+    case "mental_drift":
+      return composeOptions(
+        [
+          { id: "mental", opener: "멘탈", noun: "멘탈", text: "체력보다 멘탈 소모를 먼저 다뤄야 하는" },
+          { id: "focus", opener: "집중", noun: "집중", text: "집중 소모 관리가 핵심이 되는" },
+          { id: "drift", opener: "리듬", noun: "멘탈", text: "버티는 힘과 체감 피로의 간격이 벌어진" },
+          { id: "response", opener: "응답", noun: "응답", text: "응답 밀도와 깊은 일 배치를 조절해야 하는" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "zone", text: "구간입니다." },
+        ]
+      );
+    case "body_low":
+      return composeOptions(
+        [
+          { id: "body", opener: "체력", noun: "체력", text: "체력 소모를 먼저 줄여야 하는" },
+          { id: "battery", opener: "body", noun: "body", text: "body 배터리 하강폭을 먼저 멈춰야 하는" },
+          { id: "load", opener: "부담", noun: "부담", text: "부하를 낮춰 회복량을 살려야 하는" },
+          { id: "anchor", opener: "휴식", noun: "휴식", text: "쉬는 블록 하나를 먼저 지켜야 하는" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "phase", text: "흐름입니다." },
+        ]
+      );
+    case "coordination_gap":
+      return composeOptions(
+        [
+          { id: "window", opener: "회복", noun: "회복 창", text: "겹치는 회복 창을 먼저 맞춰야 하는" },
+          { id: "timing", opener: "타이밍", noun: "타이밍", text: "쉬는 타이밍 조율이 핵심이 되는" },
+          { id: "coordination", opener: "조율", noun: "조율", text: "리듬 차이를 짧게 조율해야 하는" },
+          { id: "slot", opener: "슬롯", noun: "회복 슬롯", text: "짧은 회복 슬롯부터 고정해야 하는" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "zone", text: "구간입니다." },
+        ]
+      );
+    case "night_reset":
+      return composeOptions(
+        [
+          { id: "night", opener: "야간", noun: "야간", text: "야간 뒤 리듬 정리가 우선인" },
+          { id: "reset", opener: "리듬", noun: "리듬", text: "다음날 회복 리듬을 단순하게 잡아야 하는" },
+          { id: "after", opener: "다음날", noun: "다음날", text: "야간 다음날 변수를 줄여야 하는" },
+          { id: "buffer", opener: "완충", noun: "야간", text: "야간 뒤 완충 여백이 필요한" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "phase", text: "흐름입니다." },
+        ]
+      );
+    default:
+      return composeOptions(
+        [
+          { id: "steady", opener: "안정", noun: "안정", text: "안정 흐름을 크게 흔들지 않는 것이 맞는" },
+          { id: "maintain", opener: "유지", noun: "리듬", text: "지금 리듬을 유지하는 편이 유리한" },
+          { id: "base", opener: "기본", noun: "회복", text: "기본 회복 리듬이 비교적 잘 유지되는" },
+          { id: "balance", opener: "균형", noun: "균형", text: "무리한 변화보다 균형 유지가 맞는" },
+        ],
+        [
+          { id: "week", text: "한 주예요." },
+          { id: "zone", text: "구간입니다." },
+        ]
+      );
+  }
+}
+
+function buildHeroSubheadlineOptions(context: GroupBriefContext, spec: BriefNarrativeSpec) {
+  const labels = buildCopyLabels(context);
+  switch (spec.dominantAxis) {
+    case "recover_risk":
+      return composeOptions(
+        [
+          { id: "risk", opener: "위험", noun: "위험", text: `${labels.risk} 흐름이라` },
+          { id: "recover", opener: "회복", noun: "회복 신호", text: `회복 우선 ${context.metrics.dangerCount}명과 주의 ${context.metrics.warningCount}명이 같이 보여` },
+          { id: "load", opener: "부담", noun: "부담", text: `이번 주는 평균보다 부담을 낮게 잡아야 해서` },
+          { id: "signal", opener: "신호", noun: "경고 신호", text: `경고 신호가 겹치는 주라` },
+        ],
+        [
+          { id: "direction", text: "새 계획보다 응답 속도와 일정 길이부터 낮추는 편이 안전합니다." },
+          { id: "safety", text: "긴 일정과 과한 체크인보다 완충 여백을 먼저 확보하는 편이 맞습니다." },
+        ]
+      );
+    case "sleep_short":
+      return composeOptions(
+        [
+          { id: "sleep", opener: "수면", noun: "수면", text: `평균 수면 ${labels.avgSleep} 구간이라` },
+          { id: "body", opener: "회복", noun: "회복 속도", text: `평균 body ${labels.avgBattery}여도 수면 ${labels.avgSleep}가 먼저 걸려서` },
+          { id: "night", opener: "야간", noun: "야간", text: spec.nightBand !== "none" ? `${labels.night}에 수면 ${labels.avgSleep} 흐름이 겹쳐` : `짧은 수면이 이어지는 주라` },
+          { id: "rhythm", opener: "취침", noun: "취침 리듬", text: `취침 흐름을 지키지 않으면 회복이 더 밀릴 수 있어` },
+        ],
+        [
+          { id: "guard", text: "일정보다 취침 시각과 카페인 컷오프를 먼저 고정하는 편이 좋습니다." },
+          { id: "restore", text: "활동량을 늘리기보다 수면이 더 짧아지지 않게 막는 방향이 우선입니다." },
+        ]
+      );
+    case "mental_drift":
+      return composeOptions(
+        [
+          { id: "gap", opener: "격차", noun: "멘탈 격차", text: `평균 body ${labels.avgBattery}, mental ${labels.avgMental} 흐름이라` },
+          { id: "mental", opener: "멘탈", noun: "멘탈 배터리", text: `멘탈 배터리가 body보다 먼저 떨어지는 패턴이 보여` },
+          { id: "response", opener: "집중", noun: "집중 소모", text: `집중 소모가 먼저 커지는 주라` },
+          { id: "drift", opener: "리듬", noun: "리듬 차이", text: `버티는 체력과 체감 피로 사이 간격이 벌어져` },
+        ],
+        [
+          { id: "direction", text: "깊은 일과 잦은 응답을 몰아넣기보다 완충 시간을 앞에 배치하는 편이 좋습니다." },
+          { id: "guard", text: "긴 집중 블록보다 짧은 회복 슬롯을 먼저 확보하는 운영이 더 잘 맞습니다." },
+        ]
+      );
+    case "body_low":
+      return composeOptions(
+        [
+          { id: "body", opener: "체력", noun: "체력", text: `평균 body ${labels.avgBattery} 흐름이라` },
+          { id: "load", opener: "부하", noun: "부하", text: `body 배터리가 먼저 깎이는 주라` },
+          { id: "energy", opener: "소모", noun: "소모", text: `회복량보다 소모가 조금 앞서는 구간이라` },
+          { id: "rest", opener: "휴식", noun: "휴식 블록", text: `쉬는 블록을 고정하지 않으면 체력 하강이 이어질 수 있어` },
+        ],
+        [
+          { id: "direction", text: "새 일정 추가보다 완전히 쉬는 시간 하나를 먼저 지키는 편이 좋습니다." },
+          { id: "guard", text: "일정 길이를 줄이고 회복 블록을 끊기지 않게 두는 운영이 맞습니다." },
+        ]
+      );
+    case "coordination_gap":
+      return composeOptions(
+        [
+          { id: "shared", opener: "회복", noun: "회복 창", text: `${labels.sharedWindow} 흐름이라` },
+          { id: "timing", opener: "타이밍", noun: "타이밍", text: `같이 쉬는 타이밍이 흩어지는 주라` },
+          { id: "slot", opener: "슬롯", noun: "회복 슬롯", text: `겹치는 회복 슬롯이 적어서` },
+          { id: "adjust", opener: "조율", noun: "짧은 조율", text: `긴 계획보다 짧은 조율이 더 중요한 주라` },
+        ],
+        [
+          { id: "direction", text: "전원 일정보다 15~30분이라도 겹치는 회복 슬롯을 먼저 올려 두는 편이 낫습니다." },
+          { id: "guard", text: "길게 맞추려 하기보다 둘 이상 겹치는 쉬는 창부터 고정하는 편이 효율적입니다." },
+        ]
+      );
+    case "night_reset":
+      return composeOptions(
+        [
+          { id: "night", opener: "야간", noun: "야간", text: `${labels.night}이라` },
+          { id: "after", opener: "다음날", noun: "다음날", text: `야간 다음날 리듬이 깨지기 쉬운 주라` },
+          { id: "reset", opener: "리듬", noun: "리듬 정리", text: `야간 뒤 회복 루틴을 단순하게 둘 필요가 있어` },
+          { id: "buffer", opener: "완충", noun: "완충 시간", text: `야간 뒤 완충 시간을 미리 열어 둬야 해서` },
+        ],
+        [
+          { id: "direction", text: "다음날은 활동량보다 수면과 식사 타이밍을 단순하게 유지하는 편이 더 안정적입니다." },
+          { id: "guard", text: "새 약속을 얹기보다 야간 뒤 회복 루틴을 짧고 반복되게 두는 편이 좋습니다." },
+        ]
+      );
+    default:
+      return composeOptions(
+        [
+          { id: "steady", opener: "안정", noun: "안정 흐름", text: `평균 body ${labels.avgBattery}, mental ${labels.avgMental}, 수면 ${labels.avgSleep} 흐름이라` },
+          { id: "maintain", opener: "리듬", noun: "리듬 유지", text: `지금 회복 리듬이 크게 흔들리지 않는 주라` },
+          { id: "shared", opener: "균형", noun: "균형", text: context.metrics.commonOffCount > 0 ? `${labels.sharedWindow}도 보이는 편이라` : `큰 경고 없이 균형이 유지되는 편이라` },
+          { id: "base", opener: "기본", noun: "기본 회복", text: `기본 회복 루틴을 유지하기 좋은 주라` },
+        ],
+        [
+          { id: "direction", text: "새 전략을 더 얹기보다 이미 맞는 회복 패턴을 그대로 지키는 편이 좋습니다." },
+          { id: "guard", text: "큰 변화를 주기보다 쉬는 창 하나만 일정하게 고정해도 충분합니다." },
+        ]
+      );
+  }
+}
+
+function buildActionBlueprintsV2(
+  context: GroupBriefContext,
+  outline: ReturnType<typeof buildNarrativeOutline>
+): ActionBlueprint[] {
+  const avgBatteryLabel = formatPointText(context.metrics.avgBattery);
+  const avgMentalLabel = formatPointText(context.metrics.avgMental);
+  const avgSleepLabel = formatHourText(context.metrics.avgSleep);
+  const commonOffCount = context.commonOffDays.length;
+  const warningCount = context.metrics.warningCount;
+  const dangerCount = context.metrics.dangerCount;
+  const nightCountToday = context.metrics.nightCountToday;
+  const avgBattery = context.metrics.avgBattery ?? null;
+  const avgMental = context.metrics.avgMental ?? null;
+  const avgSleep = context.metrics.avgSleep ?? null;
+  const mentalGap = avgBattery != null && avgMental != null ? Math.round((avgBattery - avgMental) * 10) / 10 : null;
+  const candidates: ActionBlueprint[] = [];
+  const push = (candidate: ActionBlueprint) => {
+    if (candidates.some((item) => item.id === candidate.id)) return;
+    candidates.push({
+      ...candidate,
+      priority: candidate.priority + applyPriorityProfileBoost(outline.actionPriorityProfile, candidate.id),
+    });
+  };
+
+  if (dangerCount > 0 || warningCount > 0) {
+    push({
+      id: "load_guard",
+      priority: 10,
+      reasonFact: `주의 ${warningCount}명 · 회복 우선 ${dangerCount}명`,
+      factText:
+        dangerCount > 0
+          ? `회복 우선 ${dangerCount}명이 보여 이번 주는 팀 평균보다 회복이 느린 멤버를 기준으로 속도를 잡는 편이 안전합니다.`
+          : `주의 ${warningCount}명이 보여 이번 주는 체크인 빈도와 일정 밀도를 조금 낮춰 두는 편이 좋습니다.`,
+    });
+  }
+
+  if (avgSleep != null && avgSleep < 6.2) {
+    push({
+      id: "sleep_restore",
+      priority: 12,
+      reasonFact: `평균 수면 ${avgSleepLabel}`,
+      factText: `평균 수면 ${avgSleepLabel} 구간이라 취침 시각과 카페인 컷오프를 먼저 복구하는 편이 핵심입니다.`,
+    });
+  } else if (avgSleep != null && avgSleep < 6.8) {
+    push({
+      id: "sleep_guard",
+      priority: 18,
+      reasonFact: `평균 수면 ${avgSleepLabel}`,
+      factText: `수면 ${avgSleepLabel}를 더 깎지 않는 편이 우선이라 늦은 약속과 자극을 먼저 줄이는 편이 맞습니다.`,
+    });
+  }
+
+  if (mentalGap != null && mentalGap >= 7) {
+    push({
+      id: "mental_buffer",
+      priority: 14,
+      reasonFact: `body ${avgBatteryLabel} · mental ${avgMentalLabel}`,
+      factText: `body ${avgBatteryLabel}보다 mental ${avgMentalLabel} 하강폭이 커서 긴 집중 블록을 먼저 줄이는 편이 좋습니다.`,
+    });
+  } else if (avgBattery != null && avgBattery < 58) {
+    push({
+      id: "body_buffer",
+      priority: 16,
+      reasonFact: `평균 body ${avgBatteryLabel}`,
+      factText: `평균 body ${avgBatteryLabel} 구간이라 완전히 쉬는 블록 하나를 먼저 지키는 쪽이 더 안정적입니다.`,
+    });
+  }
+
+  if (commonOffCount > 0) {
+    push({
+      id: "shared_window",
+      priority: 20,
+      reasonFact: `겹치는 회복 창 ${commonOffCount}일`,
+      factText: `이번 주는 둘 이상 겹치는 회복 창이 ${commonOffCount}일 보여 회복성 일정 하나를 먼저 고정해 두기 좋습니다.`,
+    });
+  } else {
+    push({
+      id: "micro_window",
+      priority: 22,
+      reasonFact: "겹치는 회복 창이 적습니다.",
+      factText: "길게 맞추기 어려운 주라면 15~30분이라도 겹치는 회복 슬롯을 먼저 확보하는 편이 전체 흐름에 더 도움이 됩니다.",
+    });
+  }
+
+  if (nightCountToday > 0) {
+    push({
+      id: "night_reset",
+      priority: 24,
+      reasonFact: `오늘 야간 ${nightCountToday}명`,
+      factText: `오늘 야간 ${nightCountToday}명이 있어 다음날은 활동량보다 수면과 식사 타이밍을 단순하게 유지하는 편이 더 안정적입니다.`,
+    });
+  }
+
+  push({
+    id: "anchor_window",
+    priority: 32,
+    reasonFact: commonOffCount > 0 ? `겹치는 회복 창 ${commonOffCount}일` : "짧은 회복 슬롯 유지",
+    factText:
+      commonOffCount > 0
+        ? "겹치는 회복 창이 있더라도 각자 회복 타이밍 하나는 비슷한 시간대로 고정해 두는 편이 주간 리듬을 덜 흔들리게 만듭니다."
+        : "같이 쉬는 날이 적더라도 하루에 한 번은 겹치는 회복 슬롯을 정해 두면 짧은 회복이 안정적으로 쌓입니다.",
+  });
+
+  push({
+    id: "maintain_rhythm",
+    priority: 40,
+    reasonFact: "기본 회복 리듬 유지",
+    factText: "이번 주는 새 전략을 여러 개 얹기보다 이미 맞는 취침 흐름과 쉬는 창 하나만 꾸준히 지키는 편이 더 효율적입니다.",
+  });
+
+  candidates.sort((a, b) => a.priority - b.priority);
+  return candidates.slice(0, 3);
+}
+
+function buildActionTitleOptions(context: GroupBriefContext, action: ActionBlueprint): CopyOption[] {
+  switch (action.id) {
+    case "load_guard":
+      return composeOptions(
+        [
+          { id: "pace", opener: "속도", noun: "운영 속도", text: "이번 주 운영 속도부터 낮추기" },
+          { id: "load", opener: "부담", noun: "부담", text: "팀 전체 부담 신호 먼저 낮추기" },
+        ],
+        [
+          { id: "safe", text: "기준으로 두기" },
+          { id: "guard", text: "운영으로 전환" },
+        ]
+      );
+    case "sleep_restore":
+      return composeOptions(
+        [
+          { id: "sleep", opener: "수면", noun: "수면", text: "평균 수면부터 먼저 복구" },
+          { id: "bedtime", opener: "취침", noun: "취침 시각", text: "취침 시각부터 다시 고정" },
+        ],
+        [
+          { id: "restore", text: "흐름으로 돌리기" },
+          { id: "guard", text: "구간으로 올리기" },
+        ]
+      );
+    case "sleep_guard":
+      return composeOptions(
+        [
+          { id: "sleep", opener: "수면", noun: "수면", text: "지금 수면 길이 더 깎지 않기" },
+          { id: "night", opener: "야간", noun: "늦은 자극", text: "늦은 자극부터 먼저 덜기" },
+        ],
+        [
+          { id: "guard", text: "운영으로 가기" },
+          { id: "steady", text: "기준 세우기" },
+        ]
+      );
+    case "mental_buffer":
+      return composeOptions(
+        [
+          { id: "mental", opener: "멘탈", noun: "멘탈", text: "멘탈 하강폭부터 먼저 완충" },
+          { id: "focus", opener: "집중", noun: "집중 블록", text: "긴 집중 블록부터 잘라내기" },
+        ],
+        [
+          { id: "guard", text: "기준 세우기" },
+          { id: "buffer", text: "흐름으로 바꾸기" },
+        ]
+      );
+    case "body_buffer":
+      return composeOptions(
+        [
+          { id: "body", opener: "체력", noun: "체력", text: "체력 소모 구간부터 줄이기" },
+          { id: "rest", opener: "휴식", noun: "휴식 블록", text: "쉬는 블록 하나 먼저 확보" },
+        ],
+        [
+          { id: "guard", text: "운영으로 전환" },
+          { id: "buffer", text: "기준 세우기" },
+        ]
+      );
+    case "shared_window":
+      return composeOptions(
+        [
+          { id: "shared", opener: "겹침", noun: "겹치는 회복 창", text: "겹치는 회복 창에 일정 먼저 올리기" },
+          { id: "window", opener: "회복", noun: "회복 창", text: "같이 맞추기 쉬운 창부터 고정" },
+        ],
+        [
+          { id: "anchor", text: "운영으로 가기" },
+          { id: "slot", text: "순서로 두기" },
+        ]
+      );
+    case "micro_window":
+      return composeOptions(
+        [
+          { id: "micro", opener: "짧은", noun: "짧은 회복 슬롯", text: "15~30분 회복 슬롯부터 맞추기" },
+          { id: "slot", opener: "회복", noun: "회복 슬롯", text: "짧게라도 겹치는 창 먼저 만들기" },
+        ],
+        [
+          { id: "anchor", text: "순서로 두기" },
+          { id: "first", text: "기준 세우기" },
+        ]
+      );
+    case "night_reset":
+      return composeOptions(
+        [
+          { id: "night", opener: "야간", noun: "야간", text: "야간 뒤 리듬부터 단순화" },
+          { id: "nextday", opener: "다음날", noun: "다음날 루틴", text: "야간 다음날 루틴 먼저 정리" },
+        ],
+        [
+          { id: "guard", text: "기준 두기" },
+          { id: "reset", text: "운영으로 맞추기" },
+        ]
+      );
+    case "anchor_window":
+      return composeOptions(
+        [
+          { id: "anchor", opener: "앵커", noun: "회복 앵커", text: "하루 회복 앵커 하나는 고정" },
+          { id: "daily", opener: "매일", noun: "반복 루틴", text: "매일 같은 회복 루틴 하나 만들기" },
+        ],
+        [
+          { id: "keep", text: "흐름으로 가기" },
+          { id: "anchor", text: "기준 세우기" },
+        ]
+      );
+    default:
+      return composeOptions(
+        [
+          { id: "maintain", opener: "유지", noun: "리듬 유지", text: "지금 맞는 리듬부터 유지" },
+          { id: "steady", opener: "안정", noun: "안정 흐름", text: "큰 변화보다 현재 흐름 지키기" },
+        ],
+        [
+          { id: "first", text: "순서로 두기" },
+          { id: "keep", text: "운영으로 가기" },
+        ]
+      );
+  }
+}
+
+function buildActionBodyOptions(context: GroupBriefContext, action: ActionBlueprint): CopyOption[] {
+  switch (action.id) {
+    case "load_guard":
+      return composeOptions(
+        [
+          { id: "status", opener: "경고", noun: "경고 신호", text: action.factText },
+          { id: "direction", opener: "이번", noun: "운영 강도", text: "이번 주는 회복이 느린 멤버 기준으로 속도를 잡아야 해서" },
+        ],
+        [
+          { id: "safe", text: "새 과제보다 응답 속도와 일정 길이부터 낮추는 편이 안전합니다." },
+          { id: "buffer", text: "긴 모임보다 낮은 부담 운영과 짧은 완충 시간을 먼저 여는 편이 맞습니다." },
+        ]
+      );
+    case "sleep_restore":
+      return composeOptions(
+        [
+          { id: "status", opener: "수면", noun: "수면", text: action.factText },
+          { id: "direction", opener: "취침", noun: "취침 시각", text: "수면 시간이 짧은 주라" },
+        ],
+        [
+          { id: "guard", text: "취침 시각과 카페인 컷오프를 먼저 고정하는 편이 중요합니다." },
+          { id: "restore", text: "늦은 약속보다 회복이 더 밀리지 않게 막는 방향이 우선입니다." },
+        ]
+      );
+    case "sleep_guard":
+      return composeOptions(
+        [
+          { id: "status", opener: "수면", noun: "수면", text: action.factText },
+          { id: "direction", opener: "자극", noun: "늦은 자극", text: "수면 여유가 넉넉하지 않은 구간이라" },
+        ],
+        [
+          { id: "guard", text: "늦은 자극과 길게 늘어지는 일정부터 먼저 덜어내는 편이 좋습니다." },
+          { id: "steady", text: "지금 확보된 수면 시간만이라도 그대로 지키는 운영이 더 잘 맞습니다." },
+        ]
+      );
+    case "mental_buffer":
+      return composeOptions(
+        [
+          { id: "status", opener: "멘탈", noun: "멘탈", text: action.factText },
+          { id: "direction", opener: "집중", noun: "집중 소모", text: "체력보다 멘탈 소모가 먼저 커지는 흐름이라" },
+        ],
+        [
+          { id: "buffer", text: "긴 집중 블록과 잦은 응답을 줄이고 짧은 완충 시간을 앞에 두는 편이 좋습니다." },
+          { id: "guard", text: "깊은 일을 몰아넣기보다 회복 슬롯을 먼저 확보하는 운영이 더 안정적입니다." },
+        ]
+      );
+    case "body_buffer":
+      return composeOptions(
+        [
+          { id: "status", opener: "체력", noun: "체력", text: action.factText },
+          { id: "direction", opener: "소모", noun: "소모 구간", text: "body 배터리가 먼저 깎이는 주라" },
+        ],
+        [
+          { id: "guard", text: "하루 중 완전히 쉬는 블록 하나를 끊기지 않게 두는 편이 좋습니다." },
+          { id: "buffer", text: "일정을 더 채우기보다 회복량을 살리는 운영이 더 효과적입니다." },
+        ]
+      );
+    case "shared_window":
+      return composeOptions(
+        [
+          { id: "status", opener: "회복", noun: "회복 창", text: action.factText },
+          { id: "direction", opener: "겹침", noun: "겹치는 창", text: "같이 맞추기 쉬운 날이 보이는 주라" },
+        ],
+        [
+          { id: "anchor", text: "새로운 약속보다 회복성 일정 하나를 그 창에 먼저 올려 두는 편이 유지에 유리합니다." },
+          { id: "slot", text: "긴 계획보다 같은 타이밍에 쉬는 창을 먼저 고정하는 편이 더 효과적입니다." },
+        ]
+      );
+    case "micro_window":
+      return composeOptions(
+        [
+          { id: "status", opener: "슬롯", noun: "짧은 회복 슬롯", text: action.factText },
+          { id: "direction", opener: "조율", noun: "짧은 조율", text: "길게 맞추기 어려운 주라" },
+        ],
+        [
+          { id: "anchor", text: "15~30분이라도 겹치는 쉬는 시간을 먼저 확보하는 편이 전체 흐름을 덜 흔듭니다." },
+          { id: "first", text: "전원 일정보다 둘 이상 맞는 짧은 회복 슬롯부터 만드는 쪽이 현실적입니다." },
+        ]
+      );
+    case "night_reset":
+      return composeOptions(
+        [
+          { id: "status", opener: "야간", noun: "야간", text: action.factText },
+          { id: "direction", opener: "다음날", noun: "다음날 루틴", text: "야간 뒤 리듬이 깨지기 쉬운 흐름이라" },
+        ],
+        [
+          { id: "reset", text: "다음날은 활동량보다 수면과 식사 타이밍을 단순하게 유지하는 편이 더 안정적입니다." },
+          { id: "guard", text: "새 약속을 얹기보다 회복 루틴을 짧고 반복되게 두는 방향이 맞습니다." },
+        ]
+      );
+    case "anchor_window":
+      return composeOptions(
+        [
+          { id: "status", opener: "앵커", noun: "회복 앵커", text: action.factText },
+          { id: "direction", opener: "반복", noun: "반복 루틴", text: "하루에 한 번 같은 회복 타이밍을 두는 편이" },
+        ],
+        [
+          { id: "steady", text: "주간 리듬을 덜 흔들리게 만들고 짧은 회복도 더 안정적으로 쌓이게 합니다." },
+          { id: "guard", text: "각자 리듬이 달라도 기본 회복 루틴 하나는 묶어 두는 편이 좋습니다." },
+        ]
+      );
+    default:
+      return composeOptions(
+        [
+          { id: "status", opener: "유지", noun: "리듬 유지", text: action.factText },
+          { id: "direction", opener: "안정", noun: "안정 흐름", text: "이번 주는 큰 변화보다 현재 흐름을 지키는 편이" },
+        ],
+        [
+          { id: "keep", text: "체감 부담을 더 낮추는 데 도움이 됩니다." },
+          { id: "steady", text: "새 전략을 얹는 것보다 결과가 더 안정적입니다." },
+        ]
+      );
+  }
+}
+
+function buildActionReasonOptions(context: GroupBriefContext, action: ActionBlueprint): CopyOption[] {
+  const base = action.reasonFact;
+  const options =
+    action.id === "load_guard"
+      ? ["경고 신호가 겹칩니다.", "낮은 부담 운영이 맞습니다.", base]
+      : action.id === "sleep_restore"
+        ? [base, "수면 복구가 급합니다.", "취침 루틴 복원이 우선입니다."]
+        : action.id === "sleep_guard"
+          ? [base, "수면 하락 방지가 핵심입니다.", "늦은 자극을 덜어야 합니다."]
+          : action.id === "mental_buffer"
+            ? [base, "멘탈 완충이 먼저입니다.", "집중 소모를 낮춰야 합니다."]
+            : action.id === "body_buffer"
+              ? [base, "체력 소모를 먼저 줄입니다.", "완전 휴식 블록이 필요합니다."]
+              : action.id === "shared_window"
+                ? [base, "같이 맞추기 쉬운 날입니다.", "회복 창을 먼저 고정합니다."]
+                : action.id === "micro_window"
+                  ? [base, "짧은 조율이 더 현실적입니다.", "15~30분 슬롯이 먼저입니다."]
+                  : action.id === "night_reset"
+                    ? [base, "야간 뒤 리듬 정리가 필요합니다.", "다음날 루틴이 중요합니다."]
+                    : action.id === "anchor_window"
+                      ? [base, "하루 회복 앵커가 필요합니다.", "반복 루틴 유지가 맞습니다."]
+                      : [base, "현재 리듬 유지가 우선입니다.", "큰 변화보다 유지가 맞습니다."];
+  return options.map((text, index) => ({
+    id: `reason-${index}`,
+    opener: `reason-${index}`,
+    noun: `reason-${index}`,
+    text,
+  }));
+}
+
+function buildDeterministicNarrative(args: {
+  context: GroupBriefContext;
+  promptVersion: string;
+  existingRow?: SocialGroupAIBriefRow | null;
+}) {
+  const outline = buildNarrativeOutline(args.context);
+  const actionsBlueprint = buildActionBlueprintsV2(args.context, outline);
+  const topActionIds = actionsBlueprint.map((item) => item.id);
+  const copyFingerprint = buildCopyFingerprint({
+    outline,
+    topActionIds,
+    context: args.context,
+  });
+  const previousUsage = readBriefUsageMeta(args.existingRow ?? null);
+  const rotation = extractVariantRotation(previousUsage, copyFingerprint);
+  const spec: BriefNarrativeSpec = {
+    ...outline,
+    variationSeed: buildVariationSeed({
+      groupId: args.context.groupId,
+      weekStartISO: args.context.week.startISO,
+      copySlotKey: outline.copySlotKey,
+      archetypeId: outline.dominantAxis,
+      topActionIds,
+    }),
+  };
+  const usedOpeners = new Set<string>();
+  const usedNouns = new Set<string>();
+  const heroHeadline = pickCopyOption({
+    bank: buildHeroHeadlineOptions(args.context, spec),
+    selectionKey: `${spec.variationSeed}:hero-headline`,
+    rotation,
+    usedOpeners,
+    usedNouns,
+  });
+  const heroSubheadline = pickCopyOption({
+    bank: buildHeroSubheadlineOptions(args.context, spec),
+    selectionKey: `${spec.variationSeed}:hero-subheadline`,
+    rotation,
+    usedOpeners,
+    usedNouns,
+  });
+
+  const actionTitles: Record<string, string> = {};
+  const actionBodies: Record<string, string> = {};
+  const actionReasons: Record<string, string> = {};
+  const actions = actionsBlueprint.map((action, index) => {
+    const title = pickCopyOption({
+      bank: buildActionTitleOptions(args.context, action),
+      selectionKey: `${spec.variationSeed}:${action.id}:title:${index}`,
+      rotation,
+      usedOpeners,
+      usedNouns,
+    });
+    const body = buildActionBodyOptions(args.context, action)[
+      (stableHashInt(`${spec.variationSeed}:${action.id}:body:${index}`) + rotation) % 4
+    ];
+    const reason = buildActionReasonOptions(args.context, action)[
+      (stableHashInt(`${spec.variationSeed}:${action.id}:reason:${index}`) + rotation) % 3
+    ];
+    actionTitles[action.id] = title.id;
+    actionBodies[action.id] = body.id;
+    actionReasons[action.id] = reason.id;
+    return {
+      id: action.id,
+      reason: reason.text,
+      factText: action.factText,
+      defaultTitle: title.text,
+      defaultBody: body.text,
+    };
+  });
+
+  const variantIds: BriefVariantIds = {
+    heroHeadline: `${heroHeadline.id}.${rotation % buildHeroHeadlineOptions(args.context, spec).length}`,
+    heroSubheadline: `${heroSubheadline.id}.${rotation % buildHeroSubheadlineOptions(args.context, spec).length}`,
+    actionTitles,
+    actionBodies,
+    actionReasons,
+  };
+
+  const usageMeta: BriefUsageMeta = {
+    archetypeId: spec.dominantAxis,
+    dominantAxis: spec.dominantAxis,
+    secondaryAxis: spec.secondaryAxis,
+    copySlotKey: spec.copySlotKey,
+    variantIds,
+    copyFingerprint,
+    previousFingerprint: previousUsage?.copyFingerprint ?? null,
+    topActionIds,
+    promptVersion: args.promptVersion,
+  };
+
+  return {
+    spec,
+    usageMeta,
+    hero: {
+      headline: heroHeadline.text,
+      subheadline: heroSubheadline.text,
+    },
+    actions,
+  };
+}
+
+function buildSnapshot(args: {
+  context: GroupBriefContext;
+  promptVersion: string;
+  existingRow?: SocialGroupAIBriefRow | null;
+}): SocialGroupAIBriefSnapshot {
+  const narrative = buildDeterministicNarrative({
+    context: args.context,
+    promptVersion: args.promptVersion,
+    existingRow: args.existingRow,
+  });
+  return {
+    week: {
+      startISO: args.context.week.startISO,
+      endISO: args.context.week.endISO,
+      label: args.context.week.label,
+    },
+    metrics: args.context.metrics,
+    narrativeSpec: narrative.spec,
+    factBundle: formatFactBundle(args.context),
+    previousCopy: readPreviousCopySummary(args.existingRow ?? null),
+    copyMeta: narrative.usageMeta,
+    hero: {
+      tone: narrative.spec.tone,
+      defaultHeadline: narrative.hero.headline,
+      defaultSubheadline: narrative.hero.subheadline,
+    },
+    findings: [
+      buildEnergyFinding(args.context, narrative.spec.tone),
+      buildRiskFinding(args.context),
+      buildScheduleFinding(args.context),
+    ],
+    actions: narrative.actions,
+    windows: args.context.sharedWindows.map((item) => ({
+      dateISO: item.dateISO,
+      label: formatMonthDay(item.dateISO),
+      reason: `공개 일정 기준으로 ${item.members.length}명이 OFF/VAC인 날입니다.`,
+      members: item.members,
+    })),
+    personalCards: args.context.cardCandidates.map((member) => buildPersonalCardSnapshot(member)),
+  };
+}
+
+function buildDeterministicBriefPayload(args: {
+  context: GroupBriefContext;
+  promptVersion: string;
+  existingRow?: SocialGroupAIBriefRow | null;
+}): SocialGroupAIBriefPayload {
+  const snapshot = buildSnapshot(args);
+  return {
+    week: snapshot.week,
+    hero: {
+      headline: snapshot.hero.defaultHeadline,
+      subheadline: snapshot.hero.defaultSubheadline,
+      tone: snapshot.hero.tone,
+    },
+    metrics: buildMetricsPayload(args.context.metrics),
+    findings: snapshot.findings.map((item) => ({
+      id: item.id,
+      title: item.defaultTitle,
+      body: item.defaultBody,
+      tone: item.tone,
+      factLabel: item.factLabel,
+    })),
+    actions: snapshot.actions.map((item) => ({
+      id: item.id,
+      title: item.defaultTitle,
+      body: item.defaultBody,
+      reason: item.reason,
+    })),
+    windows: snapshot.windows,
+    personalCards: snapshot.personalCards.map((item) => ({
+      userId: item.userId,
+      nickname: item.nickname,
+      avatarEmoji: item.avatarEmoji,
+      statusLabel: item.statusLabel,
+      vitalScore: item.vitalScore,
+      bodyBattery: item.bodyBattery,
+      mentalBattery: item.mentalBattery,
+      sleepDebtHours: item.sleepDebtHours,
+      summary: item.defaultSummary,
+      action: item.defaultAction,
+    })),
+  };
 }
 
 function buildHeroCopy(context: GroupBriefContext, tone: SocialGroupAIBriefTone) {
@@ -919,76 +2046,6 @@ function buildPersonalCardSnapshot(member: BriefMemberContext): SocialGroupAIBri
   };
 }
 
-function buildSnapshot(context: GroupBriefContext): SocialGroupAIBriefSnapshot {
-  const tone = toneFromMetrics(context.metrics);
-  const heroCopy = buildHeroCopy(context, tone);
-  return {
-    week: {
-      startISO: context.week.startISO,
-      endISO: context.week.endISO,
-      label: context.week.label,
-    },
-    metrics: context.metrics,
-    hero: {
-      tone,
-      defaultHeadline: heroCopy.headline,
-      defaultSubheadline: heroCopy.subheadline,
-    },
-    findings: [
-      buildEnergyFinding(context, tone),
-      buildRiskFinding(context),
-      buildScheduleFinding(context),
-    ],
-    actions: buildActionPlans(context),
-    windows: context.sharedWindows.map((item) => ({
-      dateISO: item.dateISO,
-      label: formatMonthDay(item.dateISO),
-      reason: `공개 일정 기준으로 ${item.members.length}명이 OFF/VAC인 날입니다.`,
-      members: item.members,
-    })),
-    personalCards: context.cardCandidates.map((member) => buildPersonalCardSnapshot(member)),
-  };
-}
-
-function buildDeterministicBriefPayload(context: GroupBriefContext): SocialGroupAIBriefPayload {
-  const snapshot = buildSnapshot(context);
-  return {
-    week: snapshot.week,
-    hero: {
-      headline: snapshot.hero.defaultHeadline,
-      subheadline: snapshot.hero.defaultSubheadline,
-      tone: snapshot.hero.tone,
-    },
-    metrics: buildMetricsPayload(context.metrics),
-    findings: snapshot.findings.map((item) => ({
-      id: item.id,
-      title: item.defaultTitle,
-      body: item.defaultBody,
-      tone: item.tone,
-      factLabel: item.factLabel,
-    })),
-    actions: snapshot.actions.map((item) => ({
-      id: item.id,
-      title: item.defaultTitle,
-      body: item.defaultBody,
-      reason: item.reason,
-    })),
-    windows: snapshot.windows,
-    personalCards: snapshot.personalCards.map((item) => ({
-      userId: item.userId,
-      nickname: item.nickname,
-      avatarEmoji: item.avatarEmoji,
-      statusLabel: item.statusLabel,
-      vitalScore: item.vitalScore,
-      bodyBattery: item.bodyBattery,
-      mentalBattery: item.mentalBattery,
-      sleepDebtHours: item.sleepDebtHours,
-      summary: item.defaultSummary,
-      action: item.defaultAction,
-    })),
-  };
-}
-
 function buildFlowRowLevel(id: SocialGroupAIBriefFlowRow["id"], context: GroupBriefContext): 1 | 2 | 3 | 4 | 5 {
   if (id === "energy") {
     if ((context.metrics.avgBattery ?? 100) < 40 || (context.metrics.avgSleep ?? 99) < 5.8) return 2;
@@ -1008,23 +2065,36 @@ function buildFlowRowLevel(id: SocialGroupAIBriefFlowRow["id"], context: GroupBr
   return 2;
 }
 
-function buildLivePanel(context: GroupBriefContext): NonNullable<SocialGroupAIBriefResponse["live"]> {
-  const snapshot = buildSnapshot(context);
-  return {
-    week: snapshot.week,
-    updatedAt: new Date().toISOString(),
-    metrics: buildMetricsPayload(context.metrics),
-    flowRows: snapshot.findings.filter((item) => item.id !== "schedule").map((item) => ({
-      id: item.id,
-      label: item.id === "energy" ? "에너지" : "리스크",
-      title: item.defaultTitle,
-      summary: item.defaultBody,
-      factLabel: item.factLabel,
-      tone: item.tone,
-      level: buildFlowRowLevel(item.id, context),
-    })),
-    windows: snapshot.windows,
-    personalCards: snapshot.personalCards.map((item) => ({
+function buildLivePanel(args: {
+  row: SocialGroupAIBriefRow | null;
+  context: GroupBriefContext;
+}): NonNullable<SocialGroupAIBriefResponse["live"]> {
+  const snapshot = buildSnapshot({
+    context: args.context,
+    promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
+    existingRow: args.row,
+  });
+  const payload = args.row?.payload && hasRenderableBrief(args.row.payload) ? args.row.payload : null;
+  const flowSource: Array<{
+    id: string;
+    title: string;
+    body: string;
+    tone: SocialGroupAIBriefTone;
+    factLabel: string;
+  }> =
+    payload?.findings && payload.findings.length === 3
+      ? payload.findings
+      : snapshot.findings.map((item) => ({
+          id: item.id,
+          title: item.defaultTitle,
+          body: item.defaultBody,
+          tone: item.tone,
+          factLabel: item.factLabel,
+        }));
+  const windowSource = payload?.windows ?? snapshot.windows;
+  const personalCardSource =
+    payload?.personalCards ??
+    snapshot.personalCards.map((item) => ({
       userId: item.userId,
       nickname: item.nickname,
       avatarEmoji: item.avatarEmoji,
@@ -1035,7 +2105,42 @@ function buildLivePanel(context: GroupBriefContext): NonNullable<SocialGroupAIBr
       sleepDebtHours: item.sleepDebtHours,
       summary: item.defaultSummary,
       action: item.defaultAction,
+    }));
+  const liveFlowSource = flowSource.reduce<
+    Array<{
+      id: "energy" | "risk";
+      title: string;
+      body: string;
+      tone: SocialGroupAIBriefTone;
+      factLabel: string;
+    }>
+  >((list, item) => {
+    if (item.id === "energy" || item.id === "risk") {
+      list.push({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        tone: item.tone,
+        factLabel: item.factLabel,
+      });
+    }
+    return list;
+  }, []);
+  return {
+    week: payload?.week ?? snapshot.week,
+    updatedAt: args.row?.generated_at ?? new Date().toISOString(),
+    metrics: buildMetricsPayload(args.context.metrics),
+    flowRows: liveFlowSource.map((item) => ({
+      id: item.id,
+      label: item.id === "energy" ? "에너지" : "리스크",
+      title: item.title,
+      summary: item.body,
+      factLabel: item.factLabel,
+      tone: item.tone,
+      level: buildFlowRowLevel(item.id as SocialGroupAIBriefFlowRow["id"], args.context),
     })),
+    windows: windowSource,
+    personalCards: personalCardSource,
   };
 }
 
@@ -1055,7 +2160,11 @@ function buildSnapshotPanel(args: {
     };
   }
 
-  const fallback = buildDeterministicBriefPayload(args.context);
+  const fallback = buildDeterministicBriefPayload({
+    context: args.context,
+    promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
+    existingRow: args.row,
+  });
   return {
     snapshot: {
       hero: fallback.hero,
@@ -1096,6 +2205,34 @@ function buildRow(args: {
   };
 }
 
+function buildStoredUsageRecord(args: {
+  snapshot: SocialGroupAIBriefSnapshot;
+  providerUsage?: unknown;
+  llmMode: string;
+  responseId?: string | null;
+  traceId?: string | null;
+  storeResponses?: boolean;
+  requestUrl?: string | null;
+  authMode?: string | null;
+  usesCloudflareGateway?: boolean;
+  requestMetadata?: Record<string, string> | null;
+  extras?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    ...args.snapshot.copyMeta,
+    llmMode: args.llmMode,
+    providerUsage: args.providerUsage ?? null,
+    responseId: args.responseId ?? null,
+    traceId: args.traceId ?? null,
+    storeResponses: args.storeResponses ?? null,
+    requestUrl: args.requestUrl ?? null,
+    authMode: args.authMode ?? null,
+    usesCloudflareGateway: args.usesCloudflareGateway ?? null,
+    requestMetadata: args.requestMetadata ?? null,
+    ...(args.extras ?? {}),
+  };
+}
+
 export async function generateGroupAIBriefArtifact(args: {
   admin?: any;
   groupId: number;
@@ -1119,6 +2256,8 @@ export async function generateGroupAIBriefArtifact(args: {
     args.generatorType === "manual" ? new Date(Date.now() + SOCIAL_GROUP_AI_BRIEF_COOLDOWN_MS).toISOString() : null;
   const tone = toneFromMetrics(context.metrics);
   const basePayload = buildBasePayload({ week: context.week, metrics: context.metrics, tone });
+  const existingRow =
+    args.existingRow !== undefined || !admin ? args.existingRow ?? null : await readBriefRow(admin, args.groupId, context.week.startISO);
 
   if (context.metrics.contributorCount < MIN_GROUP_AI_BRIEF_CONTRIBUTORS) {
     return buildRow({
@@ -1134,7 +2273,11 @@ export async function generateGroupAIBriefArtifact(args: {
     });
   }
 
-  const snapshot = buildSnapshot(context);
+  const snapshot = buildSnapshot({
+    context,
+    promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
+    existingRow,
+  });
   const model = context.hasProEligibleMember ? "gpt-5.4" : "gpt-5.2";
   const controller = new AbortController();
   try {
@@ -1143,9 +2286,23 @@ export async function generateGroupAIBriefArtifact(args: {
       snapshot,
       model,
       signal: controller.signal,
+      groupId: args.groupId,
+      generatorType: args.generatorType,
+      promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
     });
 
     if (aiResult.ok) {
+      console.info("[SocialGroupAIBrief] generation_ready", {
+        groupId: args.groupId,
+        generatorType: args.generatorType,
+        model: aiResult.model,
+        generatedAt: snapshot.week.startISO,
+        traceId: aiResult.traceId,
+        responseId: aiResult.responseId,
+        storeResponses: aiResult.storeResponses,
+        authMode: aiResult.authMode,
+        usesCloudflareGateway: aiResult.usesCloudflareGateway,
+      });
       return buildRow({
         groupId: args.groupId,
         context,
@@ -1162,12 +2319,38 @@ export async function generateGroupAIBriefArtifact(args: {
           windows: aiResult.content.windows,
           personalCards: aiResult.content.personalCards,
         },
-        usage: aiResult.usage as unknown as Record<string, unknown> | null,
+        usage: buildStoredUsageRecord({
+          snapshot,
+          providerUsage: aiResult.usage,
+          llmMode: "hero_actions_refine_v2",
+          responseId: aiResult.responseId,
+          traceId: aiResult.traceId,
+          storeResponses: aiResult.storeResponses,
+          requestUrl: aiResult.requestUrl,
+          authMode: aiResult.authMode,
+          usesCloudflareGateway: aiResult.usesCloudflareGateway,
+          requestMetadata: aiResult.requestMetadata,
+        }),
         cooldownUntil,
       });
     }
 
-    const fallbackPayload = buildDeterministicBriefPayload(context);
+    const fallbackPayload = buildDeterministicBriefPayload({
+      context,
+      promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
+      existingRow,
+    });
+    console.warn("[SocialGroupAIBrief] generation_fallback", {
+      groupId: args.groupId,
+      generatorType: args.generatorType,
+      model: aiResult.model,
+      traceId: aiResult.traceId,
+      responseId: aiResult.responseId,
+      storeResponses: aiResult.storeResponses,
+      authMode: aiResult.authMode,
+      usesCloudflareGateway: aiResult.usesCloudflareGateway,
+      error: aiResult.error,
+    });
     return buildRow({
       groupId: args.groupId,
       context,
@@ -1176,11 +2359,23 @@ export async function generateGroupAIBriefArtifact(args: {
       model: aiResult.model,
       promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
       payload: fallbackPayload,
-      usage: { fallbackReason: aiResult.error },
+      usage: buildStoredUsageRecord({
+        snapshot,
+        llmMode: "hero_actions_refine_v2",
+        responseId: aiResult.responseId,
+        traceId: aiResult.traceId,
+        storeResponses: aiResult.storeResponses,
+        requestUrl: aiResult.requestUrl,
+        authMode: aiResult.authMode,
+        usesCloudflareGateway: aiResult.usesCloudflareGateway,
+        requestMetadata: aiResult.requestMetadata,
+        extras: {
+          fallbackReason: aiResult.error,
+        },
+      }),
       cooldownUntil,
     });
   } catch (error) {
-    const existingRow = args.existingRow ?? null;
     if (existingRow && hasRenderableBrief(existingRow.payload)) {
       return {
         ...existingRow,
@@ -1191,6 +2386,7 @@ export async function generateGroupAIBriefArtifact(args: {
         cooldown_until: cooldownUntil,
         usage: {
           ...(existingRow.usage ?? {}),
+          ...snapshot.copyMeta,
           error: String((error as any)?.message ?? error ?? "group_ai_brief_generation_failed"),
           stale: true,
         },
@@ -1203,8 +2399,15 @@ export async function generateGroupAIBriefArtifact(args: {
       generatorType: args.generatorType,
       model: context.hasProEligibleMember ? "gpt-5.4" : "gpt-5.2",
       promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
-      payload: basePayload,
-      usage: { error: String((error as any)?.message ?? error ?? "group_ai_brief_generation_failed") },
+      payload: buildDeterministicBriefPayload({
+        context,
+        promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
+        existingRow,
+      }),
+      usage: {
+        ...snapshot.copyMeta,
+        error: String((error as any)?.message ?? error ?? "group_ai_brief_generation_failed"),
+      },
       cooldownUntil,
     });
   }
@@ -1285,6 +2488,26 @@ function buildResponse(args: {
     row: args.row,
     context: args.context,
   });
+  const traceMeta = readStoredTraceMeta(args.row);
+  const hasStoredPayload = Boolean(args.row?.payload && hasRenderableBrief(args.row.payload));
+  console.info("[SocialGroupAIBrief] response_ready", {
+    groupId: args.context.groupId,
+    rowStatus: args.row?.status ?? null,
+    generatedAt: args.row?.generated_at ?? null,
+    stale: snapshotPanel.stale,
+    errorCode: snapshotPanel.errorCode,
+    canRefresh,
+    snapshotSource: hasStoredPayload ? "stored_payload" : "deterministic_fallback",
+    liveUsesStoredFindings: Boolean(args.row?.payload?.findings && args.row.payload.findings.length === 3),
+    liveUsesStoredWindows: Array.isArray(args.row?.payload?.windows),
+    liveUsesStoredPersonalCards: Array.isArray(args.row?.payload?.personalCards),
+    traceId: traceMeta.traceId,
+    responseId: traceMeta.responseId,
+    storeResponses: traceMeta.storeResponses,
+    requestUrl: traceMeta.requestUrl,
+    authMode: traceMeta.authMode,
+    usesCloudflareGateway: traceMeta.usesCloudflareGateway,
+  });
 
   return {
     state: "ready",
@@ -1297,7 +2520,7 @@ function buildResponse(args: {
     },
     eligibility,
     snapshot: snapshotPanel.snapshot,
-    live: buildLivePanel(args.context),
+    live: buildLivePanel({ row: args.row, context: args.context }),
     errorCode: snapshotPanel.errorCode,
   };
 }
@@ -1389,6 +2612,15 @@ export async function refreshCurrentGroupAIBrief(args: {
     groupId: args.groupId,
     subscriptionCache,
   });
+  const existingTraceMeta = readStoredTraceMeta(existingRow);
+  console.info("[SocialGroupAIBrief] manual_refresh_start", {
+    groupId: args.groupId,
+    userId: String(args.userId).slice(0, 8),
+    existingStatus: existingRow?.status ?? null,
+    existingGeneratedAt: existingRow?.generated_at ?? null,
+    existingTraceId: existingTraceMeta.traceId,
+    existingResponseId: existingTraceMeta.responseId,
+  });
   if (
     existingRow?.cooldown_until &&
     Date.parse(existingRow.cooldown_until) > Date.now() &&
@@ -1412,6 +2644,18 @@ export async function refreshCurrentGroupAIBrief(args: {
     throw error;
   }
   await upsertBriefRow(args.admin, generated);
+  const savedTraceMeta = readStoredTraceMeta(generated);
+  console.info("[SocialGroupAIBrief] manual_refresh_saved", {
+    groupId: args.groupId,
+    rowStatus: generated.status,
+    generatedAt: generated.generated_at,
+    traceId: savedTraceMeta.traceId,
+    responseId: savedTraceMeta.responseId,
+    storeResponses: savedTraceMeta.storeResponses,
+    requestUrl: savedTraceMeta.requestUrl,
+    authMode: savedTraceMeta.authMode,
+    usesCloudflareGateway: savedTraceMeta.usesCloudflareGateway,
+  });
 
   return buildResponse({ row: generated, viewer, context: currentContext });
 }
@@ -1498,6 +2742,7 @@ export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
         groupId,
         generatorType: "cron",
         subscriptionCache,
+        existingRow: await readBriefRow(args.admin, groupId, week.startISO),
       });
       if (!generated) {
         skippedCount += 1;
