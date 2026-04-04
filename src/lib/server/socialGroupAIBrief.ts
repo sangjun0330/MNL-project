@@ -957,25 +957,57 @@ export async function getCurrentGroupAIBrief(args: {
   subscriptionCache?: Map<string, SubscriptionSnapshot | null>;
 }): Promise<SocialGroupAIBriefResponse> {
   const subscriptionCache = args.subscriptionCache ?? new Map<string, SubscriptionSnapshot | null>();
-  const viewer = await loadViewerPrefs({
-    admin: args.admin,
-    groupId: args.groupId,
-    userId: args.userId,
-    subscriptionCache,
-  });
+  let viewer: ViewerPrefs | null = null;
+  try {
+    viewer = await loadViewerPrefs({
+      admin: args.admin,
+      groupId: args.groupId,
+      userId: args.userId,
+      subscriptionCache,
+    });
+  } catch (error: any) {
+    const code = String(error?.code ?? error?.message ?? "");
+    // Re-throw membership/group errors so the route can return proper 403/404
+    if (code === "not_group_member" || code === "group_not_found") throw error;
+    console.error(
+      "[SocialGroupAIBrief] loadViewerPrefs failed group=%d userId=%s code=%s err=%s",
+      args.groupId,
+      String(args.userId).slice(0, 8),
+      code,
+      String(error?.message ?? error)
+    );
+    // Return locked state on any other viewer-load failure
+    return {
+      state: "failed",
+      generatedAt: null,
+      stale: false,
+      viewer: { hasEntitlement: false, canRefresh: false, healthShareEnabled: false, personalCardOptIn: false },
+      brief: null,
+      errorCode: "group_ai_brief_viewer_load_failed",
+    };
+  }
+
   const week = getCurrentWeekWindow();
   let row: SocialGroupAIBriefRow | null = null;
   try {
     row = await readBriefRow(args.admin, args.groupId, week.startISO);
   } catch (error) {
-    console.error("[SocialGroupAIBrief] readBriefRow failed group=%d err=%s", args.groupId, String((error as any)?.message ?? error));
+    console.error(
+      "[SocialGroupAIBrief] readBriefRow failed group=%d err=%s",
+      args.groupId,
+      String((error as any)?.message ?? error)
+    );
   }
   let context: GroupBriefContext | null = null;
   if (viewer.hasEntitlement) {
     try {
       context = await loadGroupBriefContext({ admin: args.admin, groupId: args.groupId, subscriptionCache });
     } catch (error) {
-      console.error("[SocialGroupAIBrief] loadGroupBriefContext failed group=%d err=%s", args.groupId, String((error as any)?.message ?? error));
+      console.error(
+        "[SocialGroupAIBrief] loadGroupBriefContext failed group=%d err=%s",
+        args.groupId,
+        String((error as any)?.message ?? error)
+      );
     }
   }
   return buildResponse({ row, viewer, context });
