@@ -981,6 +981,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       if (autoOrdersKey) settleAutoOrdersRequest(autoOrdersKey, autoOrdersSucceeded);
       ordersInFlightRef.current = false;
       setSavingOrders(false);
+      if (autoOrdersKey) emitAutoOrdersRequestChange();
     }
   };
 
