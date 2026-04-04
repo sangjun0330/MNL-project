@@ -566,6 +566,7 @@ export function computeMemberWeeklyVitals(
       daysWithData.reduce((sum, v) => sum + v.body.value, 0) / daysWithData.length;
     const avgMental =
       daysWithData.reduce((sum, v) => sum + v.mental.ema, 0) / daysWithData.length;
+    const latestVital = weekVitals[weekVitals.length - 1] ?? daysWithData[daysWithData.length - 1] ?? null;
 
     const daysWithSleep = daysWithData.filter((v) => v.inputs.sleepHours != null);
     const avgSleep =
@@ -617,6 +618,11 @@ export function computeMemberWeeklyVitals(
     return {
       weeklyAvgBattery: Math.round(avgBattery * 10) / 10,
       weeklyAvgMental: Math.round(avgMental * 10) / 10,
+      latestVital: latestVital ? Math.round((latestVital.body.value + latestVital.mental.ema) / 2) : Math.round((avgBattery + avgMental) / 2),
+      latestBodyBattery: latestVital ? Math.round(latestVital.body.value) : Math.round(avgBattery),
+      latestMentalBattery: latestVital ? Math.round(latestVital.mental.ema) : Math.round(avgMental),
+      latestSleepDebtHours:
+        latestVital?.engine?.sleepDebtHours != null ? Math.round(latestVital.engine.sleepDebtHours * 10) / 10 : null,
       weeklyAvgSleep: avgSleep !== null ? Math.round(avgSleep * 10) / 10 : null,
       weeklyAvgStress: avgStress !== null ? Math.round(avgStress * 10) / 10 : null,
       weeklyAvgActivity: avgActivity !== null ? Math.round(avgActivity * 10) / 10 : null,

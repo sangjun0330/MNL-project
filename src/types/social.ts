@@ -57,6 +57,14 @@ export type MemberWeeklyVitals = {
   weeklyAvgBattery: number;
   /** 지난 7일 평균 Mental Battery (0-100) */
   weeklyAvgMental: number;
+  /** 최근 계산 시점 RNest Vital (0-100) */
+  latestVital: number;
+  /** 최근 계산 시점 Body Battery (0-100) */
+  latestBodyBattery: number;
+  /** 최근 계산 시점 Mental Battery (0-100) */
+  latestMentalBattery: number;
+  /** 최근 계산 시점 수면 부채 시간 */
+  latestSleepDebtHours: number | null;
   /** 지난 7일 평균 수면 시간 (수면 데이터 있는 날 기준, 없으면 null) */
   weeklyAvgSleep: number | null;
   /** 지난 7일 평균 스트레스 단계 (입력된 날 기준, 없으면 null) */
@@ -262,6 +270,10 @@ export type SocialGroupAIBriefPersonalCard = {
   nickname: string;
   avatarEmoji: string;
   statusLabel: "안정" | "주의" | "회복 우선";
+  vitalScore: number | null;
+  bodyBattery: number | null;
+  mentalBattery: number | null;
+  sleepDebtHours: number | null;
   summary: string;
   action: string;
 };

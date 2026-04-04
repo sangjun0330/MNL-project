@@ -56,6 +56,10 @@ export type SocialGroupAIBriefSnapshot = {
     nickname: string;
     avatarEmoji: string;
     statusLabel: SocialGroupAIBriefPersonalCard["statusLabel"];
+    vitalScore: number | null;
+    bodyBattery: number | null;
+    mentalBattery: number | null;
+    sleepDebtHours: number | null;
     summaryFact: string;
     actionFact: string;
     defaultSummary: string;

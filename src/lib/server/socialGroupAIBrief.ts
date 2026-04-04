@@ -504,29 +504,412 @@ async function upsertBriefRow(admin: any, row: SocialGroupAIBriefRow) {
   if (error && !isSocialGroupAIBriefSchemaUnavailableError(error)) throw error;
 }
 
-function buildSnapshot(context: GroupBriefContext): SocialGroupAIBriefSnapshot {
-  const tone = toneFromMetrics(context.metrics);
-  const avgBatteryLabel = context.metrics.avgBattery != null ? `${context.metrics.avgBattery}점` : "기록 부족";
-  const avgSleepLabel = context.metrics.avgSleep != null ? `${context.metrics.avgSleep}시간` : "기록 부족";
-  const riskLabel = `주의 ${context.metrics.warningCount}명 · 회복 우선 ${context.metrics.dangerCount}명`;
+function formatPointText(value: number | null) {
+  return value != null && Number.isFinite(value) ? `${value}점` : "기록 부족";
+}
+
+function formatHourText(value: number | null) {
+  return value != null && Number.isFinite(value) ? `${value}시간` : "기록 부족";
+}
+
+function formatDebtText(value: number | null) {
+  return value != null && Number.isFinite(value) ? `${value}h` : "-";
+}
+
+function buildHeroCopy(context: GroupBriefContext, tone: SocialGroupAIBriefTone) {
+  const avgBatteryLabel = formatPointText(context.metrics.avgBattery);
+  const avgMentalLabel = formatPointText(context.metrics.avgMental);
+  const avgSleepLabel = formatHourText(context.metrics.avgSleep);
+  const avgBattery = context.metrics.avgBattery ?? null;
+  const avgMental = context.metrics.avgMental ?? null;
+  const avgSleep = context.metrics.avgSleep ?? null;
+  const commonOffCount = context.commonOffDays.length;
+  const nightCountToday = context.metrics.nightCountToday;
+  const warningCount = context.metrics.warningCount;
+  const dangerCount = context.metrics.dangerCount;
+  const mentalGap =
+    avgBattery != null && avgMental != null ? Math.round((avgBattery - avgMental) * 10) / 10 : null;
+  const sleepShort = avgSleep != null && avgSleep < 6.2;
+  const sleepWatch = avgSleep != null && avgSleep < 6.8;
+  const batteryLow = avgBattery != null && avgBattery < 58;
+  const mentalLow = avgMental != null && avgMental < 58;
+  const mentalDrift = mentalGap != null && mentalGap >= 7;
+  const strongSharedWindow = commonOffCount >= 2;
+  const noSharedWindow = commonOffCount === 0;
+
+  if (dangerCount > 0 && sleepShort) {
+    return {
+      headline: "이번 주는 회복 우선 신호와 짧은 수면이 같이 올라와 있어요.",
+      subheadline: `회복 우선 ${dangerCount}명, 평균 수면 ${avgSleepLabel}이라 새 일정보다 수면 확보와 응답 강도 조절이 먼저입니다.`,
+    };
+  }
+  if (dangerCount > 0 && mentalDrift) {
+    return {
+      headline: "이번 주는 버티는 체력보다 멘탈 소모 관리가 더 급해요.",
+      subheadline: `평균 body ${avgBatteryLabel}, mental ${avgMentalLabel} 흐름에 회복 우선 ${dangerCount}명이 있어 긴 일정과 잦은 체크인을 먼저 줄이는 편이 맞습니다.`,
+    };
+  }
+  if (dangerCount > 0) {
+    return {
+      headline: "이번 주는 회복 여백을 먼저 확보해야 팀 리듬이 무너지지 않아요.",
+      subheadline: `주의 ${warningCount}명, 회복 우선 ${dangerCount}명 흐름이라 과한 챌린지보다 낮은 부담 운영이 먼저 필요합니다.`,
+    };
+  }
+  if (sleepShort && nightCountToday > 0) {
+    return {
+      headline: "이번 주는 야간과 짧은 수면이 겹쳐 리듬이 쉽게 흐트러질 수 있어요.",
+      subheadline: `평균 수면 ${avgSleepLabel}, 오늘 야간 ${nightCountToday}명이라 야간 뒤 회복 구간을 먼저 비워 두는 편이 좋습니다.`,
+    };
+  }
+  if (mentalDrift && sleepWatch) {
+    return {
+      headline: "이번 주는 체력보다 집중 소모와 수면 회복을 함께 봐야 해요.",
+      subheadline: `평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}, 수면 ${avgSleepLabel}이라 버티는 것보다 회복 속도 관리가 더 중요합니다.`,
+    };
+  }
+  if (mentalLow) {
+    return {
+      headline: "이번 주는 멘탈 배터리 하강폭을 먼저 완충하는 편이 좋아요.",
+      subheadline: `평균 mental ${avgMentalLabel}까지 내려와 있어 일정 길이보다 집중이 길어지는 구간을 먼저 줄이는 전략이 맞습니다.`,
+    };
+  }
+  if (batteryLow && commonOffCount > 0) {
+    return {
+      headline: "이번 주는 체력 소모가 보이지만 회복 창을 활용할 여지는 있어요.",
+      subheadline: `평균 body ${avgBatteryLabel} 흐름이지만 공통 OFF ${commonOffCount}일이 보여 쉬는 창만 잘 고정해도 부담을 줄일 수 있습니다.`,
+    };
+  }
+  if (warningCount > 0 && noSharedWindow) {
+    return {
+      headline: "큰 위험 신호는 아니지만 리듬 차이를 방치하면 피로가 커질 수 있어요.",
+      subheadline: `주의 ${warningCount}명 흐름에 공통 OFF가 없어, 길게 맞추기보다 짧은 회복 슬롯을 먼저 맞추는 편이 안전합니다.`,
+    };
+  }
+  if (tone === "steady" && strongSharedWindow) {
+    return {
+      headline: "이번 주는 안정 흐름 위에 같이 쉬는 창도 꽤 잡혀 있어요.",
+      subheadline: `평균 body ${avgBatteryLabel}, 수면 ${avgSleepLabel}, 공통 OFF ${commonOffCount}일 흐름이라 지금 리듬을 유지하면서 회복 슬롯만 고정하면 충분합니다.`,
+    };
+  }
+  if (tone === "steady" && noSharedWindow) {
+    return {
+      headline: "전체 흐름은 안정적이지만 쉬는 타이밍은 조금 흩어져 있어요.",
+      subheadline: `평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}로 크게 흔들리진 않지만 공통 OFF가 없어 짧은 회복 창을 먼저 잡아 두는 편이 좋습니다.`,
+    };
+  }
+  return {
+    headline: "이번 주 그룹 흐름은 비교적 안정적으로 유지되고 있어요.",
+    subheadline: `평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}, 수면 ${avgSleepLabel} 흐름이라 지금의 회복 리듬을 크게 흔들지 않는 편이 좋습니다.`,
+  };
+}
+
+function buildEnergyFinding(context: GroupBriefContext, tone: SocialGroupAIBriefTone): SocialGroupAIBriefSnapshot["findings"][number] {
+  const avgBattery = context.metrics.avgBattery ?? null;
+  const avgMental = context.metrics.avgMental ?? null;
+  const avgSleep = context.metrics.avgSleep ?? null;
+  const avgBatteryLabel = formatPointText(avgBattery);
+  const avgMentalLabel = formatPointText(avgMental);
+  const avgSleepLabel = formatHourText(avgSleep);
+  const mentalGap = avgBattery != null && avgMental != null ? Math.round((avgBattery - avgMental) * 10) / 10 : null;
+  const sleepShort = avgSleep != null && avgSleep < 6.2;
+  const batteryLow = avgBattery != null && avgBattery < 58;
+  const mentalDrift = mentalGap != null && mentalGap >= 7;
+
+  if (sleepShort && batteryLow) {
+    return {
+      id: "energy",
+      tone: "recover",
+      factLabel: `body ${avgBatteryLabel} · sleep ${avgSleepLabel}`,
+      factText: `최근 7일 평균 body는 ${avgBatteryLabel}, mental은 ${avgMentalLabel}, 수면은 ${avgSleepLabel}입니다.`,
+      defaultTitle: "회복량보다 소모가 먼저 앞서는 흐름",
+      defaultBody: `최근 7일 평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}, 수면 ${avgSleepLabel}입니다. 기본 회복이 쌓이기보다 소모가 앞서서 이번 주는 수면 확보와 일과 사이 완충 시간이 먼저 필요합니다.`,
+    };
+  }
+  if (mentalDrift) {
+    return {
+      id: "energy",
+      tone: tone === "recover" ? "recover" : "watch",
+      factLabel: `body ${avgBatteryLabel} · mental ${avgMentalLabel}`,
+      factText: `최근 7일 평균 body는 ${avgBatteryLabel}, mental은 ${avgMentalLabel}입니다.`,
+      defaultTitle: "체력보다 멘탈 배터리가 먼저 꺾이는 흐름",
+      defaultBody: `최근 7일 평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}입니다. 버티는 체력보다 집중 소모가 빨라서 긴 일정과 잦은 응답이 누적되면 피로가 크게 느껴질 수 있습니다.`,
+    };
+  }
+  if (sleepShort) {
+    return {
+      id: "energy",
+      tone: "watch",
+      factLabel: `sleep ${avgSleepLabel} · body ${avgBatteryLabel}`,
+      factText: `최근 7일 평균 수면은 ${avgSleepLabel}, body는 ${avgBatteryLabel}, mental은 ${avgMentalLabel}입니다.`,
+      defaultTitle: "수면이 회복 속도를 붙잡고 있는 흐름",
+      defaultBody: `최근 7일 평균 수면 ${avgSleepLabel}, body ${avgBatteryLabel}, mental ${avgMentalLabel}입니다. 이번 주는 낮 시간대 회복 여백과 취침 루틴을 같이 지켜야 흐름이 덜 흔들립니다.`,
+    };
+  }
+  return {
+    id: "energy",
+    tone,
+    factLabel: `body ${avgBatteryLabel} · mental ${avgMentalLabel}`,
+    factText: `최근 7일 평균 body는 ${avgBatteryLabel}, mental은 ${avgMentalLabel}, 수면은 ${avgSleepLabel}입니다.`,
+    defaultTitle: tone === "steady" ? "기본 회복 리듬이 비교적 유지되는 흐름" : "기본 리듬을 먼저 안정시켜야 하는 흐름",
+    defaultBody:
+      tone === "steady"
+        ? `최근 7일 평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}, 수면 ${avgSleepLabel}입니다. 큰 하강 없이 유지되고 있어 기본 회복 루틴을 건드리지 않는 편이 좋습니다.`
+        : `최근 7일 평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}, 수면 ${avgSleepLabel}입니다. 이번 주는 체력을 더 쓰기보다 기본 회복 리듬을 먼저 고정하는 편이 맞습니다.`,
+  };
+}
+
+function buildRiskFinding(context: GroupBriefContext): SocialGroupAIBriefSnapshot["findings"][number] {
+  const warningCount = context.metrics.warningCount;
+  const dangerCount = context.metrics.dangerCount;
+  const nightCountToday = context.metrics.nightCountToday;
+  const riskLabel = `주의 ${warningCount}명 · 회복 우선 ${dangerCount}명`;
+
+  if (dangerCount > 0 && warningCount > 0) {
+    return {
+      id: "risk",
+      tone: "recover",
+      factLabel: riskLabel,
+      factText: `최근 7일 기준으로 ${riskLabel}입니다.`,
+      defaultTitle: "경고 신호와 회복 우선 신호가 같이 섞인 구간",
+      defaultBody: `최근 7일 기준 ${riskLabel}입니다. 이번 주는 팀 평균보다 회복이 더 느린 멤버를 기준으로 속도와 응답량을 정하는 편이 안전합니다.`,
+    };
+  }
+  if (dangerCount > 0) {
+    return {
+      id: "risk",
+      tone: "recover",
+      factLabel: riskLabel,
+      factText: `최근 7일 기준으로 ${riskLabel}입니다.`,
+      defaultTitle: "회복 우선 멤버를 기준으로 봐야 하는 구간",
+      defaultBody: `최근 7일 기준 ${riskLabel}입니다. 이번 주는 추가 부담을 얹기보다 회복 우선 멤버가 버틸 수 있는 속도로 운영 강도를 낮추는 편이 좋습니다.`,
+    };
+  }
+  if (warningCount >= 2) {
+    return {
+      id: "risk",
+      tone: "watch",
+      factLabel: riskLabel,
+      factText: `최근 7일 기준으로 ${riskLabel}입니다.`,
+      defaultTitle: "주의 신호가 여러 명에게 겹치는 구간",
+      defaultBody: `최근 7일 기준 ${riskLabel}입니다. 큰 경고 전 단계지만 동시에 여러 명이 피로를 느끼는 흐름이라 짧은 체크인과 낮은 부담 운영이 더 잘 맞습니다.`,
+    };
+  }
+  if (warningCount === 1) {
+    return {
+      id: "risk",
+      tone: "watch",
+      factLabel: riskLabel,
+      factText: `최근 7일 기준으로 ${riskLabel}입니다.`,
+      defaultTitle: "한 명의 하강 신호가 팀 속도를 좌우할 수 있는 구간",
+      defaultBody: `최근 7일 기준 ${riskLabel}입니다. 주의 신호가 작은 것처럼 보여도 이번 주 속도를 끌어올리면 체감 부담이 빠르게 커질 수 있습니다.`,
+    };
+  }
+  return {
+    id: "risk",
+    tone: nightCountToday > 0 ? "watch" : "steady",
+    factLabel: riskLabel,
+    factText: `최근 7일 기준으로 ${riskLabel}입니다.`,
+    defaultTitle: nightCountToday > 0 ? "큰 경고는 적지만 야간 변수가 남아 있는 구간" : "큰 경고 없이 유지되는 구간",
+    defaultBody:
+      nightCountToday > 0
+        ? `최근 7일 기준 ${riskLabel}이고 오늘 야간 ${nightCountToday}명이 있습니다. 지금은 큰 경고가 적지만 야간 뒤 리듬이 깨지면 피로가 커질 수 있어 미리 완충이 필요합니다.`
+        : `최근 7일 기준 ${riskLabel}입니다. 큰 위험 신호는 적어 지금 리듬을 유지하면서도 작은 피로 누적만 막아 주면 충분합니다.`,
+  };
+}
+
+function buildScheduleFinding(context: GroupBriefContext): SocialGroupAIBriefSnapshot["findings"][number] {
   const scheduleLabel =
     context.commonOffDays.length > 0
       ? `공통 OFF ${context.commonOffDays.length}일`
       : `오늘 OFF ${context.metrics.offCountToday}명 · 야간 ${context.metrics.nightCountToday}명`;
+  return {
+    id: "schedule",
+    tone: context.commonOffDays.length > 0 ? "steady" : context.metrics.nightCountToday > 0 ? "watch" : "steady",
+    factLabel: scheduleLabel,
+    factText:
+      context.commonOffDays.length > 0
+        ? `이번 주 공개 일정 기준으로 함께 쉬는 창이 ${context.commonOffDays.length}일 있습니다.`
+        : `오늘 공개 일정 기준으로 OFF/VAC ${context.metrics.offCountToday}명, 야간 ${context.metrics.nightCountToday}명입니다.`,
+    defaultTitle: context.commonOffDays.length > 0 ? "같이 맞추기 좋은 회복 창이 보이는 흐름" : "리듬 차이가 있어 짧은 조율이 필요한 흐름",
+    defaultBody:
+      context.commonOffDays.length > 0
+        ? `이번 주 공개 일정 기준으로 함께 쉬는 창이 ${context.commonOffDays.length}일 있습니다. 긴 계획보다 같은 타이밍에 쉬는 창을 먼저 고정하는 편이 더 효과적입니다.`
+        : `오늘 공개 일정 기준으로 OFF/VAC ${context.metrics.offCountToday}명, 야간 ${context.metrics.nightCountToday}명입니다. 공개된 일정만 놓고 보면 리듬 차이가 있어 짧은 조율이 필요합니다.`,
+  };
+}
 
-  const heroHeadline =
-    tone === "recover"
-      ? "이번 주는 회복 여백을 먼저 챙겨야 하는 흐름이에요."
-      : tone === "watch"
-        ? "이번 주는 리듬을 정리하면 훨씬 수월해질 수 있어요."
-        : "이번 주 그룹 흐름은 비교적 안정적으로 유지되고 있어요.";
-  const heroSubheadline =
-    tone === "recover"
-      ? "무리한 일정 추가보다 공통 쉬는 창과 낮은 부담 운영이 먼저 필요합니다."
-      : tone === "watch"
-        ? "야간과 수면 패턴이 겹치는 구간만 먼저 정리해도 체감 부담이 줄어듭니다."
-        : "지금의 회복 흐름을 유지하면서 같이 쉬는 창을 잘 활용하면 좋습니다.";
+function buildActionPlans(context: GroupBriefContext): SocialGroupAIBriefSnapshot["actions"] {
+  const avgBatteryLabel = formatPointText(context.metrics.avgBattery);
+  const avgMentalLabel = formatPointText(context.metrics.avgMental);
+  const avgSleepLabel = formatHourText(context.metrics.avgSleep);
+  const commonOffCount = context.commonOffDays.length;
+  const warningCount = context.metrics.warningCount;
+  const dangerCount = context.metrics.dangerCount;
+  const nightCountToday = context.metrics.nightCountToday;
+  const avgBattery = context.metrics.avgBattery ?? null;
+  const avgMental = context.metrics.avgMental ?? null;
+  const avgSleep = context.metrics.avgSleep ?? null;
+  const mentalGap =
+    avgBattery != null && avgMental != null ? Math.round((avgBattery - avgMental) * 10) / 10 : null;
 
+  type ActionCandidate = SocialGroupAIBriefSnapshot["actions"][number] & { priority: number };
+  const candidates: ActionCandidate[] = [];
+  const push = (candidate: ActionCandidate) => {
+    if (candidates.some((item) => item.id === candidate.id)) return;
+    candidates.push(candidate);
+  };
+
+  if (dangerCount > 0 || warningCount > 0) {
+    push({
+      id: "load_guard",
+      priority: 10,
+      reason: `주의 ${warningCount}명 · 회복 우선 ${dangerCount}명`,
+      factText: `이번 주는 경고 신호를 기준으로 운영 강도를 낮추는 편이 좋습니다.`,
+      defaultTitle:
+        dangerCount > 0 ? `회복 우선 ${dangerCount}명 기준으로 속도 낮추기` : `주의 ${warningCount}명 신호에 맞춰 강도 조정`,
+      defaultBody:
+        dangerCount > 0
+          ? `이번 주는 회복 우선 ${dangerCount}명이 보여 새 과제나 긴 모임보다, 응답 속도와 일정 길이를 먼저 낮추는 편이 안전합니다.`
+          : `주의 신호가 ${warningCount}명에게 보여 이번 주는 체크인 빈도와 일정 밀도를 조금만 낮춰도 전체 부담이 훨씬 덜해집니다.`,
+    });
+  }
+
+  if (avgSleep != null && avgSleep < 6.2) {
+    push({
+      id: "sleep_restore",
+      priority: 12,
+      reason: `평균 수면 ${avgSleepLabel}`,
+      factText: `평균 수면 ${avgSleepLabel} 구간을 먼저 회복하는 편이 좋습니다.`,
+      defaultTitle: `평균 수면 ${avgSleepLabel}선부터 먼저 복구`,
+      defaultBody: `이번 주는 취침 시간을 늘리는 것보다 취침 시각과 카페인 컷오프를 먼저 고정해 수면 ${avgSleepLabel} 구간이 더 짧아지지 않게 막는 편이 중요합니다.`,
+    });
+  } else if (avgSleep != null && avgSleep < 6.8) {
+    push({
+      id: "sleep_guard",
+      priority: 18,
+      reason: `평균 수면 ${avgSleepLabel}`,
+      factText: `이번 주는 수면 시간이 더 줄지 않게 보호하는 편이 핵심입니다.`,
+      defaultTitle: `수면 ${avgSleepLabel}를 더 깎지 않게 보호`,
+      defaultBody: `수면은 아주 낮진 않지만 여유롭지도 않습니다. 취침 전 자극과 늦은 약속을 줄여 지금 확보된 수면 시간을 그대로 지키는 편이 좋습니다.`,
+    });
+  }
+
+  if (mentalGap != null && mentalGap >= 7) {
+    push({
+      id: "mental_buffer",
+      priority: 14,
+      reason: `body ${avgBatteryLabel} · mental ${avgMentalLabel}`,
+      factText: `체력보다 멘탈 배터리 하강폭이 더 큰 흐름입니다.`,
+      defaultTitle: `멘탈 ${avgMentalLabel} 구간부터 먼저 완충`,
+      defaultBody: `평균 body ${avgBatteryLabel}보다 mental ${avgMentalLabel}이 더 낮습니다. 긴 집중 블록과 잦은 응답을 줄이고, 깊은 일은 한 번에 몰아 처리하는 편이 덜 지칩니다.`,
+    });
+  } else if (avgBattery != null && avgBattery < 58) {
+    push({
+      id: "body_buffer",
+      priority: 16,
+      reason: `평균 body ${avgBatteryLabel}`,
+      factText: `body 배터리 소모 구간을 먼저 줄이는 편이 맞습니다.`,
+      defaultTitle: `body ${avgBatteryLabel} 소모 구간 줄이기`,
+      defaultBody: `이번 주는 체력을 더 쓰는 일정보다, 하루 중 한 번은 완전히 쉬는 블록을 확보해 body 배터리가 연속으로 깎이지 않게 관리하는 편이 좋습니다.`,
+    });
+  }
+
+  if (commonOffCount > 0) {
+    push({
+      id: "shared_window",
+      priority: 20,
+      reason: `공통 OFF ${commonOffCount}일`,
+      factText: `이번 주는 공통 쉬는 창을 먼저 고정하는 편이 좋습니다.`,
+      defaultTitle: `공통 OFF ${commonOffCount}일에 회복 슬롯 고정`,
+      defaultBody: `공개 일정 기준으로 겹치는 쉬는 날이 ${commonOffCount}일 있습니다. 새로운 약속보다 회복성 일정 하나를 그 창에 먼저 올려 두는 편이 유지에 유리합니다.`,
+    });
+  } else {
+    push({
+      id: "micro_window",
+      priority: 22,
+      reason: "공통 OFF가 거의 없습니다.",
+      factText: `이번 주는 짧은 공통 회복 창부터 먼저 정하는 편이 좋습니다.`,
+      defaultTitle: "15~30분 공통 회복 슬롯부터 맞추기",
+      defaultBody: "길게 맞추기 어려운 주라면 15~30분이라도 겹치는 쉬는 시간을 먼저 확보해 두세요. 짧은 회복 슬롯 하나가 전체 흐름을 훨씬 안정적으로 만듭니다.",
+    });
+  }
+
+  if (nightCountToday > 0) {
+    push({
+      id: "night_reset",
+      priority: 24,
+      reason: `오늘 야간 ${nightCountToday}명`,
+      factText: `야간 뒤 리듬을 단순하게 유지하는 편이 필요합니다.`,
+      defaultTitle: `야간 ${nightCountToday}명 뒤 리듬 단순화`,
+      defaultBody: `오늘 야간 ${nightCountToday}명이 있어 다음날은 활동량을 늘리기보다 식사, 수면, 응답 타이밍을 단순하게 유지하는 쪽이 더 안정적입니다.`,
+    });
+  }
+
+  push({
+    id: "anchor_window",
+    priority: 32,
+    reason: commonOffCount > 0 ? `공통 OFF ${commonOffCount}일` : "짧은 회복 슬롯 유지",
+    factText: "하루 회복 앵커 하나를 먼저 고정하는 편이 좋습니다.",
+    defaultTitle: "하루 회복 앵커 하나는 매일 고정",
+    defaultBody:
+      commonOffCount > 0
+        ? "공통으로 쉬는 날이 있더라도 각자 회복 타이밍 하나는 비슷한 시간대로 고정해 두는 편이 주간 리듬을 덜 흔들리게 만듭니다."
+        : "같이 쉬는 날이 적더라도, 하루에 한 번은 겹치는 회복 슬롯을 정해 두면 짧은 회복이 훨씬 안정적으로 쌓입니다.",
+  });
+
+  push({
+    id: "maintain_rhythm",
+    priority: 40,
+    reason: "기본 회복 리듬 유지",
+    factText: "이번 주는 큰 변화보다 현재 리듬을 지키는 편이 좋습니다.",
+    defaultTitle: "이미 맞는 리듬은 더 흔들지 않기",
+    defaultBody: "이번 주는 새 전략을 여러 개 얹기보다, 이미 잘 지켜지고 있는 취침 흐름과 쉬는 창 하나만 유지해도 체감 부담을 충분히 낮출 수 있습니다.",
+  });
+
+  candidates.sort((a, b) => a.priority - b.priority);
+  const selected = candidates.slice(0, 3);
+  return selected.map(({ priority: _priority, ...rest }) => rest);
+}
+
+function buildPersonalCardSnapshot(member: BriefMemberContext): SocialGroupAIBriefSnapshot["personalCards"][number] {
+  const statusLabel = statusLabelForMember(member);
+  const vitalScore = member.vitals?.latestVital ?? null;
+  const bodyBattery = member.vitals?.latestBodyBattery ?? null;
+  const mentalBattery = member.vitals?.latestMentalBattery ?? null;
+  const sleepDebtHours = member.vitals?.latestSleepDebtHours ?? null;
+  const vitalLabel = vitalScore != null ? String(vitalScore) : "-";
+  const bodyLabel = bodyBattery != null ? String(bodyBattery) : "-";
+  const mentalLabel = mentalBattery != null ? String(mentalBattery) : "-";
+  const debtLabel = formatDebtText(sleepDebtHours);
+  return {
+    userId: member.userId,
+    nickname: member.nickname || "익명",
+    avatarEmoji: member.avatarEmoji || "🐧",
+    statusLabel,
+    vitalScore,
+    bodyBattery,
+    mentalBattery,
+    sleepDebtHours,
+    summaryFact: `RNest Vital ${vitalLabel}, body ${bodyLabel}, mental ${mentalLabel}, 수면 부채 ${debtLabel} 흐름입니다.`,
+    actionFact:
+      statusLabel === "회복 우선"
+        ? "짧은 회복 창과 수면 부채 정리를 먼저 잡는 편이 좋습니다."
+        : statusLabel === "주의"
+          ? "집중 소모가 긴 구간보다 짧은 완충 시간을 먼저 넣는 편이 낫습니다."
+          : "지금 확보된 회복 리듬을 유지하는 편이 가장 효율적입니다.",
+    defaultSummary: `RNest Vital ${vitalLabel}, body ${bodyLabel}, mental ${mentalLabel}, 수면 부채 ${debtLabel}입니다.`,
+    defaultAction:
+      statusLabel === "회복 우선"
+        ? "이번 주는 추가 일정보다 수면 부채를 덜어내고, 길게 쉬는 창 하나를 먼저 확보하는 편이 좋습니다."
+        : statusLabel === "주의"
+          ? "이번 주는 집중 시간이 길어지기 전에 짧은 회복 슬롯을 먼저 넣어 멘탈과 body 하강폭을 줄이는 편이 좋습니다."
+          : "현재 회복 흐름을 유지하면서 쉬는 창 하나만 고정해도 충분히 안정적인 주를 보낼 수 있습니다.",
+  };
+}
+
+function buildSnapshot(context: GroupBriefContext): SocialGroupAIBriefSnapshot {
+  const tone = toneFromMetrics(context.metrics);
+  const heroCopy = buildHeroCopy(context, tone);
   return {
     week: {
       startISO: context.week.startISO,
@@ -536,131 +919,21 @@ function buildSnapshot(context: GroupBriefContext): SocialGroupAIBriefSnapshot {
     metrics: context.metrics,
     hero: {
       tone,
-      defaultHeadline: heroHeadline,
-      defaultSubheadline: heroSubheadline,
+      defaultHeadline: heroCopy.headline,
+      defaultSubheadline: heroCopy.subheadline,
     },
     findings: [
-      {
-        id: "energy",
-        tone,
-        factLabel: `${avgBatteryLabel} · ${avgSleepLabel}`,
-        factText: `기여 멤버 기준 최근 7일 평균 배터리는 ${avgBatteryLabel}, 평균 수면은 ${avgSleepLabel}입니다.`,
-        defaultTitle: "이번 주 기본 체력 흐름",
-        defaultBody: `최근 7일 평균 배터리는 ${avgBatteryLabel}, 평균 수면은 ${avgSleepLabel}입니다. 이번 주에는 기본 회복 리듬을 먼저 안정시키는 편이 좋습니다.`,
-      },
-      {
-        id: "risk",
-        tone: context.metrics.dangerCount > 0 ? "recover" : context.metrics.warningCount > 0 ? "watch" : "steady",
-        factLabel: riskLabel,
-        factText: `최근 7일 기준 번아웃 warning ${context.metrics.warningCount}명, danger ${context.metrics.dangerCount}명입니다.`,
-        defaultTitle: "주의가 필요한 구간",
-        defaultBody: `최근 7일 기준으로 ${riskLabel}입니다. 일정 강도를 올리기보다 낮은 부담 운영과 짧은 체크인이 더 잘 맞는 주입니다.`,
-      },
-      {
-        id: "schedule",
-        tone: context.commonOffDays.length > 0 ? "steady" : context.metrics.nightCountToday > 0 ? "watch" : "steady",
-        factLabel: scheduleLabel,
-        factText:
-          context.commonOffDays.length > 0
-            ? `이번 주 공개 일정 기준으로 함께 쉬는 창이 ${context.commonOffDays.length}일 있습니다.`
-            : `오늘 공개 일정 기준으로 OFF/VAC ${context.metrics.offCountToday}명, 야간 ${context.metrics.nightCountToday}명입니다.`,
-        defaultTitle: "같이 맞추기 좋은 일정 흐름",
-        defaultBody:
-          context.commonOffDays.length > 0
-            ? `이번 주 공개 일정 기준으로 함께 쉬는 창이 ${context.commonOffDays.length}일 있습니다. 짧게라도 같은 타이밍에 쉬는 창을 잡아두면 운영이 한결 편해집니다.`
-            : `오늘 공개 일정 기준으로 OFF/VAC ${context.metrics.offCountToday}명, 야간 ${context.metrics.nightCountToday}명입니다. 공개된 일정만 놓고 보면 리듬 차이가 있어 짧은 조율이 필요합니다.`,
-      },
+      buildEnergyFinding(context, tone),
+      buildRiskFinding(context),
+      buildScheduleFinding(context),
     ],
-    actions: [
-      {
-        id: "window",
-        reason: context.commonOffDays.length > 0 ? "공통 OFF가 있습니다." : "공통 OFF가 적습니다.",
-        factText:
-          context.commonOffDays.length > 0
-            ? `공개 일정 기준 공통 OFF ${context.commonOffDays.length}일을 먼저 확보해 보세요.`
-            : "이번 주는 공개 일정상 공통 OFF가 거의 없으니 짧은 회복 창을 먼저 정하는 편이 좋습니다.",
-        defaultTitle: context.commonOffDays.length > 0 ? "공통 쉬는 창 먼저 확보" : "짧은 회복 창부터 선점",
-        defaultBody:
-          context.commonOffDays.length > 0
-            ? "공개 일정 기준으로 겹치는 쉬는 날을 먼저 정하고, 그 시간엔 새 약속보다 회복 시간을 우선으로 잡아두세요."
-            : "이번 주는 길게 맞추기보다 15~30분이라도 같은 회복 창을 먼저 정해 두는 편이 부담이 적습니다.",
-      },
-      {
-        id: "load",
-        reason: context.metrics.dangerCount > 0 || context.metrics.warningCount > 0 ? "회복 우선 멤버가 있습니다." : "안정 흐름을 유지하는 주입니다.",
-        factText:
-          context.metrics.dangerCount > 0 || context.metrics.warningCount > 0
-            ? "부담이 몰리는 멤버가 있어 이번 주는 낮은 강도의 운영이 더 잘 맞습니다."
-            : "큰 경고 신호는 적으니 지금의 운영 강도를 유지하는 것이 좋습니다.",
-        defaultTitle: context.metrics.dangerCount > 0 || context.metrics.warningCount > 0 ? "낮은 부담 운영으로 조정" : "지금 리듬 유지",
-        defaultBody:
-          context.metrics.dangerCount > 0 || context.metrics.warningCount > 0
-            ? "회복 우선 멤버가 있는 주에는 추가 일정이나 과한 챌린지보다, 기본 회복 리듬을 지키는 편이 전체 흐름에 도움이 됩니다."
-            : "큰 변화를 주기보다 현재 리듬을 유지하고, 쉬는 창을 너무 잘게 쪼개지 않도록만 관리해 주세요.",
-      },
-      {
-        id: "sleep",
-        reason:
-          context.metrics.avgSleep != null && context.metrics.avgSleep < 6.5
-            ? "평균 수면이 짧습니다."
-            : context.metrics.nightCountToday > 0
-              ? "오늘 야간 근무가 있습니다."
-              : "야간 부담이 크지 않습니다.",
-        factText:
-          context.metrics.avgSleep != null && context.metrics.avgSleep < 6.5
-            ? `평균 수면이 ${context.metrics.avgSleep}시간 수준이라 수면 보존이 우선입니다.`
-            : context.metrics.nightCountToday > 0
-              ? `오늘 야간 근무가 ${context.metrics.nightCountToday}명 있어 야간 뒤 리듬 관리가 중요합니다.`
-              : "이번 주는 수면 리듬만 흐트러지지 않게 유지해도 충분합니다.",
-        defaultTitle:
-          context.metrics.avgSleep != null && context.metrics.avgSleep < 6.5
-            ? "수면 보존을 우선 순위로"
-            : context.metrics.nightCountToday > 0
-              ? "야간 뒤 리듬 정리"
-              : "기본 수면 리듬 유지",
-        defaultBody:
-          context.metrics.avgSleep != null && context.metrics.avgSleep < 6.5
-            ? "짧은 수면이 이어지는 주에는 약속과 카페인 컷오프를 보수적으로 잡고, 수면 시간을 먼저 보호하는 편이 좋습니다."
-            : context.metrics.nightCountToday > 0
-              ? "야간 다음날은 활동을 많이 늘리기보다 수면과 식사 타이밍을 단순하게 유지하는 쪽이 더 안정적입니다."
-              : "이번 주는 과한 보충 전략보다 취침 시간과 기상 흐름을 크게 흔들지 않는 것이 핵심입니다.",
-      },
-    ],
+    actions: buildActionPlans(context),
     windows: context.commonOffDays.map((dateISO) => ({
       dateISO,
       label: formatMonthDay(dateISO),
       reason: "공개 일정 기준으로 여러 멤버가 OFF/VAC인 날입니다.",
     })),
-    personalCards: context.cardCandidates.map((member) => {
-      const statusLabel = statusLabelForMember(member);
-      const avgBattery = member.vitals?.weeklyAvgBattery != null ? `${member.vitals.weeklyAvgBattery}점` : "기록 부족";
-      const avgSleep = member.vitals?.weeklyAvgSleep != null ? `${member.vitals.weeklyAvgSleep}시간` : "기록 부족";
-      return {
-        userId: member.userId,
-        nickname: member.nickname || "익명",
-        avatarEmoji: member.avatarEmoji || "🐧",
-        statusLabel,
-        summaryFact: `최근 7일 평균 배터리 ${avgBattery}, 평균 수면 ${avgSleep} 흐름입니다.`,
-        actionFact:
-          statusLabel === "회복 우선"
-            ? "짧은 일정도 줄이고 연속된 쉬는 창을 먼저 확보하는 편이 좋습니다."
-            : statusLabel === "주의"
-              ? "이번 주는 회복 시간을 먼저 고정하고 새 약속은 가볍게 잡는 편이 좋습니다."
-              : "지금 리듬을 유지하면서 쉬는 창을 너무 잘게 나누지 않는 편이 좋습니다.",
-        defaultSummary:
-          statusLabel === "회복 우선"
-            ? `최근 7일 평균 배터리 ${avgBattery}, 평균 수면 ${avgSleep} 흐름이라 이번 주는 회복 여백을 우선으로 두는 편이 좋습니다.`
-            : statusLabel === "주의"
-              ? `최근 7일 평균 배터리 ${avgBattery}, 평균 수면 ${avgSleep} 흐름이라 무리한 일정 추가는 피하는 편이 좋습니다.`
-              : `최근 7일 평균 배터리 ${avgBattery}, 평균 수면 ${avgSleep} 흐름으로 비교적 안정적인 주간 리듬을 유지하고 있습니다.`,
-        defaultAction:
-          statusLabel === "회복 우선"
-            ? "가능하면 연속 휴식 시간을 먼저 확보하고, 회복이 필요한 날엔 그룹 일정도 가볍게 조정해 보세요."
-            : statusLabel === "주의"
-              ? "짧은 회복 창을 먼저 확보하고, 체력 소모가 큰 일정은 하루에 몰지 않는 편이 좋습니다."
-              : "현재 회복 흐름을 유지하면서 쉬는 창 하나는 고정해 두는 편이 좋습니다.",
-      };
-    }),
+    personalCards: context.cardCandidates.map((member) => buildPersonalCardSnapshot(member)),
   };
 }
 
@@ -693,6 +966,10 @@ function buildDeterministicBriefPayload(context: GroupBriefContext): SocialGroup
       nickname: item.nickname,
       avatarEmoji: item.avatarEmoji,
       statusLabel: item.statusLabel,
+      vitalScore: item.vitalScore,
+      bodyBattery: item.bodyBattery,
+      mentalBattery: item.mentalBattery,
+      sleepDebtHours: item.sleepDebtHours,
       summary: item.defaultSummary,
       action: item.defaultAction,
     })),
@@ -724,9 +1001,9 @@ function buildLivePanel(context: GroupBriefContext): NonNullable<SocialGroupAIBr
     week: snapshot.week,
     updatedAt: new Date().toISOString(),
     metrics: buildMetricsPayload(context.metrics),
-    flowRows: snapshot.findings.map((item) => ({
+    flowRows: snapshot.findings.filter((item) => item.id !== "schedule").map((item) => ({
       id: item.id,
-      label: item.id === "energy" ? "에너지" : item.id === "risk" ? "리스크" : "일정",
+      label: item.id === "energy" ? "에너지" : "리스크",
       title: item.defaultTitle,
       summary: item.defaultBody,
       factLabel: item.factLabel,
@@ -739,6 +1016,10 @@ function buildLivePanel(context: GroupBriefContext): NonNullable<SocialGroupAIBr
       nickname: item.nickname,
       avatarEmoji: item.avatarEmoji,
       statusLabel: item.statusLabel,
+      vitalScore: item.vitalScore,
+      bodyBattery: item.bodyBattery,
+      mentalBattery: item.mentalBattery,
+      sleepDebtHours: item.sleepDebtHours,
       summary: item.defaultSummary,
       action: item.defaultAction,
     })),

@@ -315,6 +315,36 @@ function StepItem({
   );
 }
 
+function compactMetricValue(value: number | null, suffix = "") {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${value}${suffix}`;
+}
+
+function CompactMetricCell({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "blue" | "rose";
+}) {
+  return (
+    <div
+      className={
+        tone === "blue"
+          ? "rounded-[18px] bg-[rgba(0,122,255,0.08)] px-3 py-3"
+          : tone === "rose"
+            ? "rounded-[18px] bg-[rgba(232,116,133,0.10)] px-3 py-3"
+            : "rounded-[18px] bg-ios-bg px-3 py-3"
+      }
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ios-muted">{label}</p>
+      <p className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-ios-text tabular-nums">{value}</p>
+    </div>
+  );
+}
+
 function PersonalBandCard({
   cards,
   pendingCard,
@@ -328,7 +358,7 @@ function PersonalBandCard({
         <div>
           <p className="text-[14px] font-semibold text-ios-text">멤버 상태 밴드</p>
           <p className="mt-1 text-[11.5px] leading-5 text-ios-muted">
-            opt-in 멤버만 표시되고, 수치 상세는 드러내지 않아요.
+            opt-in 멤버의 최신 RNest vital, body, mental, 수면 부채만 compact하게 표시합니다.
           </p>
         </div>
         <Activity className="mt-0.5 h-4 w-4 text-ios-muted" />
@@ -344,7 +374,7 @@ function PersonalBandCard({
             {cards.map((item) => (
               <div
                 key={item.userId}
-                className="w-[238px] shrink-0 snap-start rounded-[26px] bg-white px-4 py-4 shadow-[0_16px_36px_rgba(123,111,208,0.10)]"
+                className="w-[252px] shrink-0 snap-start rounded-[26px] bg-white px-4 py-4 shadow-[0_16px_36px_rgba(123,111,208,0.10)]"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-[22px]">{item.avatarEmoji || "🐧"}</span>
@@ -361,8 +391,20 @@ function PersonalBandCard({
                     </div>
                   </div>
                 </div>
-                <p className="mt-3 text-[11.5px] leading-5 text-ios-muted">{item.summary}</p>
-                <p className="mt-3 text-[11.5px] font-medium leading-5 text-ios-text">{item.action}</p>
+                <div className="mt-3 rounded-[20px] bg-[linear-gradient(180deg,rgba(0,122,255,0.10),rgba(255,255,255,0.98))] px-3 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ios-muted">RNest Vital</p>
+                  <div className="mt-1 flex items-end justify-between gap-3">
+                    <p className="text-[30px] font-bold tracking-[-0.04em] text-ios-text tabular-nums">
+                      {compactMetricValue(item.vitalScore)}
+                    </p>
+                    <span className="text-[11px] font-semibold text-ios-muted">{item.statusLabel}</span>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <CompactMetricCell label="Body" value={compactMetricValue(item.bodyBattery)} tone="blue" />
+                  <CompactMetricCell label="Mental" value={compactMetricValue(item.mentalBattery)} tone="rose" />
+                  <CompactMetricCell label="수면부채" value={compactMetricValue(item.sleepDebtHours, "h")} />
+                </div>
               </div>
             ))}
           </div>
@@ -795,7 +837,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
             <div>
               <p className="text-[14px] font-semibold text-ios-text">주간 흐름 보드</p>
               <p className="mt-1 text-[11.5px] leading-5 text-ios-muted">
-                숫자와 리스크를 한 장으로 묶어 이번 주 흐름을 바로 읽을 수 있게 정리했습니다.
+                이번 주 에너지와 리스크만 남겨 핵심 변화가 바로 들어오도록 정리했습니다.
               </p>
             </div>
             <BatteryMedium className="mt-0.5 h-4 w-4 text-ios-muted" />
