@@ -23,6 +23,7 @@ import type {
 
 const SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION = "2026-04-04.social-group-brief.v1";
 const SOCIAL_GROUP_AI_BRIEF_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const MIN_GROUP_AI_BRIEF_CONTRIBUTORS = 3;
 
 type SocialGroupAIBriefRow = {
   group_id: number;
@@ -185,6 +186,43 @@ function hasRenderableBrief(payload: SocialGroupAIBriefPayload | null | undefine
       payload.findings.length === 3 &&
       payload.actions.length === 3
   );
+}
+
+function hasMinimumContributorCount(context: GroupBriefContext | null | undefined) {
+  return (context?.metrics.contributorCount ?? 0) >= MIN_GROUP_AI_BRIEF_CONTRIBUTORS;
+}
+
+function shouldTreatInsufficientDataRowAsObsolete(
+  row: SocialGroupAIBriefRow | null | undefined,
+  context: GroupBriefContext | null | undefined
+) {
+  return row?.status === "insufficient_data" && hasMinimumContributorCount(context);
+}
+
+function shouldBypassCooldownForCurrentContext(
+  row: SocialGroupAIBriefRow | null | undefined,
+  context: GroupBriefContext | null | undefined
+) {
+  return shouldTreatInsufficientDataRowAsObsolete(row, context);
+}
+
+function shouldRegenerateRowOnRead(
+  row: SocialGroupAIBriefRow | null | undefined,
+  context: GroupBriefContext | null | undefined
+) {
+  if (!hasMinimumContributorCount(context)) return false;
+  if (!row) return true;
+  if (row.status === "insufficient_data") return true;
+  if (row.status === "ready") return !hasRenderableBrief(row.payload);
+  if (row.status === "failed") return !hasRenderableBrief(row.payload);
+  return false;
+}
+
+function canSkipWeeklyRegeneration(row: Pick<SocialGroupAIBriefRow, "status" | "payload"> | null | undefined) {
+  if (!row) return false;
+  if (row.status === "ready") return hasRenderableBrief(row.payload);
+  if (row.status === "failed") return hasRenderableBrief(row.payload);
+  return false;
 }
 
 function statusLabelForMember(member: BriefMemberContext) {
@@ -759,7 +797,7 @@ export async function generateGroupAIBriefArtifact(args: {
   const tone = toneFromMetrics(context.metrics);
   const basePayload = buildBasePayload({ week: context.week, metrics: context.metrics, tone });
 
-  if (context.metrics.contributorCount < 3) {
+  if (context.metrics.contributorCount < MIN_GROUP_AI_BRIEF_CONTRIBUTORS) {
     return buildRow({
       groupId: args.groupId,
       context,
@@ -865,11 +903,13 @@ function buildResponse(args: {
   context: GroupBriefContext | null;
 }): SocialGroupAIBriefResponse {
   const cooldownUntil = args.row?.cooldown_until ? Date.parse(args.row.cooldown_until) : null;
-  const canRefresh = args.viewer.hasEntitlement && (!cooldownUntil || cooldownUntil <= Date.now());
+  const canRefresh =
+    args.viewer.hasEntitlement &&
+    (shouldBypassCooldownForCurrentContext(args.row, args.context) || !cooldownUntil || cooldownUntil <= Date.now());
   const eligibility = args.context
     ? {
         memberCount: args.context.metrics.memberCount,
-        requiredContributorCount: 3,
+        requiredContributorCount: MIN_GROUP_AI_BRIEF_CONTRIBUTORS,
         contributorCount: args.context.metrics.contributorCount,
         healthShareCount: args.context.metrics.healthShareCount,
         consentCount: args.context.metrics.consentCount,
@@ -894,7 +934,7 @@ function buildResponse(args: {
     };
   }
 
-  if (args.context && args.context.metrics.contributorCount < 3) {
+  if (args.context && !hasMinimumContributorCount(args.context)) {
     return {
       state: "insufficient_data",
       generatedAt: args.row?.generated_at ?? null,
@@ -915,6 +955,23 @@ function buildResponse(args: {
     return {
       state: "failed",
       generatedAt: null,
+      stale: false,
+      viewer: {
+        hasEntitlement: true,
+        canRefresh,
+        healthShareEnabled: args.viewer.healthShareEnabled,
+        personalCardOptIn: args.viewer.personalCardOptIn,
+      },
+      eligibility,
+      brief: null,
+      errorCode: "group_ai_brief_missing",
+    };
+  }
+
+  if (shouldTreatInsufficientDataRowAsObsolete(args.row, args.context)) {
+    return {
+      state: "failed",
+      generatedAt: args.row.generated_at,
       stale: false,
       viewer: {
         hasEntitlement: true,
@@ -975,6 +1032,23 @@ function buildResponse(args: {
       eligibility,
       brief: null,
       errorCode: "group_ai_brief_generation_failed",
+    };
+  }
+
+  if (!hasRenderableBrief(args.row.payload)) {
+    return {
+      state: "failed",
+      generatedAt: args.row.generated_at,
+      stale: false,
+      viewer: {
+        hasEntitlement: true,
+        canRefresh,
+        healthShareEnabled: args.viewer.healthShareEnabled,
+        personalCardOptIn: args.viewer.personalCardOptIn,
+      },
+      eligibility,
+      brief: null,
+      errorCode: "group_ai_brief_missing",
     };
   }
 
@@ -1053,6 +1127,27 @@ export async function getCurrentGroupAIBrief(args: {
       );
     }
   }
+  if (viewer.hasEntitlement && context && shouldRegenerateRowOnRead(row, context)) {
+    try {
+      const generated = await generateGroupAIBriefArtifact({
+        admin: args.admin,
+        groupId: args.groupId,
+        generatorType: "cron",
+        subscriptionCache,
+        existingRow: row,
+      });
+      if (generated) {
+        await upsertBriefRow(args.admin, generated);
+        row = generated;
+      }
+    } catch (error) {
+      console.error(
+        "[SocialGroupAIBrief] read-time regeneration failed group=%d err=%s",
+        args.groupId,
+        String((error as any)?.message ?? error)
+      );
+    }
+  }
   return buildResponse({ row, viewer, context });
 }
 
@@ -1076,7 +1171,16 @@ export async function refreshCurrentGroupAIBrief(args: {
 
   const week = getCurrentWeekWindow();
   const existingRow = await readBriefRow(args.admin, args.groupId, week.startISO);
-  if (existingRow?.cooldown_until && Date.parse(existingRow.cooldown_until) > Date.now()) {
+  const currentContext = await loadGroupBriefContext({
+    admin: args.admin,
+    groupId: args.groupId,
+    subscriptionCache,
+  });
+  if (
+    existingRow?.cooldown_until &&
+    Date.parse(existingRow.cooldown_until) > Date.now() &&
+    !shouldBypassCooldownForCurrentContext(existingRow, currentContext)
+  ) {
     const error = new Error("group_ai_brief_refresh_cooldown");
     (error as any).code = "group_ai_brief_refresh_cooldown";
     throw error;
@@ -1096,12 +1200,7 @@ export async function refreshCurrentGroupAIBrief(args: {
   }
   await upsertBriefRow(args.admin, generated);
 
-  const context = await loadGroupBriefContext({
-    admin: args.admin,
-    groupId: args.groupId,
-    subscriptionCache,
-  });
-  return buildResponse({ row: generated, viewer, context });
+  return buildResponse({ row: generated, viewer, context: currentContext });
 }
 
 export async function readGroupAIBriefViewerPrefs(args: {
@@ -1167,7 +1266,7 @@ export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
   const [{ data: existingRows, error: existingErr }, { data: memberRows, error: memberErr }] = await Promise.all([
     (args.admin as any)
       .from("rnest_social_group_ai_briefs")
-      .select("group_id")
+      .select("group_id, status, payload")
       .eq("week_start_iso", week.startISO),
     (args.admin as any)
       .from("rnest_social_group_members")
@@ -1177,14 +1276,20 @@ export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
   if (existingErr && !isSocialGroupAIBriefSchemaUnavailableError(existingErr)) throw existingErr;
   if (memberErr) throw memberErr;
 
-  const existingGroupIds = new Set<number>(
-    ((existingErr ? [] : existingRows) ?? []).map((row: any) => Number(row.group_id)).filter((value: number) => Number.isFinite(value))
-  );
+  const existingRowMap = new Map<number, Pick<SocialGroupAIBriefRow, "status" | "payload">>();
+  for (const row of (existingErr ? [] : existingRows) ?? []) {
+    const groupId = Number((row as any).group_id);
+    if (!Number.isFinite(groupId)) continue;
+    existingRowMap.set(groupId, {
+      status: (row as any).status,
+      payload: ((row as any).payload ?? null) as SocialGroupAIBriefPayload | null,
+    });
+  }
   const candidateGroupIds: number[] = Array.from(
     new Set<number>(
       (memberRows ?? []).map((row: any) => Number(row.group_id)).filter((value: number) => Number.isFinite(value))
     )
-  ).filter((groupId: number) => !existingGroupIds.has(groupId));
+  ).filter((groupId: number) => !canSkipWeeklyRegeneration(existingRowMap.get(groupId) ?? null));
 
   let processedCount = 0;
   let skippedCount = 0;
