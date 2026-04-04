@@ -432,9 +432,14 @@ export function useAIRecoveryRouteEntry(args: RouteEntryArgs): RouteEntryState {
     return resources.recoverySummary.latestSlot ?? null;
   }, [args.dateISO, resources.recoverySummary?.dateISO, resources.recoverySummary?.latestSlot]);
   const preferredSlot = args.requestedSlot ?? summaryLatestSlot;
+  const preferredInitialData = useMemo(() => {
+    if (!preferredSlot) return null;
+    const key = buildSessionResourceKey(args.dateISO, preferredSlot);
+    return resources.sessions[key]?.data ?? null;
+  }, [args.dateISO, preferredSlot, resources.sessions]);
   const [state, setState] = useState<RouteEntryState>(() => ({
     slot: preferredSlot,
-    initialData: null,
+    initialData: preferredInitialData,
     loading: !preferredSlot && Boolean(accountKey),
     error: null,
   }));
@@ -442,12 +447,17 @@ export function useAIRecoveryRouteEntry(args: RouteEntryArgs): RouteEntryState {
   useEffect(() => {
     if (preferredSlot) {
       setState((current) => {
-        if (current.slot === preferredSlot && !current.loading && current.error == null && current.initialData == null) {
+        if (
+          current.slot === preferredSlot &&
+          !current.loading &&
+          current.error == null &&
+          current.initialData === preferredInitialData
+        ) {
           return current;
         }
         return {
           slot: preferredSlot,
-          initialData: null,
+          initialData: preferredInitialData,
           loading: false,
           error: null,
         };
@@ -513,7 +523,7 @@ export function useAIRecoveryRouteEntry(args: RouteEntryArgs): RouteEntryState {
     return () => {
       cancelled = true;
     };
-  }, [accountKey, args.dateISO, preferredSlot, stateRevision]);
+  }, [accountKey, args.dateISO, preferredInitialData, preferredSlot, stateRevision]);
 
   return state;
 }
@@ -543,11 +553,22 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }),
     [args.dateISO, args.enabled, args.slot, initialSourceData]
   );
+
+  function buildAutoOrdersKey(value: SessionData | null) {
+    const generatedAt = value?.session?.generatedAt;
+    if (!value?.session?.brief || value.session.orders || !generatedAt) return null;
+    if (value.session.status === "fallback" || value.session.openaiMeta?.fallbackReason) return null;
+    return `${accountKey ?? "guest"}:${value.dateISO}:${value.slot}:${generatedAt}`;
+  }
+
   const [data, setData] = useState<SessionData | null>(initialData);
   const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);
   const [savingOrders, setSavingOrders] = useState(false);
-  const [pendingAutoOrders, setPendingAutoOrders] = useState(false);
+  const [pendingAutoOrders, setPendingAutoOrders] = useState(() => {
+    const initialAutoOrdersKey = buildAutoOrdersKey(initialData);
+    return initialAutoOrdersKey ? getAutoOrdersRequestStatus(initialAutoOrdersKey) === "pending" : false;
+  });
   const [togglingCompletion, setTogglingCompletion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoRequestedRef = useRef(new Set<string>());
@@ -725,13 +746,6 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     } catch {
       return null;
     }
-  };
-
-  const buildAutoOrdersKey = (value: SessionData | null) => {
-    const generatedAt = value?.session?.generatedAt;
-    if (!value?.session?.brief || value.session.orders || !generatedAt) return null;
-    if (value.session.status === "fallback" || value.session.openaiMeta?.fallbackReason) return null;
-    return `${accountKey ?? "guest"}:${value.dateISO}:${value.slot}:${generatedAt}`;
   };
 
   const load = async (options?: { force?: boolean }) => {
@@ -1078,6 +1092,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     }
   }, [initialData, args.dateISO, args.slot]);
 
+  const pendingAutoOrdersKey = useMemo(
+    () => buildAutoOrdersKey(data),
+    [data, accountKey]
+  );
+
   useEffect(() => {
     if (!args.enabled) {
       setPendingAutoOrders(false);
@@ -1086,8 +1105,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
     const syncPendingAutoOrders = () => {
       const currentData = dataRef.current;
-      const autoOrdersKey = buildAutoOrdersKey(currentData);
-      const status = autoOrdersKey ? getAutoOrdersRequestStatus(autoOrdersKey) : null;
+      const status = pendingAutoOrdersKey ? getAutoOrdersRequestStatus(pendingAutoOrdersKey) : null;
       const shouldReloadCompletedOrders =
         status === "completed" &&
         Boolean(currentData?.session?.brief) &&
@@ -1114,7 +1132,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       unsubscribe();
       window.removeEventListener("storage", handleStorage);
     };
-  }, [args.enabled, args.dateISO, args.slot, accountKey]);
+  }, [args.enabled, args.dateISO, args.slot, accountKey, pendingAutoOrdersKey]);
 
   useEffect(() => {
     void load();
