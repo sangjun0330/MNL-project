@@ -14,6 +14,10 @@ import { useClientSyncSnapshot } from "@/lib/clientSyncStore";
 import { Button } from "@/components/ui/Button";
 import { SocialGroupAIBriefLockedCard } from "@/components/social/SocialGroupAIBriefLockedCard";
 import { SocialGroupAIBriefPersonalCardToggle } from "@/components/social/SocialGroupAIBriefPersonalCardToggle";
+import {
+  SocialAvatarStackButton,
+  SocialMemberPreviewSheet,
+} from "@/components/social/SocialMemberPreviewSheet";
 import { useSocialGroupAIBriefRealtimeRefresh } from "@/components/social/useSocialGroupAIBriefRealtimeRefresh";
 import type {
   SocialGroupAIBriefAction,
@@ -192,9 +196,11 @@ function buildWeekCells(startISO: string) {
 function MiniCalendarStrip({
   startISO,
   windows,
+  onSelectWindow,
 }: {
   startISO: string;
   windows: SocialGroupAIBriefWindow[];
+  onSelectWindow?: (window: SocialGroupAIBriefWindow) => void;
 }) {
   const highlighted = new Map(windows.map((item) => [item.dateISO, item]));
   const weekCells = buildWeekCells(startISO);
@@ -234,13 +240,20 @@ function MiniCalendarStrip({
               <p className="text-[10px] font-semibold text-ios-muted">{item.weekday}</p>
               <p className="mt-1 text-[12px] font-semibold text-ios-text">{item.dayLabel}</p>
               <div className="mt-2 flex justify-center">
-                <span
-                  className={
-                    highlightedWindow
-                      ? "h-2.5 w-2.5 rounded-full bg-[color:var(--rnest-accent)]"
-                      : "h-2.5 w-2.5 rounded-full bg-ios-sep"
-                  }
-                />
+                {highlightedWindow ? (
+                  highlightedWindow.members && highlightedWindow.members.length > 0 ? (
+                    <SocialAvatarStackButton
+                      members={highlightedWindow.members}
+                      onClick={onSelectWindow ? () => onSelectWindow(highlightedWindow) : undefined}
+                      size="sm"
+                      className="justify-center"
+                    />
+                  ) : (
+                    <span className="h-2.5 w-2.5 rounded-full bg-[color:var(--rnest-accent)]" />
+                  )
+                ) : (
+                  <span className="h-2.5 w-2.5 rounded-full bg-ios-sep" />
+                )}
               </div>
             </div>
           );
@@ -388,6 +401,11 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
   const [retrying, setRetrying] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [memberPreviewSheet, setMemberPreviewSheet] = useState<{
+    title: string;
+    subtitle?: string;
+    members: NonNullable<SocialGroupAIBriefWindow["members"]>;
+  } | null>(null);
   const [response, setResponse] = useState<SocialGroupAIBriefResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [optimisticCardMode, setOptimisticCardMode] = useState<"remove" | null>(null);
@@ -770,7 +788,17 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
             </div>
             <CalendarDays className="mt-0.5 h-4 w-4 text-ios-muted" />
           </div>
-          <MiniCalendarStrip startISO={live.week.startISO} windows={live.windows} />
+          <MiniCalendarStrip
+            startISO={live.week.startISO}
+            windows={live.windows}
+            onSelectWindow={(window) =>
+              setMemberPreviewSheet({
+                title: `${window.label} · 겹치는 멤버 ${window.members?.length ?? 0}명`,
+                subtitle: "공개 일정 기준으로 이 날 회복 창이 겹치는 멤버예요.",
+                members: window.members ?? [],
+              })
+            }
+          />
         </div>
 
         <div className="mt-4 rounded-[32px] bg-[linear-gradient(180deg,rgba(249,246,240,0.98),rgba(255,255,255,0.98))] px-5 py-5 shadow-apple">
@@ -798,6 +826,14 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
           />
         </div>
       </div>
+
+      <SocialMemberPreviewSheet
+        open={Boolean(memberPreviewSheet)}
+        onClose={() => setMemberPreviewSheet(null)}
+        title={memberPreviewSheet?.title ?? "멤버"}
+        subtitle={memberPreviewSheet?.subtitle}
+        members={memberPreviewSheet?.members ?? []}
+      />
     </div>
   );
 }

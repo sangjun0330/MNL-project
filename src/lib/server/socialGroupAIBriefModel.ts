@@ -3,6 +3,7 @@ import type {
   SocialGroupAIBriefFlowRow,
   SocialGroupAIBriefPersonalCard,
   SocialGroupAIBriefTone,
+  SocialMemberPreview,
 } from "@/types/social";
 
 export type SocialGroupAIBriefSnapshot = {
@@ -50,6 +51,7 @@ export type SocialGroupAIBriefSnapshot = {
     dateISO: string;
     label: string;
     reason: string;
+    members: SocialMemberPreview[];
   }>;
   personalCards: Array<{
     userId: string;

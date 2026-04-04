@@ -259,10 +259,17 @@ export type SocialGroupAIBriefAction = {
   reason: string;
 };
 
+export type SocialMemberPreview = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+};
+
 export type SocialGroupAIBriefWindow = {
   dateISO: string;
   label: string;
   reason: string;
+  members?: SocialMemberPreview[];
 };
 
 export type SocialGroupAIBriefPersonalCard = {

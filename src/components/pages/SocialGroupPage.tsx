@@ -18,6 +18,10 @@ import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 import { SocialGroupAIBriefTab } from "@/components/social/SocialGroupAIBriefTab";
 import { SocialGroupChallengesTab } from "@/components/social/SocialGroupChallengesTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
+import {
+  SocialAvatarStackButton,
+  SocialMemberPreviewSheet,
+} from "@/components/social/SocialMemberPreviewSheet";
 import { SocialSelectableCommonOffCard } from "@/components/social/SocialSelectableCommonOffCard";
 import {
   SocialOverlapSelectorSheet,
@@ -36,6 +40,7 @@ import type {
   SocialGroupBoard,
   SocialGroupJoinMode,
   SocialGroupRole,
+  SocialMemberPreview,
 } from "@/types/social";
 import {
   computeSelectedCommonOffDays,
@@ -190,17 +195,15 @@ function OverviewMetricCard({
   value,
   hint,
   memberPreview,
+  onMemberPreviewClick,
   className,
 }: {
   icon: ReactNode;
   label: string;
   value: number;
   hint: string;
-  memberPreview?: Array<{
-    userId: string;
-    nickname: string;
-    avatarEmoji: string;
-  }>;
+  memberPreview?: SocialMemberPreview[];
+  onMemberPreviewClick?: () => void;
   className?: string;
 }) {
   return (
@@ -214,46 +217,12 @@ function OverviewMetricCard({
       <div className="mt-3 flex items-end justify-between gap-3">
         <p className="text-[26px] font-bold tracking-[-0.03em] text-ios-text tabular-nums">{value}</p>
         <div className="flex flex-col items-end gap-2">
-          {memberPreview && memberPreview.length > 0 ? <MemberAvatarStack members={memberPreview} /> : null}
+          {memberPreview && memberPreview.length > 0 ? (
+            <SocialAvatarStackButton members={memberPreview} onClick={onMemberPreviewClick} />
+          ) : null}
           <p className="text-right text-[10.5px] leading-4 text-ios-muted">{hint}</p>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MemberAvatarStack({
-  members,
-}: {
-  members: Array<{
-    userId: string;
-    nickname: string;
-    avatarEmoji: string;
-  }>;
-}) {
-  const visibleMembers = members.slice(0, 3);
-  const extraCount = Math.max(0, members.length - visibleMembers.length);
-
-  return (
-    <div className="flex items-center" aria-label={members.map((member) => member.nickname || "익명").join(", ")}>
-      {visibleMembers.map((member, index) => (
-        <span
-          key={member.userId}
-          className={cn(
-            "relative inline-flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,rgba(247,244,255,0.98),rgba(255,255,255,0.98))] text-[15px] shadow-sm",
-            index > 0 && "-ml-2.5"
-          )}
-          style={{ zIndex: visibleMembers.length - index }}
-          title={member.nickname || "익명"}
-        >
-          {member.avatarEmoji || "🐧"}
-        </span>
-      ))}
-      {extraCount > 0 ? (
-        <span className="-ml-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-ios-bg text-[10px] font-semibold text-ios-muted shadow-sm">
-          +{extraCount}
-        </span>
-      ) : null}
     </div>
   );
 }
@@ -292,6 +261,11 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [memberSheetOpen, setMemberSheetOpen] = useState(false);
+  const [memberPreviewSheet, setMemberPreviewSheet] = useState<{
+    title: string;
+    subtitle?: string;
+    members: SocialMemberPreview[];
+  } | null>(null);
   const [memberOverlapSelectorOpen, setMemberOverlapSelectorOpen] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [settingsName, setSettingsName] = useState("");
@@ -1084,6 +1058,13 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                   value={todayOffCount}
                   hint="오늘 같이 쉬는 멤버"
                   memberPreview={todayOffMembers}
+                  onMemberPreviewClick={() =>
+                    setMemberPreviewSheet({
+                      title: `오늘 OFF/VAC ${todayOffMembers.length}명`,
+                      subtitle: "오늘 공개 일정상 OFF/VAC로 보이는 멤버예요.",
+                      members: todayOffMembers,
+                    })
+                  }
                   className="col-span-2 sm:col-span-1"
                 />
                 <OverviewMetricCard
@@ -1092,6 +1073,13 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                   value={todayNightCount}
                   hint="오늘 야간 근무 중"
                   memberPreview={todayNightMembers}
+                  onMemberPreviewClick={() =>
+                    setMemberPreviewSheet({
+                      title: `오늘 야간 ${todayNightMembers.length}명`,
+                      subtitle: "오늘 공개 일정상 야간 근무로 보이는 멤버예요.",
+                      members: todayNightMembers,
+                    })
+                  }
                 />
                 <OverviewMetricCard
                   icon={<SocialGroupIcon className="h-[17px] w-[17px]" />}
@@ -1605,6 +1593,14 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       )}
 
       {/* ── 멤버 바텀시트 ─────────────────────────────────── */}
+      <SocialMemberPreviewSheet
+        open={Boolean(memberPreviewSheet)}
+        onClose={() => setMemberPreviewSheet(null)}
+        title={memberPreviewSheet?.title ?? "멤버"}
+        subtitle={memberPreviewSheet?.subtitle}
+        members={memberPreviewSheet?.members ?? []}
+      />
+
       {memberSheetOpen && board && (
         <BottomSheet
           open={memberSheetOpen}

@@ -21,6 +21,7 @@ import type {
   SocialGroupAIBriefPersonalCard,
   SocialGroupAIBriefResponse,
   SocialGroupAIBriefTone,
+  SocialMemberPreview,
 } from "@/types/social";
 
 const SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION = "2026-04-04.social-group-brief.v1";
@@ -75,6 +76,10 @@ type GroupBriefContext = {
   members: BriefMemberContext[];
   contributors: BriefMemberContext[];
   cardCandidates: BriefMemberContext[];
+  sharedWindows: Array<{
+    dateISO: string;
+    members: SocialMemberPreview[];
+  }>;
   commonOffDays: string[];
   todayNightCount: number;
   todayOffCount: number;
@@ -389,7 +394,6 @@ async function loadGroupBriefContext(args: {
   const consentMap = await readSocialGroupAIBriefConsentMap(args.admin, memberIds);
 
   const week = getCurrentWeekWindow();
-  const visibleOffSets: Set<string>[] = [];
 
   const members: BriefMemberContext[] = (memberRows ?? []).map((row: any) => {
     const userId = String(row.user_id);
@@ -408,13 +412,6 @@ async function loadGroupBriefContext(args: {
       if (pref.scheduleVisibility === "off_only" && !isOffOrVac(shift)) continue;
       visibleWeekSchedule[date] = shift;
     }
-
-    const offSet = new Set(
-      Object.entries(visibleWeekSchedule)
-        .filter(([, shift]) => isOffOrVac(shift))
-        .map(([date]) => date)
-    );
-    if (offSet.size > 0) visibleOffSets.push(offSet);
 
     const rawVitals = computeMemberWeeklyVitals(payload, week.todayISO);
     const vitals = pref.healthVisibility === "full" ? rawVitals : null;
@@ -442,10 +439,24 @@ async function loadGroupBriefContext(args: {
   );
   const allCardEligibleMembers = contributors.filter((member) => member.personalCardOptIn).sort(compareCardCandidates);
   const cardCandidates = allCardEligibleMembers.slice(0, 5);
-  const commonOffDays =
-    visibleOffSets.length >= 2
-      ? Array.from(visibleOffSets[0]).filter((date) => visibleOffSets.every((set) => set.has(date))).sort().slice(0, 3)
-      : [];
+  const sharedWindows: GroupBriefContext["sharedWindows"] = Array.from({ length: 7 }, (_, offset) => {
+    const dateISO = toISODate(addDays(fromISODate(week.startISO), offset));
+    const overlapMembers = members
+      .filter((member) => isOffOrVac(member.visibleWeekSchedule[dateISO]))
+      .map((member) => ({
+        userId: member.userId,
+        nickname: member.nickname,
+        avatarEmoji: member.avatarEmoji,
+      }));
+    if (overlapMembers.length < 2) return [];
+    return [
+      {
+        dateISO,
+        members: overlapMembers,
+      },
+    ];
+  }).flat();
+  const commonOffDays = sharedWindows.map((item) => item.dateISO);
 
   const metrics = {
     memberCount: members.length,
@@ -472,6 +483,7 @@ async function loadGroupBriefContext(args: {
     members,
     contributors,
     cardCandidates,
+    sharedWindows,
     commonOffDays,
     todayNightCount: metrics.nightCountToday,
     todayOffCount: metrics.offCountToday,
@@ -576,25 +588,25 @@ function buildHeroCopy(context: GroupBriefContext, tone: SocialGroupAIBriefTone)
   if (batteryLow && commonOffCount > 0) {
     return {
       headline: "이번 주는 체력 소모가 보이지만 회복 창을 활용할 여지는 있어요.",
-      subheadline: `평균 body ${avgBatteryLabel} 흐름이지만 공통 OFF ${commonOffCount}일이 보여 쉬는 창만 잘 고정해도 부담을 줄일 수 있습니다.`,
+      subheadline: `평균 body ${avgBatteryLabel} 흐름이지만 겹치는 회복 창이 ${commonOffCount}일 보여 쉬는 타이밍만 잘 맞춰도 부담을 줄일 수 있습니다.`,
     };
   }
   if (warningCount > 0 && noSharedWindow) {
     return {
       headline: "큰 위험 신호는 아니지만 리듬 차이를 방치하면 피로가 커질 수 있어요.",
-      subheadline: `주의 ${warningCount}명 흐름에 공통 OFF가 없어, 길게 맞추기보다 짧은 회복 슬롯을 먼저 맞추는 편이 안전합니다.`,
+      subheadline: `주의 ${warningCount}명 흐름에 겹치는 회복 창이 적어, 길게 맞추기보다 짧은 회복 슬롯을 먼저 맞추는 편이 안전합니다.`,
     };
   }
   if (tone === "steady" && strongSharedWindow) {
     return {
       headline: "이번 주는 안정 흐름 위에 같이 쉬는 창도 꽤 잡혀 있어요.",
-      subheadline: `평균 body ${avgBatteryLabel}, 수면 ${avgSleepLabel}, 공통 OFF ${commonOffCount}일 흐름이라 지금 리듬을 유지하면서 회복 슬롯만 고정하면 충분합니다.`,
+      subheadline: `평균 body ${avgBatteryLabel}, 수면 ${avgSleepLabel}, 겹치는 회복 창 ${commonOffCount}일 흐름이라 지금 리듬을 유지하면서 회복 슬롯만 고정하면 충분합니다.`,
     };
   }
   if (tone === "steady" && noSharedWindow) {
     return {
       headline: "전체 흐름은 안정적이지만 쉬는 타이밍은 조금 흩어져 있어요.",
-      subheadline: `평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}로 크게 흔들리진 않지만 공통 OFF가 없어 짧은 회복 창을 먼저 잡아 두는 편이 좋습니다.`,
+      subheadline: `평균 body ${avgBatteryLabel}, mental ${avgMentalLabel}로 크게 흔들리진 않지만 겹치는 회복 창이 적어 짧은 회복 창을 먼저 잡아 두는 편이 좋습니다.`,
     };
   }
   return {
@@ -720,7 +732,7 @@ function buildRiskFinding(context: GroupBriefContext): SocialGroupAIBriefSnapsho
 function buildScheduleFinding(context: GroupBriefContext): SocialGroupAIBriefSnapshot["findings"][number] {
   const scheduleLabel =
     context.commonOffDays.length > 0
-      ? `공통 OFF ${context.commonOffDays.length}일`
+      ? `겹치는 회복 창 ${context.commonOffDays.length}일`
       : `오늘 OFF ${context.metrics.offCountToday}명 · 야간 ${context.metrics.nightCountToday}명`;
   return {
     id: "schedule",
@@ -728,12 +740,12 @@ function buildScheduleFinding(context: GroupBriefContext): SocialGroupAIBriefSna
     factLabel: scheduleLabel,
     factText:
       context.commonOffDays.length > 0
-        ? `이번 주 공개 일정 기준으로 함께 쉬는 창이 ${context.commonOffDays.length}일 있습니다.`
+        ? `이번 주 공개 일정 기준으로 둘 이상 겹치는 회복 창이 ${context.commonOffDays.length}일 있습니다.`
         : `오늘 공개 일정 기준으로 OFF/VAC ${context.metrics.offCountToday}명, 야간 ${context.metrics.nightCountToday}명입니다.`,
     defaultTitle: context.commonOffDays.length > 0 ? "같이 맞추기 좋은 회복 창이 보이는 흐름" : "리듬 차이가 있어 짧은 조율이 필요한 흐름",
     defaultBody:
       context.commonOffDays.length > 0
-        ? `이번 주 공개 일정 기준으로 함께 쉬는 창이 ${context.commonOffDays.length}일 있습니다. 긴 계획보다 같은 타이밍에 쉬는 창을 먼저 고정하는 편이 더 효과적입니다.`
+        ? `이번 주 공개 일정 기준으로 둘 이상 겹치는 회복 창이 ${context.commonOffDays.length}일 있습니다. 긴 계획보다 같은 타이밍에 쉬는 창을 먼저 고정하는 편이 더 효과적입니다.`
         : `오늘 공개 일정 기준으로 OFF/VAC ${context.metrics.offCountToday}명, 야간 ${context.metrics.nightCountToday}명입니다. 공개된 일정만 놓고 보면 리듬 차이가 있어 짧은 조율이 필요합니다.`,
   };
 }
@@ -818,16 +830,16 @@ function buildActionPlans(context: GroupBriefContext): SocialGroupAIBriefSnapsho
     push({
       id: "shared_window",
       priority: 20,
-      reason: `공통 OFF ${commonOffCount}일`,
-      factText: `이번 주는 공통 쉬는 창을 먼저 고정하는 편이 좋습니다.`,
-      defaultTitle: `공통 OFF ${commonOffCount}일에 회복 슬롯 고정`,
-      defaultBody: `공개 일정 기준으로 겹치는 쉬는 날이 ${commonOffCount}일 있습니다. 새로운 약속보다 회복성 일정 하나를 그 창에 먼저 올려 두는 편이 유지에 유리합니다.`,
+      reason: `겹치는 회복 창 ${commonOffCount}일`,
+      factText: `이번 주는 둘 이상 겹치는 회복 창을 먼저 고정하는 편이 좋습니다.`,
+      defaultTitle: `겹치는 회복 창 ${commonOffCount}일에 회복 슬롯 고정`,
+      defaultBody: `공개 일정 기준으로 둘 이상 겹치는 회복 창이 ${commonOffCount}일 있습니다. 새로운 약속보다 회복성 일정 하나를 그 창에 먼저 올려 두는 편이 유지에 유리합니다.`,
     });
   } else {
     push({
       id: "micro_window",
       priority: 22,
-      reason: "공통 OFF가 거의 없습니다.",
+      reason: "겹치는 회복 창이 거의 없습니다.",
       factText: `이번 주는 짧은 공통 회복 창부터 먼저 정하는 편이 좋습니다.`,
       defaultTitle: "15~30분 공통 회복 슬롯부터 맞추기",
       defaultBody: "길게 맞추기 어려운 주라면 15~30분이라도 겹치는 쉬는 시간을 먼저 확보해 두세요. 짧은 회복 슬롯 하나가 전체 흐름을 훨씬 안정적으로 만듭니다.",
@@ -848,12 +860,12 @@ function buildActionPlans(context: GroupBriefContext): SocialGroupAIBriefSnapsho
   push({
     id: "anchor_window",
     priority: 32,
-    reason: commonOffCount > 0 ? `공통 OFF ${commonOffCount}일` : "짧은 회복 슬롯 유지",
+    reason: commonOffCount > 0 ? `겹치는 회복 창 ${commonOffCount}일` : "짧은 회복 슬롯 유지",
     factText: "하루 회복 앵커 하나를 먼저 고정하는 편이 좋습니다.",
     defaultTitle: "하루 회복 앵커 하나는 매일 고정",
     defaultBody:
       commonOffCount > 0
-        ? "공통으로 쉬는 날이 있더라도 각자 회복 타이밍 하나는 비슷한 시간대로 고정해 두는 편이 주간 리듬을 덜 흔들리게 만듭니다."
+        ? "겹치는 회복 창이 있더라도 각자 회복 타이밍 하나는 비슷한 시간대로 고정해 두는 편이 주간 리듬을 덜 흔들리게 만듭니다."
         : "같이 쉬는 날이 적더라도, 하루에 한 번은 겹치는 회복 슬롯을 정해 두면 짧은 회복이 훨씬 안정적으로 쌓입니다.",
   });
 
@@ -928,10 +940,11 @@ function buildSnapshot(context: GroupBriefContext): SocialGroupAIBriefSnapshot {
       buildScheduleFinding(context),
     ],
     actions: buildActionPlans(context),
-    windows: context.commonOffDays.map((dateISO) => ({
-      dateISO,
-      label: formatMonthDay(dateISO),
-      reason: "공개 일정 기준으로 여러 멤버가 OFF/VAC인 날입니다.",
+    windows: context.sharedWindows.map((item) => ({
+      dateISO: item.dateISO,
+      label: formatMonthDay(item.dateISO),
+      reason: `공개 일정 기준으로 ${item.members.length}명이 OFF/VAC인 날입니다.`,
+      members: item.members,
     })),
     personalCards: context.cardCandidates.map((member) => buildPersonalCardSnapshot(member)),
   };

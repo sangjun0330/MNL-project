@@ -433,6 +433,7 @@ function mergeStructuredContent(snapshot: SocialGroupAIBriefSnapshot, raw: any):
         dateISO: item.dateISO,
         label: clampText(next?.label, item.label, 24),
         reason: clampText(next?.reason, item.reason, 90),
+        members: item.members,
       };
     }),
     personalCards: snapshot.personalCards.map((item) => {
