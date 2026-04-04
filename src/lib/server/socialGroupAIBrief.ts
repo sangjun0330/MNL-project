@@ -414,6 +414,19 @@ async function loadGroupBriefContext(args: {
   };
 }
 
+function isMissingTableError(error: any): boolean {
+  const code = String(error?.code ?? "").toLowerCase();
+  const message = String(error?.message ?? "").toLowerCase();
+  return (
+    code === "42p01" ||
+    code === "pgrst204" ||
+    code === "pgrst205" ||
+    message.includes("does not exist") ||
+    message.includes("could not find the table") ||
+    message.includes("schema cache")
+  );
+}
+
 async function readBriefRow(admin: any, groupId: number, weekStartISO: string): Promise<SocialGroupAIBriefRow | null> {
   const { data, error } = await (admin as any)
     .from("rnest_social_group_ai_briefs")
@@ -421,7 +434,10 @@ async function readBriefRow(admin: any, groupId: number, weekStartISO: string): 
     .eq("group_id", groupId)
     .eq("week_start_iso", weekStartISO)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw error;
+  }
   return (data ?? null) as SocialGroupAIBriefRow | null;
 }
 
@@ -946,11 +962,22 @@ export async function getCurrentGroupAIBrief(args: {
     groupId: args.groupId,
     userId: args.userId,
     subscriptionCache,
-    strictSubscription: true,
   });
   const week = getCurrentWeekWindow();
-  const row = await readBriefRow(args.admin, args.groupId, week.startISO);
-  const context = viewer.hasEntitlement ? await loadGroupBriefContext({ admin: args.admin, groupId: args.groupId, subscriptionCache }) : null;
+  let row: SocialGroupAIBriefRow | null = null;
+  try {
+    row = await readBriefRow(args.admin, args.groupId, week.startISO);
+  } catch (error) {
+    console.error("[SocialGroupAIBrief] readBriefRow failed group=%d err=%s", args.groupId, String((error as any)?.message ?? error));
+  }
+  let context: GroupBriefContext | null = null;
+  if (viewer.hasEntitlement) {
+    try {
+      context = await loadGroupBriefContext({ admin: args.admin, groupId: args.groupId, subscriptionCache });
+    } catch (error) {
+      console.error("[SocialGroupAIBrief] loadGroupBriefContext failed group=%d err=%s", args.groupId, String((error as any)?.message ?? error));
+    }
+  }
   return buildResponse({ row, viewer, context });
 }
 
