@@ -15,6 +15,8 @@ import type {
   HealthVisibility,
   MemberWeeklyVitals,
   ScheduleVisibility,
+  SocialGroupAIBriefFlowRow,
+  SocialGroupAIBriefMetrics,
   SocialGroupAIBriefPayload,
   SocialGroupAIBriefPersonalCard,
   SocialGroupAIBriefResponse,
@@ -145,6 +147,20 @@ function toneFromMetrics(metrics: GroupBriefContext["metrics"]): SocialGroupAIBr
   return "steady";
 }
 
+function buildMetricsPayload(metrics: GroupBriefContext["metrics"]): SocialGroupAIBriefMetrics {
+  return {
+    contributorCount: metrics.contributorCount,
+    optInCardCount: metrics.optInCardCount,
+    avgBattery: metrics.avgBattery,
+    avgSleep: metrics.avgSleep,
+    warningCount: metrics.warningCount,
+    dangerCount: metrics.dangerCount,
+    commonOffCount: metrics.commonOffCount,
+    nightCountToday: metrics.nightCountToday,
+    offCountToday: metrics.offCountToday,
+  };
+}
+
 function buildBasePayload(input: {
   week: GroupBriefContext["week"];
   metrics: GroupBriefContext["metrics"];
@@ -161,17 +177,7 @@ function buildBasePayload(input: {
       subheadline: "브리프를 생성하면 이번 주 회복 패턴을 한눈에 볼 수 있어요.",
       tone: input.tone,
     },
-    metrics: {
-      contributorCount: input.metrics.contributorCount,
-      optInCardCount: input.metrics.optInCardCount,
-      avgBattery: input.metrics.avgBattery,
-      avgSleep: input.metrics.avgSleep,
-      warningCount: input.metrics.warningCount,
-      dangerCount: input.metrics.dangerCount,
-      commonOffCount: input.metrics.commonOffCount,
-      nightCountToday: input.metrics.nightCountToday,
-      offCountToday: input.metrics.offCountToday,
-    },
+    metrics: buildMetricsPayload(input.metrics),
     findings: [],
     actions: [],
     windows: [],
@@ -204,25 +210,6 @@ function shouldBypassCooldownForCurrentContext(
   context: GroupBriefContext | null | undefined
 ) {
   return shouldTreatInsufficientDataRowAsObsolete(row, context);
-}
-
-function shouldRegenerateRowOnRead(
-  row: SocialGroupAIBriefRow | null | undefined,
-  context: GroupBriefContext | null | undefined
-) {
-  if (!hasMinimumContributorCount(context)) return false;
-  if (!row) return true;
-  if (row.status === "insufficient_data") return true;
-  if (row.status === "ready") return !hasRenderableBrief(row.payload);
-  if (row.status === "failed") return !hasRenderableBrief(row.payload);
-  return false;
-}
-
-function canSkipWeeklyRegeneration(row: Pick<SocialGroupAIBriefRow, "status" | "payload"> | null | undefined) {
-  if (!row) return false;
-  if (row.status === "ready") return hasRenderableBrief(row.payload);
-  if (row.status === "failed") return hasRenderableBrief(row.payload);
-  return false;
 }
 
 function statusLabelForMember(member: BriefMemberContext) {
@@ -686,17 +673,7 @@ function buildDeterministicBriefPayload(context: GroupBriefContext): SocialGroup
       subheadline: snapshot.hero.defaultSubheadline,
       tone: snapshot.hero.tone,
     },
-    metrics: {
-      contributorCount: context.metrics.contributorCount,
-      optInCardCount: context.metrics.optInCardCount,
-      avgBattery: context.metrics.avgBattery,
-      avgSleep: context.metrics.avgSleep,
-      warningCount: context.metrics.warningCount,
-      dangerCount: context.metrics.dangerCount,
-      commonOffCount: context.metrics.commonOffCount,
-      nightCountToday: context.metrics.nightCountToday,
-      offCountToday: context.metrics.offCountToday,
-    },
+    metrics: buildMetricsPayload(context.metrics),
     findings: snapshot.findings.map((item) => ({
       id: item.id,
       title: item.defaultTitle,
@@ -722,25 +699,77 @@ function buildDeterministicBriefPayload(context: GroupBriefContext): SocialGroup
   };
 }
 
-function filterPayloadForReadTimePrivacy(
-  payload: SocialGroupAIBriefPayload,
-  context: GroupBriefContext
-): SocialGroupAIBriefPayload {
-  const eligibleCardIds = new Set(
-    context.contributors
-      .filter((member) => member.personalCardOptIn)
-      .sort(compareCardCandidates)
-      .slice(0, 3)
-      .map((member) => member.userId)
-  );
-  const personalCards = payload.personalCards.filter((item) => eligibleCardIds.has(item.userId)).slice(0, 3);
+function buildFlowRowLevel(id: SocialGroupAIBriefFlowRow["id"], context: GroupBriefContext): 1 | 2 | 3 | 4 | 5 {
+  if (id === "energy") {
+    if ((context.metrics.avgBattery ?? 100) < 40 || (context.metrics.avgSleep ?? 99) < 5.8) return 2;
+    if ((context.metrics.avgBattery ?? 100) < 62 || (context.metrics.avgSleep ?? 99) < 6.7) return 3;
+    if ((context.metrics.avgBattery ?? 100) < 74 || (context.metrics.avgSleep ?? 99) < 7.2) return 4;
+    return 5;
+  }
+  if (id === "risk") {
+    if (context.metrics.dangerCount > 0) return 5;
+    if (context.metrics.warningCount > 1) return 4;
+    if (context.metrics.warningCount > 0) return 3;
+    return 2;
+  }
+  if (context.commonOffDays.length >= 2) return 5;
+  if (context.commonOffDays.length >= 1) return 4;
+  if (context.metrics.nightCountToday === 0) return 3;
+  return 2;
+}
+
+function buildLivePanel(context: GroupBriefContext): NonNullable<SocialGroupAIBriefResponse["live"]> {
+  const snapshot = buildSnapshot(context);
   return {
-    ...payload,
-    metrics: {
-      ...payload.metrics,
-      optInCardCount: personalCards.length,
+    week: snapshot.week,
+    updatedAt: new Date().toISOString(),
+    metrics: buildMetricsPayload(context.metrics),
+    flowRows: snapshot.findings.map((item) => ({
+      id: item.id,
+      label: item.id === "energy" ? "에너지" : item.id === "risk" ? "리스크" : "일정",
+      title: item.defaultTitle,
+      summary: item.defaultBody,
+      factLabel: item.factLabel,
+      tone: item.tone,
+      level: buildFlowRowLevel(item.id, context),
+    })),
+    windows: snapshot.windows,
+    personalCards: snapshot.personalCards.map((item) => ({
+      userId: item.userId,
+      nickname: item.nickname,
+      avatarEmoji: item.avatarEmoji,
+      statusLabel: item.statusLabel,
+      summary: item.defaultSummary,
+      action: item.defaultAction,
+    })),
+  };
+}
+
+function buildSnapshotPanel(args: {
+  row: SocialGroupAIBriefRow | null;
+  context: GroupBriefContext;
+}): { snapshot: NonNullable<SocialGroupAIBriefResponse["snapshot"]>; stale: boolean; errorCode: string | null } {
+  if (args.row?.payload && hasRenderableBrief(args.row.payload)) {
+    return {
+      snapshot: {
+        hero: args.row.payload.hero,
+        actions: args.row.payload.actions,
+        generatedAt: args.row.generated_at,
+      },
+      stale: args.row.status !== "ready",
+      errorCode: args.row.status === "failed" ? "group_ai_brief_generation_failed" : null,
+    };
+  }
+
+  const fallback = buildDeterministicBriefPayload(args.context);
+  return {
+    snapshot: {
+      hero: fallback.hero,
+      actions: fallback.actions,
+      generatedAt: null,
     },
-    personalCards,
+    stale: true,
+    errorCode: "group_ai_brief_missing",
   };
 }
 
@@ -833,17 +862,7 @@ export async function generateGroupAIBriefArtifact(args: {
         payload: {
           week: snapshot.week,
           hero: aiResult.content.hero,
-          metrics: {
-            contributorCount: context.metrics.contributorCount,
-            optInCardCount: context.metrics.optInCardCount,
-            avgBattery: context.metrics.avgBattery,
-            avgSleep: context.metrics.avgSleep,
-            warningCount: context.metrics.warningCount,
-            dangerCount: context.metrics.dangerCount,
-            commonOffCount: context.metrics.commonOffCount,
-            nightCountToday: context.metrics.nightCountToday,
-            offCountToday: context.metrics.offCountToday,
-          },
+          metrics: buildMetricsPayload(context.metrics),
           findings: aiResult.content.findings,
           actions: aiResult.content.actions,
           windows: aiResult.content.windows,
@@ -920,7 +939,6 @@ function buildResponse(args: {
   if (!args.viewer.hasEntitlement) {
     return {
       state: "locked",
-      generatedAt: null,
       stale: false,
       viewer: {
         hasEntitlement: false,
@@ -929,7 +947,8 @@ function buildResponse(args: {
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
       eligibility,
-      brief: null,
+      snapshot: null,
+      live: null,
       errorCode: null,
     };
   }
@@ -937,7 +956,6 @@ function buildResponse(args: {
   if (args.context && !hasMinimumContributorCount(args.context)) {
     return {
       state: "insufficient_data",
-      generatedAt: args.row?.generated_at ?? null,
       stale: false,
       viewer: {
         hasEntitlement: true,
@@ -946,15 +964,15 @@ function buildResponse(args: {
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
       eligibility,
-      brief: null,
+      snapshot: null,
+      live: null,
       errorCode: "insufficient_group_ai_brief_data",
     };
   }
 
-  if (!args.row) {
+  if (!args.context) {
     return {
       state: "failed",
-      generatedAt: null,
       stale: false,
       viewer: {
         hasEntitlement: true,
@@ -963,99 +981,20 @@ function buildResponse(args: {
         personalCardOptIn: args.viewer.personalCardOptIn,
       },
       eligibility,
-      brief: null,
-      errorCode: "group_ai_brief_missing",
+      snapshot: null,
+      live: null,
+      errorCode: "group_ai_brief_viewer_load_failed",
     };
   }
 
-  if (shouldTreatInsufficientDataRowAsObsolete(args.row, args.context)) {
-    return {
-      state: "failed",
-      generatedAt: args.row.generated_at,
-      stale: false,
-      viewer: {
-        hasEntitlement: true,
-        canRefresh,
-        healthShareEnabled: args.viewer.healthShareEnabled,
-        personalCardOptIn: args.viewer.personalCardOptIn,
-      },
-      eligibility,
-      brief: null,
-      errorCode: "group_ai_brief_missing",
-    };
-  }
-
-  if (args.row.status === "insufficient_data") {
-    return {
-      state: "insufficient_data",
-      generatedAt: args.row.generated_at,
-      stale: false,
-      viewer: {
-        hasEntitlement: true,
-        canRefresh,
-        healthShareEnabled: args.viewer.healthShareEnabled,
-        personalCardOptIn: args.viewer.personalCardOptIn,
-      },
-      eligibility,
-      brief: null,
-      errorCode: "insufficient_group_ai_brief_data",
-    };
-  }
-
-  if (args.row.status === "failed") {
-    if (args.row.payload && hasRenderableBrief(args.row.payload) && args.context) {
-      return {
-        state: "ready",
-        generatedAt: args.row.generated_at,
-        stale: true,
-        viewer: {
-          hasEntitlement: true,
-          canRefresh,
-          healthShareEnabled: args.viewer.healthShareEnabled,
-          personalCardOptIn: args.viewer.personalCardOptIn,
-        },
-        eligibility,
-        brief: filterPayloadForReadTimePrivacy(args.row.payload, args.context),
-        errorCode: "group_ai_brief_generation_failed",
-      };
-    }
-    return {
-      state: "failed",
-      generatedAt: args.row.generated_at,
-      stale: false,
-      viewer: {
-        hasEntitlement: true,
-        canRefresh,
-        healthShareEnabled: args.viewer.healthShareEnabled,
-        personalCardOptIn: args.viewer.personalCardOptIn,
-      },
-      eligibility,
-      brief: null,
-      errorCode: "group_ai_brief_generation_failed",
-    };
-  }
-
-  if (!hasRenderableBrief(args.row.payload)) {
-    return {
-      state: "failed",
-      generatedAt: args.row.generated_at,
-      stale: false,
-      viewer: {
-        hasEntitlement: true,
-        canRefresh,
-        healthShareEnabled: args.viewer.healthShareEnabled,
-        personalCardOptIn: args.viewer.personalCardOptIn,
-      },
-      eligibility,
-      brief: null,
-      errorCode: "group_ai_brief_missing",
-    };
-  }
+  const snapshotPanel = buildSnapshotPanel({
+    row: args.row,
+    context: args.context,
+  });
 
   return {
     state: "ready",
-    generatedAt: args.row.generated_at,
-    stale: false,
+    stale: snapshotPanel.stale,
     viewer: {
       hasEntitlement: true,
       canRefresh,
@@ -1063,8 +1002,9 @@ function buildResponse(args: {
       personalCardOptIn: args.viewer.personalCardOptIn,
     },
     eligibility,
-    brief: args.row.payload && args.context ? filterPayloadForReadTimePrivacy(args.row.payload, args.context) : args.row.payload,
-    errorCode: null,
+    snapshot: snapshotPanel.snapshot,
+    live: buildLivePanel(args.context),
+    errorCode: snapshotPanel.errorCode,
   };
 }
 
@@ -1096,11 +1036,11 @@ export async function getCurrentGroupAIBrief(args: {
     );
     return {
       state: "failed",
-      generatedAt: null,
       stale: false,
       viewer: { hasEntitlement: false, canRefresh: false, healthShareEnabled: false, personalCardOptIn: false },
       eligibility: null,
-      brief: null,
+      snapshot: null,
+      live: null,
       errorCode: "group_ai_brief_viewer_load_failed",
     };
   }
@@ -1122,27 +1062,6 @@ export async function getCurrentGroupAIBrief(args: {
     } catch (error) {
       console.error(
         "[SocialGroupAIBrief] loadGroupBriefContext failed group=%d err=%s",
-        args.groupId,
-        String((error as any)?.message ?? error)
-      );
-    }
-  }
-  if (viewer.hasEntitlement && context && shouldRegenerateRowOnRead(row, context)) {
-    try {
-      const generated = await generateGroupAIBriefArtifact({
-        admin: args.admin,
-        groupId: args.groupId,
-        generatorType: "cron",
-        subscriptionCache,
-        existingRow: row,
-      });
-      if (generated) {
-        await upsertBriefRow(args.admin, generated);
-        row = generated;
-      }
-    } catch (error) {
-      console.error(
-        "[SocialGroupAIBrief] read-time regeneration failed group=%d err=%s",
         args.groupId,
         String((error as any)?.message ?? error)
       );
@@ -1263,33 +1182,16 @@ export async function saveGroupAIBriefViewerPrefs(args: {
 export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
   const week = getCurrentWeekWindow();
   const subscriptionCache = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
-  const [{ data: existingRows, error: existingErr }, { data: memberRows, error: memberErr }] = await Promise.all([
-    (args.admin as any)
-      .from("rnest_social_group_ai_briefs")
-      .select("group_id, status, payload")
-      .eq("week_start_iso", week.startISO),
-    (args.admin as any)
-      .from("rnest_social_group_members")
-      .select("group_id")
-      .order("group_id", { ascending: true }),
-  ]);
-  if (existingErr && !isSocialGroupAIBriefSchemaUnavailableError(existingErr)) throw existingErr;
+  const { data: memberRows, error: memberErr } = await (args.admin as any)
+    .from("rnest_social_group_members")
+    .select("group_id")
+    .order("group_id", { ascending: true });
   if (memberErr) throw memberErr;
-
-  const existingRowMap = new Map<number, Pick<SocialGroupAIBriefRow, "status" | "payload">>();
-  for (const row of (existingErr ? [] : existingRows) ?? []) {
-    const groupId = Number((row as any).group_id);
-    if (!Number.isFinite(groupId)) continue;
-    existingRowMap.set(groupId, {
-      status: (row as any).status,
-      payload: ((row as any).payload ?? null) as SocialGroupAIBriefPayload | null,
-    });
-  }
   const candidateGroupIds: number[] = Array.from(
     new Set<number>(
       (memberRows ?? []).map((row: any) => Number(row.group_id)).filter((value: number) => Number.isFinite(value))
     )
-  ).filter((groupId: number) => !canSkipWeeklyRegeneration(existingRowMap.get(groupId) ?? null));
+  );
 
   let processedCount = 0;
   let skippedCount = 0;

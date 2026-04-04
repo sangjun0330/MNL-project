@@ -284,6 +284,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
         : null,
     [currentUserId, groupIdNum]
   );
+  const groupMemberIds = useMemo(
+    () => (board?.members ?? []).map((member) => member.userId),
+    [board?.members]
+  );
 
   // ── 챌린지 로드 ───────────────────────────────────────────
 
@@ -1265,7 +1269,10 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
 
           {activeTab === "aiBrief" && (
             <div className="space-y-4">
-              <SocialGroupAIBriefTab groupId={groupIdNum ?? 0} />
+              <SocialGroupAIBriefTab
+                groupId={groupIdNum ?? 0}
+                memberIds={groupMemberIds}
+              />
             </div>
           )}
 

@@ -21,11 +21,11 @@ export function SocialGroupAIBriefPersonalCardToggle({
 
   return (
     <div className="rounded-[28px] bg-white px-4 py-4 shadow-apple">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[14px] font-semibold text-ios-text">내 개인 카드 그룹에 표시</p>
           <p className="mt-1 text-[12px] leading-5 text-ios-muted">
-            opt-in 상태일 때만 AI 브리프 개인 카드에 내 요약이 표시됩니다.
+            변경하면 개인 카드 밴드에 바로 반영되고, 서버 응답으로 최종 정합성을 맞춥니다.
           </p>
         </div>
         <button
@@ -38,7 +38,7 @@ export function SocialGroupAIBriefPersonalCardToggle({
           }}
           disabled={!interactive}
           className={cn(
-            "relative mt-0.5 inline-flex h-8 w-14 shrink-0 items-center rounded-full transition",
+            "relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition",
             checked ? "bg-[color:var(--rnest-accent)]" : "bg-ios-sep",
             !interactive && "opacity-50"
           )}
@@ -51,11 +51,15 @@ export function SocialGroupAIBriefPersonalCardToggle({
           />
         </button>
       </div>
-      {!healthShareEnabled ? (
-        <p className="mt-3 rounded-2xl bg-ios-bg px-3 py-2.5 text-[12px] leading-5 text-ios-muted">
-          건강 공유를 켜야 개인 카드에 참여할 수 있어요.
-        </p>
-      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-ios-muted">
+        <span className="rounded-full bg-ios-bg px-3 py-1">AI 요약 06:00 · 18:00 KST 갱신</span>
+        <span className="rounded-full bg-ios-bg px-3 py-1">라이브 데이터 자동 반영</span>
+        {!healthShareEnabled ? (
+          <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">
+            건강 공유를 켜야 개인 카드에 참여할 수 있어요.
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

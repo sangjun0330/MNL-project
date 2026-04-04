@@ -1,4 +1,6 @@
 import type {
+  SocialGroupAIBriefAction,
+  SocialGroupAIBriefFlowRow,
   SocialGroupAIBriefPersonalCard,
   SocialGroupAIBriefTone,
 } from "@/types/social";
@@ -30,7 +32,7 @@ export type SocialGroupAIBriefSnapshot = {
     defaultSubheadline: string;
   };
   findings: Array<{
-    id: string;
+    id: SocialGroupAIBriefFlowRow["id"];
     tone: SocialGroupAIBriefTone;
     factLabel: string;
     factText: string;
@@ -38,7 +40,7 @@ export type SocialGroupAIBriefSnapshot = {
     defaultBody: string;
   }>;
   actions: Array<{
-    id: string;
+    id: SocialGroupAIBriefAction["id"];
     reason: string;
     factText: string;
     defaultTitle: string;

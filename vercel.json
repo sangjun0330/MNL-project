@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/jobs/social/generate-ai-briefs",
+      "schedule": "0 9,21 * * *"
+    },
+    {
       "path": "/api/jobs/shop/cleanup-stale-orders",
       "schedule": "*/10 * * * *"
     },

@@ -266,28 +266,42 @@ export type SocialGroupAIBriefPersonalCard = {
   action: string;
 };
 
+export type SocialGroupAIBriefHero = {
+  headline: string;
+  subheadline: string;
+  tone: SocialGroupAIBriefTone;
+};
+
+export type SocialGroupAIBriefMetrics = {
+  contributorCount: number;
+  optInCardCount: number;
+  avgBattery: number | null;
+  avgSleep: number | null;
+  warningCount: number;
+  dangerCount: number;
+  commonOffCount: number;
+  nightCountToday: number;
+  offCountToday: number;
+};
+
+export type SocialGroupAIBriefFlowRow = {
+  id: "energy" | "risk" | "schedule";
+  label: string;
+  title: string;
+  summary: string;
+  factLabel: string;
+  tone: SocialGroupAIBriefTone;
+  level: 1 | 2 | 3 | 4 | 5;
+};
+
 export type SocialGroupAIBriefPayload = {
   week: {
     startISO: string;
     endISO: string;
     label: string;
   };
-  hero: {
-    headline: string;
-    subheadline: string;
-    tone: SocialGroupAIBriefTone;
-  };
-  metrics: {
-    contributorCount: number;
-    optInCardCount: number;
-    avgBattery: number | null;
-    avgSleep: number | null;
-    warningCount: number;
-    dangerCount: number;
-    commonOffCount: number;
-    nightCountToday: number;
-    offCountToday: number;
-  };
+  hero: SocialGroupAIBriefHero;
+  metrics: SocialGroupAIBriefMetrics;
   findings: SocialGroupAIBriefFinding[];
   actions: SocialGroupAIBriefAction[];
   windows: SocialGroupAIBriefWindow[];
@@ -305,7 +319,6 @@ export type SocialGroupAIBriefEligibility = {
 
 export type SocialGroupAIBriefResponse = {
   state: SocialGroupAIBriefState;
-  generatedAt: string | null;
   stale: boolean;
   viewer: {
     hasEntitlement: boolean;
@@ -314,7 +327,19 @@ export type SocialGroupAIBriefResponse = {
     personalCardOptIn: boolean;
   };
   eligibility: SocialGroupAIBriefEligibility | null;
-  brief: SocialGroupAIBriefPayload | null;
+  snapshot: {
+    hero: SocialGroupAIBriefHero;
+    actions: SocialGroupAIBriefAction[];
+    generatedAt: string | null;
+  } | null;
+  live: {
+    week: SocialGroupAIBriefPayload["week"];
+    updatedAt: string;
+    metrics: SocialGroupAIBriefMetrics;
+    flowRows: SocialGroupAIBriefFlowRow[];
+    windows: SocialGroupAIBriefWindow[];
+    personalCards: SocialGroupAIBriefPersonalCard[];
+  } | null;
   errorCode: string | null;
 };
 
