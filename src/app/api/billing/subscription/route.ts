@@ -26,6 +26,8 @@ function emptyResponse() {
           advancedCalculators: true,
           medSafety: false,
           medSafetyImageQueries: false,
+          socialGroupCreate: false,
+          socialGroupBrief: false,
         },
         aiRecoveryModel: null,
         medSafetyQuota: {

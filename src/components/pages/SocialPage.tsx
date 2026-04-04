@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
+import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import type {
   SocialConnectionsData,
   FriendsScheduleData,
@@ -44,9 +45,14 @@ import {
   haveSameIds,
   isOffOrVac,
 } from "@/lib/socialOverlap";
+import { withReturnTo } from "@/lib/navigation";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 type SocialViewTab = "friends" | "groups";
+
+function resolveSocialViewTab(value: string | null | undefined, fallback: SocialViewTab): SocialViewTab {
+  return value === "groups" ? "groups" : value === "friends" ? "friends" : fallback;
+}
 
 // 현재 월 YYYY-MM
 function currentMonth(): string {
@@ -76,6 +82,7 @@ export function SocialPage() {
     }
   }, [router]);
   const { status, user } = useAuthState();
+  const { loading: billingLoading, hasEntitlement, reload: reloadBillingAccess } = useBillingAccess();
   const currentUserId = user?.userId ?? null;
   const month = useMemo(() => currentMonth(), []);
   // 이번 주 7일 커버를 위해 필요한 months 파라미터 (월말 경계 처리)
@@ -85,6 +92,8 @@ export function SocialPage() {
   const inviteToken = searchParams.get("invite") ?? "";
   const groupInviteToken = searchParams.get("groupInvite") ?? "";
   const authError = searchParams.get("authError") ?? "";
+  const requestedTab = searchParams.get("tab");
+  const requestedOpenCreate = searchParams.get("openCreate");
 
   const [connections, setConnections] = useState<SocialConnectionsData | null>(null);
   const [friendsSchedule, setFriendsSchedule] = useState<FriendsScheduleData | null>(null);
@@ -98,7 +107,9 @@ export function SocialPage() {
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<SocialViewTab>(groupInviteToken ? "groups" : "friends");
+  const [activeTab, setActiveTab] = useState<SocialViewTab>(
+    resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "friends")
+  );
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
   const [openGroupCreate, setOpenGroupCreate] = useState(false);
@@ -116,6 +127,9 @@ export function SocialPage() {
   const [selectedCommonOffFriendIds, setSelectedCommonOffFriendIds] = useState<string[]>([]);
   const handledInviteRef = useRef<string | null>(null);
   const handledGroupInviteRef = useRef<string | null>(null);
+  const appliedTabKeyRef = useRef<string | null>(null);
+  const autoOpenCreateHandledRef = useRef<string | null>(null);
+  const billingReloadHandledRef = useRef<string | null>(null);
   const selectedCommonOffAvailableIdsRef = useRef<string[]>([]);
   const profileFetchSeqRef = useRef(0);
   const connectionsFetchSeqRef = useRef(0);
@@ -132,6 +146,7 @@ export function SocialPage() {
   const groupsRef = useRef<SocialGroupSummary[]>([]);
   const groupsLoadedRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
+  const canCreateGroup = hasEntitlement("socialGroupCreate");
 
   const profileCacheKey = useMemo(
     () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "profile") : null),
@@ -217,6 +232,33 @@ export function SocialPage() {
       setGroupsLoading(false);
     }
   }, [currentUserId, status]);
+
+  useEffect(() => {
+    const nextTab = resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "friends");
+    const key = `${requestedTab ?? ""}:${groupInviteToken ? "groupInvite" : "none"}`;
+    if (appliedTabKeyRef.current === key) return;
+    appliedTabKeyRef.current = key;
+    setActiveTab(nextTab);
+  }, [groupInviteToken, requestedTab]);
+
+  useEffect(() => {
+    if (requestedOpenCreate !== "1" || !currentUserId) return;
+    const key = `${currentUserId}:${requestedOpenCreate}`;
+    if (billingReloadHandledRef.current === key) return;
+    billingReloadHandledRef.current = key;
+    reloadBillingAccess();
+  }, [currentUserId, reloadBillingAccess, requestedOpenCreate]);
+
+  useEffect(() => {
+    if (requestedOpenCreate !== "1") return;
+    if (activeTab !== "groups") return;
+    if (!canCreateGroup || billingLoading) return;
+    const key = `${currentUserId ?? "guest"}:${requestedOpenCreate}`;
+    if (autoOpenCreateHandledRef.current === key) return;
+    autoOpenCreateHandledRef.current = key;
+    setOpenGroupCreate(true);
+    router.replace("/social?tab=groups", { scroll: false });
+  }, [activeTab, billingLoading, canCreateGroup, currentUserId, requestedOpenCreate, router]);
 
   const fetchProfile = useCallback(() => {
     if (status !== "authenticated" || !currentUserId) {
@@ -610,6 +652,11 @@ export function SocialPage() {
   const handleOnboardingSkip = useCallback(() => {
     setShowOnboarding(false);
   }, []);
+
+  const handleUpgradeForCreateGroup = useCallback(() => {
+    if (billingLoading) return;
+    router.push(withReturnTo("/settings/billing/upgrade", "/social?tab=groups&openCreate=1"));
+  }, [billingLoading, router]);
 
   const pendingIncoming = useMemo(() => connections?.pendingIncoming ?? [], [connections?.pendingIncoming]);
   const pendingSent = useMemo(() => connections?.pendingSent ?? [], [connections?.pendingSent]);
@@ -1104,7 +1151,10 @@ export function SocialPage() {
       {activeTab === "groups" && !groupsLoading && !groupsError && (
         <SocialGroupList
           groups={groups}
+          canCreateGroup={canCreateGroup}
+          createGroupDisabled={billingLoading}
           onCreateGroup={() => setOpenGroupCreate(true)}
+          onUpgradeForCreateGroup={handleUpgradeForCreateGroup}
           onPrefetchGroup={(group) => prefetchGroupBoard(group.id)}
           onOpenGroup={(group) => {
             prefetchGroupBoard(group.id);

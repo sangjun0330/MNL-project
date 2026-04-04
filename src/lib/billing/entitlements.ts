@@ -6,7 +6,9 @@ export type BillingEntitlement =
   | "recoveryPlannerAI"
   | "advancedCalculators"
   | "medSafety"
-  | "medSafetyImageQueries";
+  | "medSafetyImageQueries"
+  | "socialGroupCreate"
+  | "socialGroupBrief";
 
 export type BillingEntitlements = Record<BillingEntitlement, boolean>;
 
@@ -17,6 +19,8 @@ export const DEFAULT_BILLING_ENTITLEMENTS: BillingEntitlements = {
   advancedCalculators: false,
   medSafety: false,
   medSafetyImageQueries: false,
+  socialGroupCreate: false,
+  socialGroupBrief: false,
 };
 
 export function buildBillingEntitlements(args: {
@@ -35,6 +39,8 @@ export function buildBillingEntitlements(args: {
     advancedCalculators: true,
     medSafety: medSafetyAvailable,
     medSafetyImageQueries: medSafetyAvailable,
+    socialGroupCreate: recoveryPlannerAvailable,
+    socialGroupBrief: recoveryPlannerAvailable,
   };
 }
 

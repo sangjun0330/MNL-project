@@ -233,6 +233,81 @@ export type SocialGroupInvitePreview = {
   group: SocialGroupSummary;
 };
 
+export type SocialGroupAIBriefState = "locked" | "insufficient_data" | "ready" | "failed";
+export type SocialGroupAIBriefTone = "steady" | "watch" | "recover";
+
+export type SocialGroupAIBriefFinding = {
+  id: string;
+  title: string;
+  body: string;
+  tone: SocialGroupAIBriefTone;
+  factLabel: string;
+};
+
+export type SocialGroupAIBriefAction = {
+  id: string;
+  title: string;
+  body: string;
+  reason: string;
+};
+
+export type SocialGroupAIBriefWindow = {
+  dateISO: string;
+  label: string;
+  reason: string;
+};
+
+export type SocialGroupAIBriefPersonalCard = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+  statusLabel: "안정" | "주의" | "회복 우선";
+  summary: string;
+  action: string;
+};
+
+export type SocialGroupAIBriefPayload = {
+  week: {
+    startISO: string;
+    endISO: string;
+    label: string;
+  };
+  hero: {
+    headline: string;
+    subheadline: string;
+    tone: SocialGroupAIBriefTone;
+  };
+  metrics: {
+    contributorCount: number;
+    optInCardCount: number;
+    avgBattery: number | null;
+    avgSleep: number | null;
+    warningCount: number;
+    dangerCount: number;
+    commonOffCount: number;
+    nightCountToday: number;
+    offCountToday: number;
+  };
+  findings: SocialGroupAIBriefFinding[];
+  actions: SocialGroupAIBriefAction[];
+  windows: SocialGroupAIBriefWindow[];
+  personalCards: SocialGroupAIBriefPersonalCard[];
+};
+
+export type SocialGroupAIBriefResponse = {
+  state: SocialGroupAIBriefState;
+  generatedAt: string | null;
+  stale: boolean;
+  viewer: {
+    hasEntitlement: boolean;
+    canRefresh: boolean;
+    healthShareEnabled: boolean;
+    personalCardOptIn: boolean;
+  };
+  brief: SocialGroupAIBriefPayload | null;
+  errorCode: string | null;
+};
+
 // ══════════════════════════════════════════════════════════════
 // Group Challenge types
 // ══════════════════════════════════════════════════════════════

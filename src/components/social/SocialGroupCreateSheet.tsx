@@ -46,6 +46,7 @@ export function SocialGroupCreateSheet({ open, onClose, onCreated }: Props) {
       if (!res.ok) {
         if (res.error === "group_name_required") throw new Error("그룹 이름을 입력해 주세요.");
         if (res.error === "too_many_requests") throw new Error("그룹을 너무 자주 만들고 있어요. 잠시 후 다시 시도해 주세요.");
+        if (res.error === "paid_plan_required_for_group_create") throw new Error("그룹 만들기는 Plus/Pro에서 사용할 수 있어요.");
         throw new Error("그룹을 만들지 못했어요.");
       }
 

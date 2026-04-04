@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { useAppStoreSelector } from "@/lib/store";
 import { cn } from "@/lib/cn";
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
+import { SocialGroupAIBriefTab } from "@/components/social/SocialGroupAIBriefTab";
 import { SocialGroupChallengesTab } from "@/components/social/SocialGroupChallengesTab";
 import { SocialThisWeek } from "@/components/social/SocialThisWeek";
 import { SocialSelectableCommonOffCard } from "@/components/social/SocialSelectableCommonOffCard";
@@ -154,7 +155,7 @@ function parseActionError(errorCode: string | undefined, fallback: string): stri
 // ── 타입 ─────────────────────────────────────────────────────
 
 type ShareState = "idle" | "link-copied" | "shared";
-type DetailTab = "overview" | "challenge" | "manage" | "activity";
+type DetailTab = "overview" | "aiBrief" | "challenge" | "manage" | "activity";
 
 type Props = {
   groupId: string;
@@ -216,6 +217,7 @@ function OverviewMetricCard({
 
 export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const handleBack = useCallback(() => {
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
@@ -266,6 +268,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const challengesLoadedRef = useRef(false);
   const selectedOverviewAvailableIdsRef = useRef<string[]>([]);
   const challengesRef = useRef<GroupChallengeSummary[]>([]);
+  const appliedTabKeyRef = useRef<string | null>(null);
 
   const boardCacheKey = useMemo(
     () =>
@@ -394,6 +397,24 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   }, [groupIdNum, loadBoard]);
 
   useEffect(() => {
+    const rawTab = searchParams.get("tab");
+    const nextTab: DetailTab =
+      rawTab === "aiBrief"
+        ? "aiBrief"
+        : rawTab === "challenge"
+          ? "challenge"
+          : rawTab === "manage"
+            ? "manage"
+            : rawTab === "activity"
+              ? "activity"
+              : "overview";
+    const key = rawTab ?? "";
+    if (appliedTabKeyRef.current === key) return;
+    appliedTabKeyRef.current = key;
+    setActiveTab(nextTab);
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!groupIdNum) return;
     let tid: ReturnType<typeof setTimeout>;
     const trigger = () => {
@@ -441,8 +462,8 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     const canManage =
       board.permissions.canEditBasicInfo || board.permissions.canManageJoinRequests;
     const allowedTabs: DetailTab[] = canManage
-      ? ["overview", "challenge", "manage", "activity"]
-      : ["overview", "challenge", "activity"];
+      ? ["overview", "aiBrief", "challenge", "manage", "activity"]
+      : ["overview", "aiBrief", "challenge", "activity"];
     if (!allowedTabs.includes(activeTab)) setActiveTab("overview");
   }, [activeTab, board]);
 
@@ -542,6 +563,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const tabs = useMemo(() => {
     const items: Array<{ id: DetailTab; label: string }> = [
       { id: "overview", label: "개요" },
+      { id: "aiBrief", label: "AI 브리프" },
       { id: "challenge", label: "챌린지" },
     ];
     if (board?.permissions.canEditBasicInfo || board?.permissions.canManageJoinRequests) {
@@ -1238,6 +1260,12 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                   </div>
                 </div>
               ) : null}
+            </div>
+          )}
+
+          {activeTab === "aiBrief" && (
+            <div className="space-y-4">
+              <SocialGroupAIBriefTab groupId={groupIdNum ?? 0} />
             </div>
           )}
 

@@ -8,10 +8,22 @@ type Props = {
   groups: SocialGroupSummary[];
   onOpenGroup: (group: SocialGroupSummary) => void;
   onCreateGroup: () => void;
+  canCreateGroup: boolean;
+  createGroupDisabled?: boolean;
+  onUpgradeForCreateGroup: () => void;
   onPrefetchGroup?: (group: SocialGroupSummary) => void;
 };
 
-export function SocialGroupList({ groups, onOpenGroup, onCreateGroup, onPrefetchGroup }: Props) {
+export function SocialGroupList({
+  groups,
+  onOpenGroup,
+  onCreateGroup,
+  canCreateGroup,
+  createGroupDisabled = false,
+  onUpgradeForCreateGroup,
+  onPrefetchGroup,
+}: Props) {
+  const handleCreateClick = canCreateGroup ? onCreateGroup : onUpgradeForCreateGroup;
   return (
     <div className="rounded-apple bg-white shadow-apple">
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
@@ -26,11 +38,15 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup, onPrefetch
           </p>
           <button
             type="button"
-            onClick={onCreateGroup}
+            onClick={handleCreateClick}
+            disabled={createGroupDisabled}
             className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[14px] font-semibold text-white transition active:opacity-60"
           >
             그룹 만들기
           </button>
+          {!canCreateGroup ? (
+            <p className="mt-2 text-[11.5px] text-ios-muted">Plus/Pro에서 그룹을 만들 수 있어요</p>
+          ) : null}
         </div>
       ) : (
         <>
@@ -105,8 +121,9 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup, onPrefetch
           <div className="border-t border-ios-sep">
             <button
               type="button"
-              onClick={onCreateGroup}
-              className="flex w-full items-center justify-center gap-2 py-3.5 text-[13.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
+              onClick={handleCreateClick}
+              disabled={createGroupDisabled}
+              className="flex w-full items-center justify-center gap-2 py-3.5 text-[13.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60 disabled:opacity-45"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19" />
@@ -114,6 +131,9 @@ export function SocialGroupList({ groups, onOpenGroup, onCreateGroup, onPrefetch
               </svg>
               새 그룹 만들기
             </button>
+            {!canCreateGroup ? (
+              <p className="px-4 pb-3 text-center text-[11.5px] text-ios-muted">Plus/Pro에서 그룹을 만들 수 있어요</p>
+            ) : null}
           </div>
         </>
       )}

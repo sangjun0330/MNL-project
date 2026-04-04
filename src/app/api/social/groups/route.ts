@@ -122,6 +122,17 @@ export async function POST(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
+  try {
+    const { readSubscription } = await import("@/lib/server/billingReadStore");
+    const subscription = await readSubscription(userId);
+    if (subscription.entitlements.socialGroupCreate !== true) {
+      return jsonNoStore({ ok: false, error: "paid_plan_required_for_group_create" }, { status: 403 });
+    }
+  } catch (err: any) {
+    console.error("[SocialGroups/POST] billing access check failed err=%s", String(err?.message ?? err));
+    return jsonNoStore({ ok: false, error: "billing_access_check_failed" }, { status: 500 });
+  }
+
   let body: any = null;
   try {
     body = await req.json();
