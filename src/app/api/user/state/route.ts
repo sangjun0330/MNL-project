@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -136,6 +136,31 @@ export async function POST(req: Request) {
     }
     const serialized = serializeStateForSupabase(state);
     const saved = await saveUserState({ userId, payload: serialized });
+    if (saved.changed) {
+      after(async () => {
+        try {
+          const { getSupabaseAdmin } = await import("@/lib/server/supabaseAdmin");
+          const { maybeAutoRefreshGroupAIBriefsForUserStateChange } = await import("@/lib/server/socialGroupAIBrief");
+          const result = await maybeAutoRefreshGroupAIBriefsForUserStateChange({
+            admin: getSupabaseAdmin(),
+            userId,
+            previousPayload: saved.previousPayload,
+            nextPayload: saved.payload,
+          });
+          if (result.triggered || result.failedCount > 0) {
+            console.info("[UserState] group_ai_brief_auto_refresh", {
+              userId: userId.slice(0, 8),
+              ...result,
+            });
+          }
+        } catch (error) {
+          console.error("[UserState] group_ai_brief_auto_refresh_failed", {
+            userId: userId.slice(0, 8),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+    }
     return jsonNoStore({
       ok: true,
       syncedAt: new Date().toISOString(),

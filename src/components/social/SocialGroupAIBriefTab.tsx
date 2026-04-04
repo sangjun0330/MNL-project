@@ -33,18 +33,6 @@ type Props = {
   memberIds: string[];
 };
 
-function currentWeekCacheKeyPart() {
-  const now = Date.now();
-  const kst = new Date(now + 9 * 60 * 60 * 1000);
-  const day = kst.getUTCDay();
-  const delta = day === 0 ? -6 : 1 - day;
-  kst.setUTCDate(kst.getUTCDate() + delta);
-  const year = kst.getUTCFullYear();
-  const month = String(kst.getUTCMonth() + 1).padStart(2, "0");
-  const date = String(kst.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${date}`;
-}
-
 function toneBadgeClasses(tone: SocialGroupAIBriefTone) {
   if (tone === "recover") return "bg-amber-50 text-amber-700";
   if (tone === "watch") return "bg-sky-50 text-sky-700";
@@ -59,8 +47,8 @@ function toneLevelClasses(tone: SocialGroupAIBriefTone, active: boolean) {
 }
 
 function stateMessage(errorCode: string | null) {
-  if (errorCode === "group_ai_brief_generation_failed") return "최근 AI 요약을 새로 만들지 못했어요.";
-  if (errorCode === "group_ai_brief_missing") return "AI 요약이 아직 준비되지 않았어요.";
+  if (errorCode === "group_ai_brief_generation_failed") return "최근 AI 요약을 자동으로 갱신하지 못했어요.";
+  if (errorCode === "group_ai_brief_missing") return "오늘 건강 기록이 충분히 모이면 AI 요약이 자동으로 생성돼요.";
   return "AI 브리프를 불러오지 못했어요.";
 }
 
@@ -77,12 +65,25 @@ function mapRequestErrorMessage(errorCode: string | null | undefined, fallback: 
     case "paid_plan_required_for_group_ai_brief":
       return "AI 브리프는 Plus/Pro에서 사용할 수 있어요.";
     case "group_ai_brief_refresh_cooldown":
-      return "AI 요약은 06:00 / 18:00 KST에 자동 갱신돼요.";
+      return "AI 요약은 조건이 충족되면 자동으로 갱신돼요.";
     case "health_visibility_required_for_personal_card":
       return "건강 공유를 켠 뒤에 개인 카드에 참여할 수 있어요.";
     default:
       return fallback;
   }
+}
+
+function isGeneratedTodayKST(value: string | null | undefined) {
+  if (!value) return false;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return false;
+  const generated = new Date(time + 9 * 60 * 60 * 1000);
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return (
+    generated.getUTCFullYear() === now.getUTCFullYear() &&
+    generated.getUTCMonth() === now.getUTCMonth() &&
+    generated.getUTCDate() === now.getUTCDate()
+  );
 }
 
 function formatMetric(value: number | null, suffix = "") {
@@ -419,7 +420,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
   const cacheKey = useMemo(
     () =>
       currentUserId
-        ? buildSocialClientCacheKey(currentUserId, "group-ai-brief", `${groupId}:${currentWeekCacheKeyPart()}`)
+        ? buildSocialClientCacheKey(currentUserId, "group-ai-brief", String(groupId))
         : null,
     [currentUserId, groupId]
   );
@@ -512,29 +513,6 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
     onRefresh: refreshLiveView,
   });
 
-  const handleGenerate = useCallback(async () => {
-    if (!groupId || retrying) return;
-    setRetrying(true);
-    setError(null);
-    try {
-      const apiResponse = await fetch(`/api/social/groups/${groupId}/ai-brief/refresh`, {
-        method: "POST",
-      });
-      const payload = await apiResponse.json();
-      if (!apiResponse.ok || payload?.ok !== true) {
-        throw new Error(mapRequestErrorMessage(payload?.error, "AI 브리프를 새로 만들지 못했어요."));
-      }
-      const nextResponse = payload.data as SocialGroupAIBriefResponse;
-      setResponse(nextResponse);
-      if (cacheKey) setSocialClientCache(cacheKey, nextResponse);
-      setError(null);
-    } catch (nextError: any) {
-      setError(String(nextError?.message ?? "AI 브리프를 새로 만들지 못했어요."));
-    } finally {
-      setRetrying(false);
-    }
-  }, [cacheKey, groupId, retrying]);
-
   const handleRetry = useCallback(async () => {
     if (retrying) return;
     setRetrying(true);
@@ -613,6 +591,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
 
   const snapshot = response?.snapshot ?? null;
   const live = response?.live ?? null;
+  const generatedToday = isGeneratedTodayKST(snapshot?.generatedAt ?? null);
 
   const visiblePersonalCards = useMemo(() => {
     const cards = [...(live?.personalCards ?? [])];
@@ -737,14 +716,14 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
           </h3>
           <Button
             variant="secondary"
-            onClick={() => void (response.viewer.canRefresh ? handleGenerate() : handleRetry())}
+            onClick={() => void handleRetry()}
             disabled={retrying}
             aria-busy={retrying}
             className="mt-5 h-10 rounded-2xl px-4 text-[13px]"
           >
             <span className="inline-flex items-center gap-2">
               {retrying ? <InlineSpinner /> : null}
-              {retrying ? "생성 중..." : response.viewer.canRefresh ? "AI 브리프 다시 생성" : "다시 시도"}
+              {retrying ? "확인 중..." : "다시 시도"}
             </span>
           </Button>
         </div>
@@ -773,20 +752,6 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
                 <h3 className="text-[24px] font-bold tracking-[-0.04em] text-ios-text">{snapshot.hero.headline}</h3>
                 <p className="mt-2 text-[13px] leading-6 text-ios-muted">{snapshot.hero.subheadline}</p>
               </div>
-              {response.viewer.canRefresh ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => void handleGenerate()}
-                  disabled={retrying || syncing}
-                  aria-busy={retrying}
-                  className="h-9 rounded-full px-3 text-[12px]"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {retrying ? <InlineSpinner /> : null}
-                    {retrying ? "생성 중..." : "다시 생성"}
-                  </span>
-                </Button>
-              ) : null}
             </div>
           </div>
         </div>
@@ -866,6 +831,10 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
             onChange={handleToggle}
           />
         </div>
+
+        {generatedToday ? (
+          <p className="mt-4 text-center text-[11px] font-medium text-ios-muted">오늘의 ai회복 생성됨</p>
+        ) : null}
       </div>
 
       <SocialMemberPreviewSheet

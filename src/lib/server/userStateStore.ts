@@ -12,6 +12,8 @@ export type UserStateSaveResult = {
   updatedAt: number | null;
   stateRevision: number | null;
   changed: boolean;
+  previousPayload: unknown;
+  payload: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -348,6 +350,8 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
       updatedAt: existingUpdatedAt,
       stateRevision: existingUpdatedAt,
       changed: false,
+      previousPayload: existingPayloadRaw,
+      payload: nextPayload,
     };
   }
 
@@ -370,6 +374,8 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
     updatedAt: nowTs,
     stateRevision: nowTs,
     changed: true,
+    previousPayload: existingPayloadRaw,
+    payload: nextPayload,
   };
 }
 

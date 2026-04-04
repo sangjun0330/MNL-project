@@ -79,6 +79,7 @@ type BriefMemberContext = {
   healthVisibility: HealthVisibility;
   vitals: MemberWeeklyVitals | null;
   hasRecentData: boolean;
+  hasTodayTrackedHealthInput: boolean;
   personalCardOptIn: boolean;
   hasPaidBriefAccess: boolean;
   hasProBriefAccess: boolean;
@@ -123,6 +124,8 @@ type GroupBriefContext = {
     commonOffCount: number;
     nightCountToday: number;
     offCountToday: number;
+    todayContributorRecordCount: number;
+    autoGenerateRequiredCount: number;
   };
 };
 
@@ -138,6 +141,90 @@ function isOffOrVac(shift: string | null | undefined) {
 function roundOne(value: number | null) {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.round(value * 10) / 10;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function hasFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function readTodayTrackedHealthInput(payload: unknown, dayISO: string) {
+  const root = isRecord(payload) ? payload : {};
+  const bioMap = isRecord(root.bio) ? root.bio : {};
+  const emotionMap = isRecord(root.emotions) ? root.emotions : {};
+  const bioEntry = isRecord(bioMap[dayISO]) ? (bioMap[dayISO] as Record<string, unknown>) : {};
+  const emotionEntry = isRecord(emotionMap[dayISO]) ? (emotionMap[dayISO] as Record<string, unknown>) : {};
+  return {
+    sleepHours: hasFiniteNumber(bioEntry.sleepHours),
+    stress: hasFiniteNumber(bioEntry.stress),
+    mood: hasFiniteNumber(bioEntry.mood) || hasFiniteNumber(emotionEntry.mood),
+    activity: hasFiniteNumber(bioEntry.activity),
+    caffeine: hasFiniteNumber(bioEntry.caffeineMg),
+  };
+}
+
+function hasTodayTrackedHealthInput(payload: unknown, dayISO: string) {
+  const tracked = readTodayTrackedHealthInput(payload, dayISO);
+  return tracked.sleepHours || tracked.stress || tracked.mood || tracked.activity || tracked.caffeine;
+}
+
+function getAutoGenerateRequiredCount(contributorCount: number) {
+  if (!Number.isFinite(contributorCount) || contributorCount <= 0) return 0;
+  return Math.ceil(contributorCount * 0.5);
+}
+
+function hasAutoGenerateReadyContributors(context: GroupBriefContext) {
+  return (
+    context.metrics.contributorCount >= MIN_GROUP_AI_BRIEF_CONTRIBUTORS &&
+    context.metrics.todayContributorRecordCount >= context.metrics.autoGenerateRequiredCount
+  );
+}
+
+function toKSTISODate(value: string | null | undefined) {
+  if (!value) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  return toISODate(new Date(time + 9 * 60 * 60 * 1000));
+}
+
+function readStoredFallbackReason(row: SocialGroupAIBriefRow | null | undefined) {
+  const usage = row?.usage;
+  const fallbackReason = String((usage as any)?.fallbackReason ?? "").trim();
+  return fallbackReason || null;
+}
+
+function hasStoredAITrace(row: SocialGroupAIBriefRow | null | undefined) {
+  const usage = row?.usage;
+  if (!usage || typeof usage !== "object") return false;
+  const responseId = String((usage as any)?.responseId ?? "").trim();
+  return Boolean(responseId || (usage as any).providerUsage || (usage as any).llmMode);
+}
+
+function isSuccessfulStoredBriefRow(row: SocialGroupAIBriefRow | null | undefined) {
+  if (!row?.payload || !hasRenderableBrief(row.payload)) return false;
+  if (readStoredFallbackReason(row)) return false;
+  if (row.status === "ready") return true;
+  if (row.status === "failed") return hasStoredAITrace(row);
+  return false;
+}
+
+function wasRowGeneratedOnDay(row: SocialGroupAIBriefRow | null | undefined, dayISO: string) {
+  return Boolean(row?.generated_at && toKSTISODate(row.generated_at) === dayISO);
+}
+
+function didTrackedHealthInputChange(previousPayload: unknown, nextPayload: unknown, dayISO: string) {
+  const previous = readTodayTrackedHealthInput(previousPayload, dayISO);
+  const next = readTodayTrackedHealthInput(nextPayload, dayISO);
+  return (
+    previous.sleepHours !== next.sleepHours ||
+    previous.stress !== next.stress ||
+    previous.mood !== next.mood ||
+    previous.activity !== next.activity ||
+    previous.caffeine !== next.caffeine
+  );
 }
 
 function averageNullable(values: Array<number | null | undefined>) {
@@ -452,6 +539,7 @@ async function loadGroupBriefContext(args: {
       healthVisibility: pref.healthVisibility,
       vitals,
       hasRecentData: rawVitals !== null,
+      hasTodayTrackedHealthInput: hasTodayTrackedHealthInput(payload, week.todayISO),
       personalCardOptIn: optInMap.get(userId) === true,
       hasPaidBriefAccess: subscription?.hasBriefAccess === true,
       hasProBriefAccess: subscription?.hasProBriefAccess === true,
@@ -501,6 +589,8 @@ async function loadGroupBriefContext(args: {
     commonOffCount: commonOffDays.length,
     nightCountToday: members.filter((member) => member.visibleWeekSchedule[week.todayISO] === "N").length,
     offCountToday: members.filter((member) => isOffOrVac(member.visibleWeekSchedule[week.todayISO])).length,
+    todayContributorRecordCount: contributors.filter((member) => member.hasTodayTrackedHealthInput).length,
+    autoGenerateRequiredCount: getAutoGenerateRequiredCount(contributors.length),
   };
 
   return {
@@ -529,6 +619,30 @@ async function readBriefRow(admin: any, groupId: number, weekStartISO: string): 
   if (error && !isSocialGroupAIBriefSchemaUnavailableError(error)) throw error;
   if (error) return null;
   return (data ?? null) as SocialGroupAIBriefRow | null;
+}
+
+async function readRecentBriefRows(admin: any, groupId: number, limit = 12): Promise<SocialGroupAIBriefRow[]> {
+  const { data, error } = await (admin as any)
+    .from("rnest_social_group_ai_briefs")
+    .select("*")
+    .eq("group_id", groupId)
+    .order("generated_at", { ascending: false })
+    .limit(limit);
+  if (error && !isSocialGroupAIBriefSchemaUnavailableError(error)) throw error;
+  if (error) return [];
+  return Array.isArray(data) ? (data as SocialGroupAIBriefRow[]) : [];
+}
+
+async function readLatestStoredDisplayRow(admin: any, groupId: number): Promise<SocialGroupAIBriefRow | null> {
+  const rows = await readRecentBriefRows(admin, groupId);
+  return rows.find((row) => isSuccessfulStoredBriefRow(row)) ?? rows.find((row) => hasRenderableBrief(row.payload)) ?? null;
+}
+
+function pickDisplayRow(currentRow: SocialGroupAIBriefRow | null, latestRow: SocialGroupAIBriefRow | null) {
+  if (isSuccessfulStoredBriefRow(currentRow)) return currentRow;
+  if (latestRow) return latestRow;
+  if (currentRow?.payload && hasRenderableBrief(currentRow.payload)) return currentRow;
+  return currentRow ?? null;
 }
 
 async function upsertBriefRow(admin: any, row: SocialGroupAIBriefRow) {
@@ -2071,16 +2185,40 @@ function buildFlowRowLevel(id: SocialGroupAIBriefFlowRow["id"], context: GroupBr
   return 2;
 }
 
+function buildStoredFlowRowLevel(
+  id: SocialGroupAIBriefFlowRow["id"],
+  payload: SocialGroupAIBriefPayload
+): 1 | 2 | 3 | 4 | 5 {
+  if (id === "energy") {
+    if ((payload.metrics.avgBattery ?? 100) < 40 || (payload.metrics.avgSleep ?? 99) < 5.8) return 2;
+    if ((payload.metrics.avgBattery ?? 100) < 62 || (payload.metrics.avgSleep ?? 99) < 6.7) return 3;
+    if ((payload.metrics.avgBattery ?? 100) < 74 || (payload.metrics.avgSleep ?? 99) < 7.2) return 4;
+    return 5;
+  }
+  if (id === "risk") {
+    if (payload.metrics.dangerCount > 0) return 5;
+    if (payload.metrics.warningCount > 1) return 4;
+    if (payload.metrics.warningCount > 0) return 3;
+    return 2;
+  }
+  if (payload.metrics.commonOffCount >= 2 || payload.windows.length >= 2) return 5;
+  if (payload.metrics.commonOffCount >= 1 || payload.windows.length >= 1) return 4;
+  if (payload.metrics.nightCountToday === 0) return 3;
+  return 2;
+}
+
 function buildLivePanel(args: {
   row: SocialGroupAIBriefRow | null;
-  context: GroupBriefContext;
+  context: GroupBriefContext | null;
 }): NonNullable<SocialGroupAIBriefResponse["live"]> {
-  const snapshot = buildSnapshot({
-    context: args.context,
-    promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
-    existingRow: args.row,
-  });
   const payload = args.row?.payload && hasRenderableBrief(args.row.payload) ? args.row.payload : null;
+  const snapshot = !payload && args.context
+    ? buildSnapshot({
+        context: args.context,
+        promptVersion: SOCIAL_GROUP_AI_BRIEF_PROMPT_VERSION,
+        existingRow: args.row,
+      })
+    : null;
   const flowSource: Array<{
     id: string;
     title: string;
@@ -2090,17 +2228,17 @@ function buildLivePanel(args: {
   }> =
     payload?.findings && payload.findings.length === 3
       ? payload.findings
-      : snapshot.findings.map((item) => ({
+      : (snapshot?.findings ?? []).map((item) => ({
           id: item.id,
           title: item.defaultTitle,
           body: item.defaultBody,
           tone: item.tone,
           factLabel: item.factLabel,
         }));
-  const windowSource = payload?.windows ?? snapshot.windows;
+  const windowSource = payload?.windows ?? snapshot?.windows ?? [];
   const personalCardSource =
     payload?.personalCards ??
-    snapshot.personalCards.map((item) => ({
+    (snapshot?.personalCards ?? []).map((item) => ({
       userId: item.userId,
       nickname: item.nickname,
       avatarEmoji: item.avatarEmoji,
@@ -2112,6 +2250,21 @@ function buildLivePanel(args: {
       summary: item.defaultSummary,
       action: item.defaultAction,
     }));
+  const metricsSource =
+    payload?.metrics ??
+    (args.context
+      ? buildMetricsPayload(args.context.metrics)
+      : {
+          contributorCount: 0,
+          optInCardCount: 0,
+          avgBattery: null,
+          avgSleep: null,
+          warningCount: 0,
+          dangerCount: 0,
+          commonOffCount: 0,
+          nightCountToday: 0,
+          offCountToday: 0,
+        });
   const liveFlowSource = flowSource.reduce<
     Array<{
       id: "energy" | "risk";
@@ -2132,10 +2285,15 @@ function buildLivePanel(args: {
     }
     return list;
   }, []);
+  const weekSource = payload?.week ?? snapshot?.week ?? args.context?.week;
   return {
-    week: payload?.week ?? snapshot.week,
+    week: weekSource ?? {
+      startISO: todayISO(),
+      endISO: todayISO(),
+      label: formatMonthDay(todayISO()),
+    },
     updatedAt: args.row?.generated_at ?? new Date().toISOString(),
-    metrics: buildMetricsPayload(args.context.metrics),
+    metrics: metricsSource,
     flowRows: liveFlowSource.map((item) => ({
       id: item.id,
       label: item.id === "energy" ? "에너지" : "리스크",
@@ -2143,7 +2301,9 @@ function buildLivePanel(args: {
       summary: item.body,
       factLabel: item.factLabel,
       tone: item.tone,
-      level: buildFlowRowLevel(item.id as SocialGroupAIBriefFlowRow["id"], args.context),
+      level: payload
+        ? buildStoredFlowRowLevel(item.id as SocialGroupAIBriefFlowRow["id"], payload)
+        : buildFlowRowLevel(item.id as SocialGroupAIBriefFlowRow["id"], args.context as GroupBriefContext),
     })),
     windows: windowSource,
     personalCards: personalCardSource,
@@ -2152,7 +2312,7 @@ function buildLivePanel(args: {
 
 function buildSnapshotPanel(args: {
   row: SocialGroupAIBriefRow | null;
-  context: GroupBriefContext;
+  context: GroupBriefContext | null;
 }): { snapshot: NonNullable<SocialGroupAIBriefResponse["snapshot"]>; stale: boolean; errorCode: string | null } {
   if (args.row?.payload && hasRenderableBrief(args.row.payload)) {
     return {
@@ -2163,6 +2323,22 @@ function buildSnapshotPanel(args: {
       },
       stale: args.row.status !== "ready",
       errorCode: args.row.status === "failed" ? "group_ai_brief_generation_failed" : null,
+    };
+  }
+
+  if (!args.context) {
+    return {
+      snapshot: {
+        hero: {
+          headline: "이번 주 그룹 흐름을 준비 중이에요.",
+          subheadline: "브리프를 생성하면 이번 주 회복 패턴을 한눈에 볼 수 있어요.",
+          tone: "steady",
+        },
+        actions: [],
+        generatedAt: null,
+      },
+      stale: true,
+      errorCode: "group_ai_brief_missing",
     };
   }
 
@@ -2424,6 +2600,7 @@ function buildResponse(args: {
   viewer: ViewerPrefs;
   context: GroupBriefContext | null;
 }): SocialGroupAIBriefResponse {
+  const hasStoredRow = Boolean(args.row?.payload && hasRenderableBrief(args.row.payload));
   const cooldownUntil = args.row?.cooldown_until ? Date.parse(args.row.cooldown_until) : null;
   const canRefresh =
     args.viewer.hasEntitlement &&
@@ -2456,7 +2633,7 @@ function buildResponse(args: {
     };
   }
 
-  if (args.context && !hasMinimumContributorCount(args.context)) {
+  if (args.context && !hasMinimumContributorCount(args.context) && !hasStoredRow) {
     return {
       state: "insufficient_data",
       stale: false,
@@ -2473,7 +2650,7 @@ function buildResponse(args: {
     };
   }
 
-  if (!args.context) {
+  if (!args.context && !hasStoredRow) {
     return {
       state: "failed",
       stale: false,
@@ -2497,7 +2674,7 @@ function buildResponse(args: {
   const traceMeta = readStoredTraceMeta(args.row);
   const hasStoredPayload = Boolean(args.row?.payload && hasRenderableBrief(args.row.payload));
   console.info("[SocialGroupAIBrief] response_ready", {
-    groupId: args.context.groupId,
+    groupId: args.context?.groupId ?? args.row?.group_id ?? null,
     rowStatus: args.row?.status ?? null,
     generatedAt: args.row?.generated_at ?? null,
     stale: snapshotPanel.stale,
@@ -2568,9 +2745,14 @@ export async function getCurrentGroupAIBrief(args: {
     };
   }
   const week = getCurrentWeekWindow();
+  let currentWeekRow: SocialGroupAIBriefRow | null = null;
   let row: SocialGroupAIBriefRow | null = null;
   try {
-    row = await readBriefRow(args.admin, args.groupId, week.startISO);
+    currentWeekRow = await readBriefRow(args.admin, args.groupId, week.startISO);
+    row = currentWeekRow;
+    if (!isSuccessfulStoredBriefRow(currentWeekRow)) {
+      row = pickDisplayRow(currentWeekRow, await readLatestStoredDisplayRow(args.admin, args.groupId));
+    }
   } catch (error) {
     console.error(
       "[SocialGroupAIBrief] readBriefRow failed group=%d err=%s",
@@ -2612,7 +2794,8 @@ export async function refreshCurrentGroupAIBrief(args: {
   }
 
   const week = getCurrentWeekWindow();
-  const existingRow = await readBriefRow(args.admin, args.groupId, week.startISO);
+  const currentWeekRow = await readBriefRow(args.admin, args.groupId, week.startISO);
+  const existingRow = currentWeekRow ?? (await readLatestStoredDisplayRow(args.admin, args.groupId));
   const currentContext = await loadGroupBriefContext({
     admin: args.admin,
     groupId: args.groupId,
@@ -2628,9 +2811,9 @@ export async function refreshCurrentGroupAIBrief(args: {
     existingResponseId: existingTraceMeta.responseId,
   });
   if (
-    existingRow?.cooldown_until &&
-    Date.parse(existingRow.cooldown_until) > Date.now() &&
-    !shouldBypassCooldownForCurrentContext(existingRow, currentContext)
+    currentWeekRow?.cooldown_until &&
+    Date.parse(currentWeekRow.cooldown_until) > Date.now() &&
+    !shouldBypassCooldownForCurrentContext(currentWeekRow, currentContext)
   ) {
     const error = new Error("group_ai_brief_refresh_cooldown");
     (error as any).code = "group_ai_brief_refresh_cooldown";
@@ -2723,8 +2906,140 @@ export async function saveGroupAIBriefViewerPrefs(args: {
   };
 }
 
-export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
+async function autoGenerateGroupAIBriefForGroup(args: {
+  admin: any;
+  groupId: number;
+  subscriptionCache: Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>;
+}) {
   const week = getCurrentWeekWindow();
+  const currentWeekRow = await readBriefRow(args.admin, args.groupId, week.startISO);
+  if (isSuccessfulStoredBriefRow(currentWeekRow) && wasRowGeneratedOnDay(currentWeekRow, week.todayISO)) {
+    return { status: "already_generated_today" as const, row: currentWeekRow };
+  }
+
+  const context = await loadGroupBriefContext({
+    admin: args.admin,
+    groupId: args.groupId,
+    subscriptionCache: args.subscriptionCache,
+  });
+
+  if (!context.hasPaidEligibleMember) {
+    return { status: "no_paid_member" as const, row: null };
+  }
+  if (!hasMinimumContributorCount(context)) {
+    return { status: "insufficient_contributors" as const, row: null };
+  }
+  if (!hasAutoGenerateReadyContributors(context)) {
+    return {
+      status: "today_threshold_not_met" as const,
+      row: null,
+      contributorCount: context.metrics.contributorCount,
+      todayContributorRecordCount: context.metrics.todayContributorRecordCount,
+      autoGenerateRequiredCount: context.metrics.autoGenerateRequiredCount,
+    };
+  }
+
+  const seedRow = currentWeekRow ?? (await readLatestStoredDisplayRow(args.admin, args.groupId));
+  const generated = await generateGroupAIBriefArtifact({
+    admin: args.admin,
+    groupId: args.groupId,
+    generatorType: "cron",
+    subscriptionCache: args.subscriptionCache,
+    existingRow: seedRow,
+  });
+
+  if (!generated) {
+    return { status: "generation_skipped" as const, row: null };
+  }
+  if (generated.status !== "ready" || readStoredFallbackReason(generated)) {
+    return { status: "preserved_existing_output" as const, row: generated };
+  }
+
+  await upsertBriefRow(args.admin, generated);
+  return { status: "processed" as const, row: generated };
+}
+
+export async function maybeAutoRefreshGroupAIBriefsForUserStateChange(args: {
+  admin: any;
+  userId: string;
+  previousPayload: unknown;
+  nextPayload: unknown;
+}) {
+  const dayISO = todayISO();
+  if (!didTrackedHealthInputChange(args.previousPayload, args.nextPayload, dayISO)) {
+    return {
+      dayISO,
+      triggered: false,
+      reason: "no_relevant_today_health_change",
+      processedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+    };
+  }
+
+  const { data: memberships, error } = await (args.admin as any)
+    .from("rnest_social_group_members")
+    .select("group_id")
+    .eq("user_id", args.userId);
+  if (error) throw error;
+
+  const groupIds = Array.from(
+    new Set<number>(
+      (memberships ?? [])
+        .map((row: any) => Number(row.group_id))
+        .filter((value: number) => Number.isFinite(value) && value > 0)
+    )
+  );
+  if (groupIds.length === 0) {
+    return {
+      dayISO,
+      triggered: false,
+      reason: "no_group_membership",
+      processedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+    };
+  }
+
+  const subscriptionCache = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
+  let processedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  for (const groupId of groupIds) {
+    try {
+      const result = await autoGenerateGroupAIBriefForGroup({
+        admin: args.admin,
+        groupId,
+        subscriptionCache,
+      });
+      if (result.status === "processed") {
+        processedCount += 1;
+      } else {
+        skippedCount += 1;
+      }
+    } catch (error) {
+      failedCount += 1;
+      console.error(
+        "[SocialGroupAIBrief] auto generation failed group=%d userId=%s err=%s",
+        groupId,
+        String(args.userId).slice(0, 8),
+        String((error as any)?.message ?? error)
+      );
+    }
+  }
+
+  return {
+    dayISO,
+    triggered: processedCount > 0,
+    reason: processedCount > 0 ? "processed" : "threshold_not_met_or_preserved",
+    processedCount,
+    skippedCount,
+    failedCount,
+  };
+}
+
+export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
   const subscriptionCache = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
   const { data: memberRows, error: memberErr } = await (args.admin as any)
     .from("rnest_social_group_members")
@@ -2743,18 +3058,15 @@ export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
 
   for (const groupId of candidateGroupIds) {
     try {
-      const generated = await generateGroupAIBriefArtifact({
+      const result = await autoGenerateGroupAIBriefForGroup({
         admin: args.admin,
         groupId,
-        generatorType: "cron",
         subscriptionCache,
-        existingRow: await readBriefRow(args.admin, groupId, week.startISO),
       });
-      if (!generated) {
+      if (result.status !== "processed") {
         skippedCount += 1;
         continue;
       }
-      await upsertBriefRow(args.admin, generated);
       processedCount += 1;
     } catch (error) {
       failedCount += 1;
@@ -2763,7 +3075,7 @@ export async function generateWeeklyGroupAIBriefs(args: { admin: any }) {
   }
 
   return {
-    weekStartISO: week.startISO,
+    weekStartISO: getCurrentWeekWindow().startISO,
     processedCount,
     skippedCount,
     failedCount,
