@@ -42,6 +42,7 @@ type HookState = {
   loading: boolean;
   generating: boolean;
   savingOrders: boolean;
+  pendingAutoOrders: boolean;
   togglingCompletion: string | null;
   error: string | null;
   reload: () => Promise<void>;
@@ -90,6 +91,18 @@ const AUTO_ORDERS_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 // Track brief-without-orders sessions across hook instances and full reloads
 // so a resumed page cannot enqueue the same orders generation with default options.
 const autoOrdersRequests = new Map<string, AutoOrdersRequestRecord>();
+const autoOrdersRequestListeners = new Set<() => void>();
+
+function emitAutoOrdersRequestChange() {
+  for (const listener of autoOrdersRequestListeners) listener();
+}
+
+function subscribeAutoOrdersRequestChange(listener: () => void) {
+  autoOrdersRequestListeners.add(listener);
+  return () => {
+    autoOrdersRequestListeners.delete(listener);
+  };
+}
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return response.json().catch(() => null);
@@ -191,6 +204,10 @@ function getAutoOrdersRequestOptions(key: string): AIRecoveryOrderGenerationOpti
   return stored ? normalizeAIRecoveryOrderGenerationOptions(stored) : null;
 }
 
+function getAutoOrdersRequestStatus(key: string) {
+  return getAutoOrdersRequestRecord(key)?.status ?? null;
+}
+
 function beginAutoOrdersRequest(key: string, options?: AIRecoveryOrderGenerationOptions) {
   const existing = getAutoOrdersRequestRecord(key);
   if (existing?.status === "pending" || existing?.status === "completed") return false;
@@ -203,6 +220,7 @@ function beginAutoOrdersRequest(key: string, options?: AIRecoveryOrderGeneration
   autoOrdersRequests.set(key, nextRecord);
   persistAutoOrdersRequest(key, nextRecord);
   trimAutoOrdersRequests();
+  emitAutoOrdersRequestChange();
   return true;
 }
 
@@ -212,6 +230,7 @@ function settleAutoOrdersRequest(key: string, success: boolean) {
   if (!success) {
     autoOrdersRequests.delete(key);
     clearPersistedAutoOrdersRequest(key);
+    emitAutoOrdersRequestChange();
     return;
   }
   const nextRecord = {
@@ -222,6 +241,7 @@ function settleAutoOrdersRequest(key: string, success: boolean) {
   autoOrdersRequests.set(key, nextRecord);
   persistAutoOrdersRequest(key, nextRecord);
   trimAutoOrdersRequests();
+  emitAutoOrdersRequestChange();
 }
 
 function normalizeSessionData(
@@ -527,12 +547,14 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const [loading, setLoading] = useState(!initialData);
   const [generating, setGenerating] = useState(false);
   const [savingOrders, setSavingOrders] = useState(false);
+  const [pendingAutoOrders, setPendingAutoOrders] = useState(false);
   const [togglingCompletion, setTogglingCompletion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoRequestedRef = useRef(new Set<string>());
   const dataRequestRef = useRef(0);
   const generateInFlightRef = useRef(false);
   const ordersInFlightRef = useRef(false);
+  const loadRef = useRef<(options?: { force?: boolean }) => Promise<void>>(async () => {});
   const togglingCompletionRef = useRef<string | null>(null);
   const committedCompletionVersionRef = useRef(0);
 
@@ -963,6 +985,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       setGenerating(false);
     }
   };
+  loadRef.current = load;
 
   // useCallback으로 안정적인 참조를 유지합니다.
   // refs를 통해 항상 최신 data/slot/dateISO를 읽어 stale closure를 방지합니다.
@@ -1056,6 +1079,44 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   }, [initialData, args.dateISO, args.slot]);
 
   useEffect(() => {
+    if (!args.enabled) {
+      setPendingAutoOrders(false);
+      return;
+    }
+
+    const syncPendingAutoOrders = () => {
+      const currentData = dataRef.current;
+      const autoOrdersKey = buildAutoOrdersKey(currentData);
+      const status = autoOrdersKey ? getAutoOrdersRequestStatus(autoOrdersKey) : null;
+      const shouldReloadCompletedOrders =
+        status === "completed" &&
+        Boolean(currentData?.session?.brief) &&
+        !currentData?.session?.orders &&
+        !ordersInFlightRef.current;
+
+      setPendingAutoOrders(status === "pending");
+
+      if (shouldReloadCompletedOrders) {
+        void loadRef.current({ force: true });
+      }
+    };
+
+    syncPendingAutoOrders();
+    const unsubscribe = subscribeAutoOrdersRequestChange(syncPendingAutoOrders);
+    if (typeof window === "undefined") return unsubscribe;
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key != null && !event.key.startsWith(AUTO_ORDERS_STORAGE_PREFIX)) return;
+      syncPendingAutoOrders();
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [args.enabled, args.dateISO, args.slot, accountKey]);
+
+  useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [args.dateISO, args.slot, args.enabled, accountKey, resourceKey, stateRevision]);
@@ -1065,6 +1126,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
     loading,
     generating,
     savingOrders,
+    pendingAutoOrders,
     togglingCompletion,
     error,
     reload: load,

@@ -195,15 +195,15 @@ export function InsightsRecoveryOrdersDetail({
   const orders = useMemo(() => ordersPayload?.items ?? [], [ordersPayload?.items]);
   const responseCompletions = useMemo(() => response?.completions ?? [], [response?.completions]);
   const canRegenerateOrders = response?.quota.canRegenerateOrders ?? !currentSession;
-  // 초기 데이터에서 해설은 있지만 오더가 없으면 오더 생성 중으로 간주
+  // 초기 진입 시 brief만 있고 orders가 없으면 오더 생성 중으로 간주
   const initiallyOrdersPending = Boolean(
     entry.initialData?.session?.brief && !entry.initialData?.session?.orders,
   );
-  // 오더 생성 중 또는 초기 로드 시 오더가 예상되는 동안 전체화면 로딩 오버레이 표시
-  // 첫 번째 조건: savingOrders=true 이면 오더가 실제로 생성 중 → gate.allowed 불필요
-  // 두 번째 조건: initiallyOrdersPending(brief만 있는 상태로 진입) + 아직 오더 없음 + 로딩 중
+  // 이미 다른 화면에서 시작된 자동 오더 생성도 pendingAutoOrders로 이어받아
+  // brief만 보이는 중간 상태가 사용자에게 오류처럼 보이지 않게 한다.
   const showGeneratingOverlay =
     Boolean(session.savingOrders && !ordersPayload) ||
+    Boolean(session.pendingAutoOrders && !ordersPayload) ||
     Boolean(!session.error && initiallyOrdersPending && !ordersPayload && session.loading);
   const showGenerationControls = Boolean(response?.showGenerationControls);
   const [localCompletions, setLocalCompletions] = useState<string[]>(responseCompletions);
