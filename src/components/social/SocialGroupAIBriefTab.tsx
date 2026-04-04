@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, BatteryMedium, CalendarDays, ShieldAlert } from "lucide-react";
 import { addDays, fromISODate, isISODate, toISODate } from "@/lib/date";
 import { useAuthState } from "@/lib/auth";
@@ -81,18 +81,6 @@ function mapRequestErrorMessage(errorCode: string | null | undefined, fallback: 
   }
 }
 
-function formatGeneratedAt(value: string | null) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("ko-KR", {
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 function formatMetric(value: number | null, suffix = "") {
   if (value == null || !Number.isFinite(value)) return "-";
   return `${value}${suffix}`;
@@ -122,22 +110,6 @@ function EligibilityStatCard({
       <p className="mt-2 text-[22px] font-bold tracking-[-0.03em] text-ios-text">{value}</p>
       <p className="mt-1 text-[11px] leading-5 text-ios-muted">{hint}</p>
     </div>
-  );
-}
-
-function MetaPill({ text, tone = "neutral" }: { text: string; tone?: "neutral" | "accent" | "warning" }) {
-  return (
-    <span
-      className={
-        tone === "accent"
-          ? "inline-flex rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]"
-          : tone === "warning"
-            ? "inline-flex rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700"
-            : "inline-flex rounded-full bg-ios-bg px-3 py-1 text-[11px] font-semibold text-ios-muted"
-      }
-    >
-      {text}
-    </span>
   );
 }
 
@@ -347,30 +319,24 @@ function CompactMetricCell({
 
 function PersonalBandCard({
   cards,
-  pendingCard,
 }: {
   cards: SocialGroupAIBriefPersonalCard[];
-  pendingCard: ReactNode;
 }) {
   return (
     <div className="rounded-[32px] bg-[linear-gradient(180deg,rgba(249,247,255,0.98),rgba(255,255,255,0.98))] px-5 py-5 shadow-apple">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[14px] font-semibold text-ios-text">멤버 상태 밴드</p>
-          <p className="mt-1 text-[11.5px] leading-5 text-ios-muted">
-            opt-in 멤버의 최신 RNest vital, body, mental, 수면 부채만 compact하게 표시합니다.
-          </p>
         </div>
         <Activity className="mt-0.5 h-4 w-4 text-ios-muted" />
       </div>
-      {cards.length === 0 && !pendingCard ? (
+      {cards.length === 0 ? (
         <p className="mt-4 rounded-[24px] bg-white px-4 py-3 text-[12.5px] text-ios-muted">
           아직 그룹에 표시할 개인 카드가 없어요.
         </p>
       ) : (
         <div className="-mx-1 mt-4 overflow-x-auto px-1 pb-1">
           <div className="flex gap-3">
-            {pendingCard}
             {cards.map((item) => (
               <div
                 key={item.userId}
@@ -424,7 +390,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
   const [toggling, setToggling] = useState(false);
   const [response, setResponse] = useState<SocialGroupAIBriefResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [optimisticCardMode, setOptimisticCardMode] = useState<"add" | "remove" | null>(null);
+  const [optimisticCardMode, setOptimisticCardMode] = useState<"remove" | null>(null);
   const responseRef = useRef<SocialGroupAIBriefResponse | null>(null);
   const stateRevisionRef = useRef<number | null>(null);
 
@@ -543,7 +509,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
     async (next: boolean) => {
       if (!response) return;
       const previousChecked = response.viewer.personalCardOptIn;
-      setOptimisticCardMode(next ? "add" : "remove");
+      setOptimisticCardMode(next ? null : "remove");
       setToggling(true);
       setError(null);
       setResponse((prev) =>
@@ -615,26 +581,6 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
     }
     return cards;
   }, [currentUserId, live?.personalCards, optimisticCardMode]);
-
-  const hasCurrentUserCard = useMemo(
-    () => visiblePersonalCards.some((item) => item.userId === currentUserId),
-    [currentUserId, visiblePersonalCards]
-  );
-
-  const pendingPersonalCard = useMemo(() => {
-    if (optimisticCardMode !== "add" || hasCurrentUserCard) return null;
-    return (
-      <div className="w-[238px] shrink-0 rounded-[26px] bg-white px-4 py-4 shadow-[0_16px_36px_rgba(123,111,208,0.10)]">
-        <div className="flex items-center gap-3">
-          <span className="text-[22px]">✨</span>
-          <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-ios-text">내 카드 반영 중</p>
-            <p className="mt-1 text-[11px] text-ios-muted">다음 서버 응답에서 개인 카드 밴드에 합쳐집니다.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }, [hasCurrentUserCard, optimisticCardMode]);
 
   if (loading && !response) {
     return (
@@ -730,11 +676,6 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
               </div>
             </>
           ) : null}
-          <div className="mt-4 rounded-[24px] bg-ios-bg px-4 py-4">
-            <p className="text-[12.5px] leading-6 text-ios-muted">
-              조건이 충족되면 AI 요약은 06:00 / 18:00 KST 배치에서 자동으로 열리고, 라이브 데이터는 그 전에도 자동 반영됩니다.
-            </p>
-          </div>
         </div>
       </div>
     );
@@ -753,9 +694,6 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
           <h3 className="mt-4 text-[22px] font-bold tracking-[-0.03em] text-ios-text">
             {stateMessage(response.errorCode)}
           </h3>
-          <p className="mt-2 text-[13px] leading-6 text-ios-muted">
-            AI 요약은 06:00 / 18:00 KST에 자동 갱신되고, 라이브 데이터는 관련 이벤트가 들어오면 자동으로 다시 불러옵니다.
-          </p>
           <Button
             variant="secondary"
             onClick={() => void handleRetry()}
@@ -789,35 +727,8 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
         <div className="relative overflow-hidden rounded-[34px] bg-white px-5 py-5 shadow-apple">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(123,111,208,0.16),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(111,208,185,0.12),transparent_34%)]" />
           <div className="relative">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex flex-wrap gap-2">
-                <MetaPill
-                  text={
-                    snapshot.hero.tone === "recover"
-                      ? "회복 우선"
-                      : snapshot.hero.tone === "watch"
-                        ? "주의 구간"
-                        : "안정 흐름"
-                  }
-                  tone="accent"
-                />
-                <MetaPill text="AI 요약 06:00 · 18:00 KST 갱신" />
-                <MetaPill text="라이브 데이터 자동 반영" />
-                {syncing || toggling ? <MetaPill text="동기화 중" tone="warning" /> : null}
-              </div>
-              {response.stale ? (
-                <MetaPill text={snapshot.generatedAt ? "직전 AI 요약 유지" : "첫 AI 요약 대기"} tone="warning" />
-              ) : null}
-            </div>
-
-            <h3 className="mt-4 text-[24px] font-bold tracking-[-0.04em] text-ios-text">{snapshot.hero.headline}</h3>
+            <h3 className="text-[24px] font-bold tracking-[-0.04em] text-ios-text">{snapshot.hero.headline}</h3>
             <p className="mt-2 text-[13px] leading-6 text-ios-muted">{snapshot.hero.subheadline}</p>
-
-            <div className="mt-5 flex flex-wrap gap-2 text-[11px] text-ios-muted">
-              <span>AI 요약 {formatGeneratedAt(snapshot.generatedAt)}</span>
-              <span>기여 멤버 {live.metrics.contributorCount}명</span>
-              <span>라이브 반영 {formatGeneratedAt(live.updatedAt)}</span>
-            </div>
           </div>
         </div>
 
@@ -829,7 +740,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
             value={`${live.metrics.warningCount}/${live.metrics.dangerCount}`}
             hint="주의 인원 / 회복 우선 인원"
           />
-          <MetricCard label="공통 OFF 수" value={String(live.metrics.commonOffCount)} hint="같이 쉬기 좋은 날 수" />
+          <MetricCard label="겹치는 회복 창" value={String(live.metrics.commonOffCount)} hint="같이 맞추기 쉬운 후보 수" />
         </div>
 
         <div className="mt-4 rounded-[32px] bg-[linear-gradient(180deg,rgba(243,248,255,0.98),rgba(255,255,255,0.98))] px-5 py-5 shadow-apple">
@@ -852,7 +763,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
         <div className="mt-4 rounded-[32px] bg-[linear-gradient(180deg,rgba(240,251,249,0.96),rgba(255,255,255,0.98))] px-5 py-5 shadow-apple">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[14px] font-semibold text-ios-text">같이 쉬기 좋은 창</p>
+              <p className="text-[14px] font-semibold text-ios-text">같이 맞추기 쉬운 창</p>
               <p className="mt-1 text-[11.5px] leading-5 text-ios-muted">
                 공개 일정 기준으로 같은 회복 창을 먼저 잡기 쉬운 날을 표시합니다.
               </p>
@@ -865,9 +776,6 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
         <div className="mt-4 rounded-[32px] bg-[linear-gradient(180deg,rgba(249,246,240,0.98),rgba(255,255,255,0.98))] px-5 py-5 shadow-apple">
           <div>
             <p className="text-[14px] font-semibold text-ios-text">이번 주 실행 3단계</p>
-            <p className="mt-1 text-[11.5px] leading-5 text-ios-muted">
-              AI 요약은 하루 두 번만 갱신하고, 실행 순서는 흔들리지 않게 유지합니다.
-            </p>
           </div>
           <div className="mt-4 space-y-1">
             {snapshot.actions.map((action, index) => (
@@ -877,7 +785,7 @@ export function SocialGroupAIBriefTab({ groupId, memberIds }: Props) {
         </div>
 
         <div className="mt-4">
-          <PersonalBandCard cards={visiblePersonalCards} pendingCard={pendingPersonalCard} />
+          <PersonalBandCard cards={visiblePersonalCards} />
         </div>
 
         <div className="mt-4">
