@@ -89,7 +89,7 @@ const AUTO_ORDERS_STORAGE_PREFIX = "rnest:ai-recovery:auto-orders:";
 const AUTO_ORDERS_PENDING_STALE_MS = 90_000;
 const AUTO_ORDERS_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTO_ORDERS_RELOAD_RETRY_MS = 700;
-const AUTO_ORDERS_RELOAD_TIMEOUT_MS = 10_000;
+const AUTO_ORDERS_RELOAD_TIMEOUT_MS = 60_000;
 // Track brief-without-orders sessions across hook instances and full reloads
 // so a resumed page cannot enqueue the same orders generation with default options.
 const autoOrdersRequests = new Map<string, AutoOrdersRequestRecord>();
@@ -216,6 +216,47 @@ function getAutoOrdersRequestOptions(key: string): AIRecoveryOrderGenerationOpti
 
 function getAutoOrdersRequestStatus(key: string) {
   return getAutoOrdersRequestRecord(key)?.status ?? null;
+}
+
+function buildAutoOrdersSlotPrefix(accountKey: string | null, dateISO: ISODate, slot: AIRecoverySlot) {
+  return `${accountKey ?? "guest"}:${dateISO}:${slot}:`;
+}
+
+function listAutoOrdersRequestKeysForSlot(accountKey: string | null, dateISO: ISODate, slot: AIRecoverySlot) {
+  const prefix = buildAutoOrdersSlotPrefix(accountKey, dateISO, slot);
+  const seen = new Set<string>();
+  const matches: Array<{ key: string; updatedAt: number }> = [];
+
+  const pushRecord = (key: string, record: AutoOrdersRequestRecord | null) => {
+    if (seen.has(key) || !record) return;
+    seen.add(key);
+    matches.push({
+      key,
+      updatedAt: record.updatedAt,
+    });
+  };
+
+  for (const key of autoOrdersRequests.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    pushRecord(key, getAutoOrdersRequestRecord(key));
+  }
+
+  if (typeof window !== "undefined") {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index);
+      if (!storageKey?.startsWith(AUTO_ORDERS_STORAGE_PREFIX)) continue;
+      const requestKey = storageKey.slice(AUTO_ORDERS_STORAGE_PREFIX.length);
+      if (!requestKey.startsWith(prefix)) continue;
+      pushRecord(requestKey, getAutoOrdersRequestRecord(requestKey));
+    }
+  }
+
+  matches.sort((left, right) => right.updatedAt - left.updatedAt);
+  return matches.map((entry) => entry.key);
+}
+
+function getLatestAutoOrdersRequestKeyForSlot(accountKey: string | null, dateISO: ISODate, slot: AIRecoverySlot) {
+  return listAutoOrdersRequestKeysForSlot(accountKey, dateISO, slot)[0] ?? null;
 }
 
 function beginAutoOrdersRequest(key: string, options?: AIRecoveryOrderGenerationOptions) {
@@ -557,7 +598,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
       }),
     [args.dateISO, args.enabled, args.slot]
   );
-  const initialSourceData = args.initialData ?? memoryEntry?.data ?? null;
+  const initialSourceData = memoryEntry?.data ?? args.initialData ?? null;
   const initialData = useMemo(
     () =>
       normalizeSessionData(initialSourceData, {
@@ -581,8 +622,12 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   const [generating, setGenerating] = useState(false);
   const [savingOrders, setSavingOrders] = useState(false);
   const [pendingAutoOrders, setPendingAutoOrders] = useState(() => {
-    const initialAutoOrdersKey = buildAutoOrdersKey(initialData);
-    return initialAutoOrdersKey ? getAutoOrdersRequestStatus(initialAutoOrdersKey) === "pending" : false;
+    if (hasSessionOrders(initialData)) return false;
+    const initialAutoOrdersKey =
+      buildAutoOrdersKey(initialData) ?? getLatestAutoOrdersRequestKeyForSlot(accountKey, args.dateISO, args.slot);
+    if (!initialAutoOrdersKey) return false;
+    const status = getAutoOrdersRequestStatus(initialAutoOrdersKey);
+    return status === "pending" || status === "completed";
   });
   const [togglingCompletion, setTogglingCompletion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1111,8 +1156,11 @@ export function useAIRecoverySession(args: HookArgs): HookState {
   }, [initialData, args.dateISO, args.slot, pickLatestData]);
 
   const pendingAutoOrdersKey = useMemo(
-    () => buildAutoOrdersKey(data),
-    [buildAutoOrdersKey, data]
+    () => {
+      if (hasSessionOrders(data)) return null;
+      return buildAutoOrdersKey(data) ?? getLatestAutoOrdersRequestKeyForSlot(accountKey, args.dateISO, args.slot);
+    },
+    [accountKey, args.dateISO, args.slot, buildAutoOrdersKey, data]
   );
 
   useEffect(() => {
@@ -1177,7 +1225,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
         status === "pending" ||
         (
           status === "completed" &&
-          hasBriefWithoutOrders(currentData) &&
+          !hasSessionOrders(currentData) &&
           !ordersInFlightRef.current
         );
 
@@ -1185,7 +1233,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
 
       const shouldReloadCompletedOrders =
         status === "completed" &&
-        hasBriefWithoutOrders(currentData) &&
+        !hasSessionOrders(currentData) &&
         !ordersInFlightRef.current;
 
       if (!shouldReloadCompletedOrders || !pendingAutoOrdersKey) {
@@ -1206,7 +1254,7 @@ export function useAIRecoverySession(args: HookArgs): HookState {
           latestStatus === "pending" ||
           (
             latestStatus === "completed" &&
-            hasBriefWithoutOrders(latestData) &&
+            !hasSessionOrders(latestData) &&
             !ordersInFlightRef.current
           );
         setPendingAutoOrders(stillWaiting);
