@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, BatteryMedium, CalendarDays, ShieldAlert } from "lucide-react";
-import { addDays, fromISODate, isISODate, toISODate } from "@/lib/date";
+import { addDays, fromISODate, isISODate, todayISO, toISODate } from "@/lib/date";
 import { useAuthState } from "@/lib/auth";
 import {
   buildSocialClientCacheKey,
@@ -181,21 +181,34 @@ function MetricCard({
 }
 
 function buildWeekCells(startISO: string) {
-  const weekday = ["월", "화", "수", "목", "금", "토", "일"];
-  const start = fromISODate(isISODate(startISO) ? startISO : toISODate(new Date()));
+  const start = fromISODate(isISODate(startISO) ? startISO : todayISO());
   return Array.from({ length: 7 }).map((_, index) => {
-    const iso = toISODate(addDays(start, index));
-    const [, month, date] = iso.split("-");
+    const currentDate = addDays(start, index);
+    const iso = toISODate(currentDate);
+    const [, month, day] = iso.split("-");
     return {
       iso,
-      weekday: weekday[index] ?? "",
-      dayLabel: `${Number(month)}/${Number(date)}`,
+      weekday: ["일", "월", "화", "수", "목", "금", "토"][currentDate.getUTCDay()] ?? "",
+      dayLabel: `${Number(month)}/${Number(day)}`,
     };
   });
 }
 
+function normalizeForwardWindows(windows: SocialGroupAIBriefWindow[], startISO: string) {
+  const safeStartISO = isISODate(startISO) ? startISO : todayISO();
+  const endISO = toISODate(addDays(fromISODate(safeStartISO), 6));
+  const byDate = new Map<string, SocialGroupAIBriefWindow>();
+
+  for (const item of windows) {
+    if (!isISODate(item.dateISO)) continue;
+    if (item.dateISO < safeStartISO || item.dateISO > endISO) continue;
+    if (!byDate.has(item.dateISO)) byDate.set(item.dateISO, item);
+  }
+
+  return [...byDate.values()].sort((a, b) => a.dateISO.localeCompare(b.dateISO));
+}
+
 function MiniCalendarStrip({
-  startISO,
   windows,
   onSelectWindow,
 }: {
@@ -203,10 +216,12 @@ function MiniCalendarStrip({
   windows: SocialGroupAIBriefWindow[];
   onSelectWindow?: (window: SocialGroupAIBriefWindow) => void;
 }) {
-  const highlighted = new Map(windows.map((item) => [item.dateISO, item]));
-  const weekCells = buildWeekCells(startISO);
+  const visibleStartISO = todayISO();
+  const visibleWindows = normalizeForwardWindows(windows, visibleStartISO);
+  const highlighted = new Map(visibleWindows.map((item) => [item.dateISO, item]));
+  const weekCells = buildWeekCells(visibleStartISO);
 
-  if (windows.length === 0) {
+  if (visibleWindows.length === 0) {
     return (
       <div className="mt-4 rounded-[24px] bg-white/80 px-4 py-4">
         <div className="flex gap-1.5">
@@ -261,7 +276,7 @@ function MiniCalendarStrip({
         })}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        {windows.map((item) => (
+        {visibleWindows.map((item) => (
           <span key={item.dateISO} className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-ios-text">
             {item.label}
           </span>

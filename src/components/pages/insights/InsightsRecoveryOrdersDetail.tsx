@@ -199,12 +199,25 @@ export function InsightsRecoveryOrdersDetail({
   const initiallyOrdersPending = Boolean(
     entry.initialData?.session?.brief && !entry.initialData?.session?.orders,
   );
+  const ordersRenderSignature = useMemo(() => {
+    if (!ordersPayload?.items?.length) return null;
+    return [
+      currentSession?.generatedAt ?? "",
+      ordersPayload.headline ?? "",
+      ordersPayload.items.length,
+      ordersPayload.items.map((order) => order.id).join(","),
+    ].join("|");
+  }, [currentSession?.generatedAt, ordersPayload?.headline, ordersPayload?.items]);
+  const [awaitingOrdersPaint, setAwaitingOrdersPaint] = useState(
+    Boolean(initiallyOrdersPending && !ordersPayload),
+  );
   // 이미 다른 화면에서 시작된 자동 오더 생성도 pendingAutoOrders로 이어받아
   // brief만 보이는 중간 상태가 사용자에게 오류처럼 보이지 않게 한다.
   const showGeneratingOverlay =
     Boolean(session.savingOrders && !ordersPayload) ||
     Boolean(session.pendingAutoOrders && !ordersPayload) ||
-    Boolean(!session.error && initiallyOrdersPending && !ordersPayload && session.loading);
+    Boolean(!session.error && initiallyOrdersPending && !ordersPayload && session.loading) ||
+    Boolean(awaitingOrdersPaint);
   const showGenerationControls = Boolean(response?.showGenerationControls);
   const [localCompletions, setLocalCompletions] = useState<string[]>(responseCompletions);
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]);
@@ -221,6 +234,48 @@ export function InsightsRecoveryOrdersDetail({
   useEffect(() => {
     setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    setAwaitingOrdersPaint(Boolean(initiallyOrdersPending && !ordersPayload));
+  }, [currentSession?.generatedAt, end, initiallyOrdersPending, ordersPayload, resolvedSlot]);
+
+  useEffect(() => {
+    const shouldWaitForOrdersPaint =
+      Boolean(session.savingOrders && !ordersPayload) ||
+      Boolean(session.pendingAutoOrders && !ordersPayload) ||
+      Boolean(!session.error && initiallyOrdersPending && !ordersPayload && session.loading);
+
+    if (shouldWaitForOrdersPaint) {
+      setAwaitingOrdersPaint(true);
+      return;
+    }
+
+    if (session.error || (!ordersPayload && !session.loading && !session.savingOrders && !session.pendingAutoOrders)) {
+      setAwaitingOrdersPaint(false);
+    }
+  }, [
+    initiallyOrdersPending,
+    ordersPayload,
+    session.error,
+    session.loading,
+    session.pendingAutoOrders,
+    session.savingOrders,
+  ]);
+
+  useEffect(() => {
+    if (!awaitingOrdersPaint || !ordersRenderSignature) return;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        setAwaitingOrdersPaint(false);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [awaitingOrdersPaint, ordersRenderSignature]);
 
   useEffect(() => {
     if (requestedSlot) {

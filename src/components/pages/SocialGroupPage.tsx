@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { useAppStoreSelector } from "@/lib/store";
 import { cn } from "@/lib/cn";
+import { sanitizeInternalPath } from "@/lib/navigation";
 import {
   buildSocialClientCacheKey,
   clearSocialClientCache,
@@ -232,13 +233,21 @@ function OverviewMetricCard({
 export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const returnTo = useMemo(
+    () => sanitizeInternalPath(searchParams.get("returnTo"), ""),
+    [searchParams]
+  );
   const handleBack = useCallback(() => {
+    if (returnTo) {
+      router.replace(returnTo);
+      return;
+    }
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
     } else {
-      router.push("/social");
+      router.push("/social?tab=groups");
     }
-  }, [router]);
+  }, [returnTo, router]);
   const { user } = useAuthState();
   const currentUserId = user?.userId ?? null;
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
@@ -260,6 +269,16 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
   const [shareState, setShareState] = useState<ShareState>("idle");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const updateActiveTab = useCallback((nextTab: DetailTab) => {
+    setActiveTab(nextTab);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (nextTab === "overview") params.delete("tab");
+    else params.set("tab", nextTab);
+    const nextQuery = params.toString();
+    const nextPath = window.location.pathname;
+    window.history.replaceState(window.history.state, "", nextQuery ? `${nextPath}?${nextQuery}` : nextPath);
+  }, []);
   const [memberSheetOpen, setMemberSheetOpen] = useState(false);
   const [memberPreviewSheet, setMemberPreviewSheet] = useState<{
     title: string;
@@ -487,8 +506,8 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     const allowedTabs: DetailTab[] = canManage
       ? ["overview", "aiBrief", "challenge", "manage", "activity"]
       : ["overview", "aiBrief", "challenge", "activity"];
-    if (!allowedTabs.includes(activeTab)) setActiveTab("overview");
-  }, [activeTab, board]);
+    if (!allowedTabs.includes(activeTab)) updateActiveTab("overview");
+  }, [activeTab, board, updateActiveTab]);
 
   useEffect(() => {
     if (activeTab !== "challenge" || !groupIdNum || challengesLoadedRef.current || challengesLoading) return;
@@ -620,6 +639,14 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
     () => board?.members.find((m) => m.userId === currentUserId)?.role ?? "member",
     [board?.members, currentUserId]
   ) as SocialGroupRole;
+  const groupDetailHref = useMemo(() => {
+    if (!groupIdNum) return returnTo || "/social?tab=groups";
+    const params = new URLSearchParams();
+    if (activeTab !== "overview") params.set("tab", activeTab);
+    if (returnTo) params.set("returnTo", returnTo);
+    const query = params.toString();
+    return query ? `/social/groups/${groupIdNum}?${query}` : `/social/groups/${groupIdNum}`;
+  }, [activeTab, groupIdNum, returnTo]);
   const initialLoading = loading && !board;
   const refreshing = loading && !!board;
 
@@ -735,7 +762,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
       if (!res.ok)
         throw new Error(isOwner ? "그룹을 삭제하지 못했어요." : "그룹에서 나가지 못했어요.");
 
-      router.replace("/social");
+      router.replace(returnTo || "/social?tab=groups");
     } catch (err: any) {
       setFeedback({ tone: "error", text: String(err?.message ?? "요청을 처리하지 못했어요.") });
       setBusyAction(null);
@@ -1034,7 +1061,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => updateActiveTab(tab.id)}
                   className={cn(
                     "flex-1 rounded-[14px] px-1.5 py-2.5 text-[12.5px] font-semibold transition",
                     activeTab === tab.id
@@ -1286,7 +1313,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setActiveTab("manage")}
+                      onClick={() => updateActiveTab("manage")}
                       className="text-[12px] font-semibold text-[color:var(--rnest-accent)]"
                     >
                       보기
@@ -1338,6 +1365,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 loading={challengesLoading && !challengesLoadedRef.current}
                 currentUserId={currentUserId}
                 canCreate={myRole === "owner" || myRole === "admin"}
+                currentGroupHref={groupDetailHref}
                 onRefresh={() => void loadChallenges()}
               />
             </div>

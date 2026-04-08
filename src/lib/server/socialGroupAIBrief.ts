@@ -1,4 +1,4 @@
-import { addDays, fromISODate, startOfWeekMonday, todayISO, toISODate } from "@/lib/date";
+import { addDays, fromISODate, todayISO, toISODate } from "@/lib/date";
 import {
   computeMemberWeeklyVitals,
   getSocialGroupById,
@@ -244,7 +244,7 @@ function buildWeekLabel(startISO: string, endISO: string) {
 
 function getCurrentWeekWindow() {
   const today = todayISO();
-  const start = toISODate(startOfWeekMonday(fromISODate(today)));
+  const start = today;
   const end = toISODate(addDays(fromISODate(start), 6));
   return {
     startISO: start,
@@ -636,13 +636,6 @@ async function readRecentBriefRows(admin: any, groupId: number, limit = 12): Pro
 async function readLatestStoredDisplayRow(admin: any, groupId: number): Promise<SocialGroupAIBriefRow | null> {
   const rows = await readRecentBriefRows(admin, groupId);
   return rows.find((row) => isSuccessfulStoredBriefRow(row)) ?? rows.find((row) => hasRenderableBrief(row.payload)) ?? null;
-}
-
-function pickDisplayRow(currentRow: SocialGroupAIBriefRow | null, latestRow: SocialGroupAIBriefRow | null) {
-  if (isSuccessfulStoredBriefRow(currentRow)) return currentRow;
-  if (latestRow) return latestRow;
-  if (currentRow?.payload && hasRenderableBrief(currentRow.payload)) return currentRow;
-  return currentRow ?? null;
 }
 
 async function upsertBriefRow(admin: any, row: SocialGroupAIBriefRow) {
@@ -2750,9 +2743,6 @@ export async function getCurrentGroupAIBrief(args: {
   try {
     currentWeekRow = await readBriefRow(args.admin, args.groupId, week.startISO);
     row = currentWeekRow;
-    if (!isSuccessfulStoredBriefRow(currentWeekRow)) {
-      row = pickDisplayRow(currentWeekRow, await readLatestStoredDisplayRow(args.admin, args.groupId));
-    }
   } catch (error) {
     console.error(
       "[SocialGroupAIBrief] readBriefRow failed group=%d err=%s",

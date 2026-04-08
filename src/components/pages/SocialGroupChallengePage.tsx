@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { cn } from "@/lib/cn";
+import { sanitizeInternalPath } from "@/lib/navigation";
 import {
   buildSocialClientCacheKey,
   clearSocialClientCache,
@@ -499,21 +500,27 @@ export function SocialGroupChallengePage({
   challengeId: rawChallengeId,
 }: Props) {
   const router = useRouter();
-  const handleBack = useCallback(() => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-    } else {
-      router.push("/social");
-    }
-  }, [router]);
-  const { user } = useAuthState();
-  const currentUserId = user?.userId ?? null;
-
+  const searchParams = useSearchParams();
   const parsedGroupId = parseInt(rawGroupId, 10);
   const parsedChallengeId = parseInt(rawChallengeId, 10);
   const groupIdNum = Number.isFinite(parsedGroupId) && parsedGroupId > 0 ? parsedGroupId : null;
   const challengeIdNum =
     Number.isFinite(parsedChallengeId) && parsedChallengeId > 0 ? parsedChallengeId : null;
+  const returnTo = sanitizeInternalPath(searchParams.get("returnTo"), "");
+  const fallbackBackHref = groupIdNum ? `/social/groups/${groupIdNum}?tab=challenge` : "/social?tab=groups";
+  const handleBack = useCallback(() => {
+    if (returnTo) {
+      router.replace(returnTo);
+      return;
+    }
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push(fallbackBackHref);
+    }
+  }, [fallbackBackHref, returnTo, router]);
+  const { user } = useAuthState();
+  const currentUserId = user?.userId ?? null;
   const detailCacheKey =
     currentUserId && groupIdNum && challengeIdNum
       ? buildSocialClientCacheKey(currentUserId, "group-challenge-detail", `${groupIdNum}:${challengeIdNum}`)

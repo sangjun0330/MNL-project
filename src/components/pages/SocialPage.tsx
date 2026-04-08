@@ -110,6 +110,17 @@ export function SocialPage() {
   const [activeTab, setActiveTab] = useState<SocialViewTab>(
     resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "friends")
   );
+  const updateActiveTab = useCallback((nextTab: SocialViewTab) => {
+    setActiveTab(nextTab);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (nextTab === "friends") params.delete("tab");
+    else params.set("tab", nextTab);
+    const nextQuery = params.toString();
+    const nextPath = window.location.pathname;
+    window.history.replaceState(window.history.state, "", nextQuery ? `${nextPath}?${nextQuery}` : nextPath);
+  }, []);
+  const groupsTabHref = "/social?tab=groups";
   const [openProfile, setOpenProfile] = useState(false);
   const [openConnect, setOpenConnect] = useState(false);
   const [openGroupCreate, setOpenGroupCreate] = useState(false);
@@ -768,9 +779,9 @@ export function SocialPage() {
 
   useEffect(() => {
     if (groupInviteToken) {
-      setActiveTab("groups");
+      updateActiveTab("groups");
     }
-  }, [groupInviteToken]);
+  }, [groupInviteToken, updateActiveTab]);
 
   useEffect(() => {
     if (!inviteToken || status !== "authenticated" || !profileChecked || showOnboarding || !profile) return;
@@ -831,6 +842,7 @@ export function SocialPage() {
     if (!groupInviteToken || status !== "authenticated" || !profileChecked || showOnboarding || !profile) return;
     if (handledGroupInviteRef.current === groupInviteToken) return;
     handledGroupInviteRef.current = groupInviteToken;
+    let navigatedToGroup = false;
 
     fetch("/api/social/groups/invites/resolve", {
       method: "POST",
@@ -855,7 +867,8 @@ export function SocialPage() {
         if (preview.state === "already_member") {
           setNotice({ tone: "info", text: `${preview.group.name} 그룹에 이미 참여 중이에요.` });
           void fetchGroups();
-          router.push(`/social/groups/${preview.group.id}`);
+          navigatedToGroup = true;
+          router.push(withReturnTo(`/social/groups/${preview.group.id}`, groupsTabHref));
           return;
         }
         if (preview.state === "group_full") {
@@ -878,9 +891,10 @@ export function SocialPage() {
         setNotice({ tone: "error", text: "그룹 초대 링크를 확인하지 못했어요." });
       })
       .finally(() => {
+        if (navigatedToGroup) return;
         router.replace("/social", { scroll: false });
       });
-  }, [fetchGroups, groupInviteToken, profile, profileChecked, router, showOnboarding, status]);
+  }, [fetchGroups, groupInviteToken, groupsTabHref, profile, profileChecked, router, showOnboarding, status]);
 
   if (status === "loading") {
     return (
@@ -1023,7 +1037,7 @@ export function SocialPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => updateActiveTab(tab.id)}
               className={`flex-1 rounded-[14px] px-3 py-2.5 text-[13px] font-semibold transition ${
                 activeTab === tab.id
                   ? "bg-white text-ios-text shadow-sm"
@@ -1158,7 +1172,7 @@ export function SocialPage() {
           onPrefetchGroup={(group) => prefetchGroupBoard(group.id)}
           onOpenGroup={(group) => {
             prefetchGroupBoard(group.id);
-            router.push(`/social/groups/${group.id}`);
+            router.push(withReturnTo(`/social/groups/${group.id}`, groupsTabHref));
           }}
         />
       )}
@@ -1209,9 +1223,9 @@ export function SocialPage() {
           if (groupsCacheKey) {
             setSocialClientCache(groupsCacheKey, nextGroups);
           }
-          setActiveTab("groups");
+          updateActiveTab("groups");
           setNotice({ tone: "success", text: `${group.name} 그룹을 만들었어요.` });
-          router.push(`/social/groups/${group.id}`);
+          router.push(withReturnTo(`/social/groups/${group.id}`, groupsTabHref));
         }}
       />
 
@@ -1225,7 +1239,7 @@ export function SocialPage() {
         onJoined={(group, state) => {
           setOpenGroupJoin(false);
           setGroupInvitePreview(null);
-          setActiveTab("groups");
+          updateActiveTab("groups");
           void fetchGroups();
           if (state === "request_pending") {
             setNotice({ tone: "info", text: `${group.name} 그룹 가입 요청을 보냈어요.` });
@@ -1236,7 +1250,7 @@ export function SocialPage() {
           if (groupsCacheKey) {
             setSocialClientCache(groupsCacheKey, nextGroups);
           }
-          router.push(`/social/groups/${group.id}`);
+          router.push(withReturnTo(`/social/groups/${group.id}`, groupsTabHref));
           setNotice({ tone: "success", text: `${group.name} 그룹에 참여했어요.` });
         }}
       />

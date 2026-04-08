@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { withReturnTo } from "@/lib/navigation";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import {
   SocialActivityIcon,
@@ -30,6 +31,7 @@ type Props = {
   loading?: boolean;
   currentUserId: string | null;
   canCreate: boolean;
+  currentGroupHref: string;
   onRefresh: () => void;
 };
 
@@ -194,12 +196,14 @@ function ProgressBar({
 function ChallengeCard({
   challenge,
   groupId,
+  currentGroupHref,
   isEnded,
   onJoin,
   joiningId,
 }: {
   challenge: GroupChallengeSummary;
   groupId: number;
+  currentGroupHref: string;
   isEnded: boolean;
   onJoin: (challengeId: number) => void;
   joiningId: number | null;
@@ -208,7 +212,7 @@ function ChallengeCard({
   const entry = challenge.myEntry;
   const isParticipating = entry !== null;
   const openChallenge = () => {
-    router.push(`/social/groups/${groupId}/challenges/${challenge.id}`);
+    router.push(withReturnTo(`/social/groups/${groupId}/challenges/${challenge.id}`, currentGroupHref));
   };
 
   return (
@@ -594,6 +598,7 @@ export function SocialGroupChallengesTab({
   loading = false,
   currentUserId,
   canCreate,
+  currentGroupHref,
   onRefresh,
 }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
@@ -691,6 +696,7 @@ export function SocialGroupChallengesTab({
                 key={c.id}
                 challenge={c}
                 groupId={groupId}
+                currentGroupHref={currentGroupHref}
                 isEnded={false}
                 onJoin={handleJoin}
                 joiningId={joiningId}
@@ -709,6 +715,7 @@ export function SocialGroupChallengesTab({
                   key={c.id}
                   challenge={c}
                   groupId={groupId}
+                  currentGroupHref={currentGroupHref}
                   isEnded
                   onJoin={handleJoin}
                   joiningId={joiningId}
