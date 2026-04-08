@@ -34,12 +34,10 @@ async function loadUserPayload(userId: string) {
 }
 
 async function saveCart(userId: string, items: ShopCartItem[]) {
-  const payload = await loadUserPayload(userId);
   const normalized = normalizeCartItems(items);
   await saveUserState({
     userId,
     payload: {
-      ...payload,
       shopCart: normalized,
     },
   });

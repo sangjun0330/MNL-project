@@ -3,35 +3,14 @@ import { NextResponse } from "next/server";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-function degradedResponse() {
+function errorResponse(status: number, error: string) {
   return NextResponse.json(
     {
-      ok: true,
-      data: {
-        onboardingCompleted: true,
-        consentCompleted: true,
-        hasStoredState: false,
-        consent: null,
-        state: {
-          selected: null,
-          schedule: {},
-          shiftNames: {},
-          notes: {},
-          emotions: {},
-          bio: {},
-          memo: { folders: {}, documents: {}, recent: [], personalTemplates: [] },
-          records: { templates: {}, entries: {}, recent: [] },
-          settings: null,
-        },
-        stateRevision: null,
-        bootstrapRevision: null,
-        updatedAt: null,
-        recoverySummary: null,
-        degraded: true,
-      },
+      ok: false,
+      error,
     },
     {
-      status: 200,
+      status,
       headers: {
         "Cache-Control": "private, no-store, max-age=0",
         Pragma: "no-cache",
@@ -53,7 +32,7 @@ export async function GET(req: Request) {
 
     const userId = await readUserIdFromRequest(req);
     if (!userId) {
-      return degradedResponse();
+      return errorResponse(401, "login_required");
     }
     const data = await loadUserBootstrap(userId);
     return jsonNoStore({ ok: true, data });
@@ -65,6 +44,6 @@ export async function GET(req: Request) {
     } catch {
       // Ignore logging failures.
     }
-    return degradedResponse();
+    return errorResponse(503, "failed_to_load_bootstrap");
   }
 }

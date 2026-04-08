@@ -74,6 +74,17 @@ function mapConsentRow(row: ConsentRow | null): UserServiceConsentSnapshot | nul
   };
 }
 
+function buildGrantedConsentSnapshot(consentedAt: string): UserServiceConsentSnapshot {
+  return {
+    recordsStorageConsentedAt: consentedAt,
+    aiUsageConsentedAt: consentedAt,
+    consentCompletedAt: consentedAt,
+    consentVersion: SERVICE_CONSENT_VERSION,
+    privacyVersion: PRIVACY_POLICY_VERSION,
+    termsVersion: TERMS_OF_SERVICE_VERSION,
+  };
+}
+
 function wasExistingUserBeforeConsentGate(createdAt: string | null | undefined) {
   if (!createdAt) return false;
   const createdMs = new Date(createdAt).getTime();
@@ -101,31 +112,17 @@ export async function loadUserServiceConsent(userId: string): Promise<UserServic
     .maybeSingle();
 
   if (error) {
-    // 신규 가입자를 동의 화면에서 막지 않도록, 동의 스키마/캐시 문제는
-    // 일시적인 인프라 degraded 상태로 보고 synthetic consent로 우회한다.
     if (isServiceConsentSchemaUnavailableError(error)) {
-      console.error("[ServiceConsent] user_service_consents schema unavailable, using synthetic consent", {
+      console.error("[ServiceConsent] user_service_consents schema unavailable, returning empty consent", {
         code: (error as any)?.code,
         message: String((error as any)?.message ?? "").slice(0, 120),
       });
-      return buildSyntheticLegacyConsent();
+      return null;
     }
     throw error;
   }
 
   return mapConsentRow((data as ConsentRow | null) ?? null);
-}
-
-function buildSyntheticLegacyConsent(): UserServiceConsentSnapshot {
-  const now = new Date().toISOString();
-  return {
-    recordsStorageConsentedAt: now,
-    aiUsageConsentedAt: now,
-    consentCompletedAt: now,
-    consentVersion: SERVICE_CONSENT_VERSION,
-    privacyVersion: PRIVACY_POLICY_VERSION,
-    termsVersion: TERMS_OF_SERVICE_VERSION,
-  };
 }
 
 async function backfillLegacyServiceConsent(userId: string): Promise<UserServiceConsentSnapshot> {
@@ -154,12 +151,11 @@ async function backfillLegacyServiceConsent(userId: string): Promise<UserService
     .single();
 
   if (error) {
-    // 테이블이 없거나 DB 오류 시에도 레거시 사용자는 동의 완료 처리
-    console.error("[ServiceConsent] backfill failed, using synthetic consent", {
+    console.error("[ServiceConsent] backfill failed", {
       code: (error as any)?.code,
       message: String((error as any)?.message ?? "").slice(0, 120),
     });
-    return buildSyntheticLegacyConsent();
+    throw error;
   }
 
   const { error: eventError } = await admin.from("user_service_consent_events").insert({
@@ -224,13 +220,11 @@ export async function userHasCompletedServiceConsent(userId: string): Promise<bo
     const consent = await ensureEffectiveServiceConsent(userId);
     return hasCompletedServiceConsent(consent);
   } catch (error) {
-    // DB 오류 시 기존 사용자 데이터 접근을 차단하지 않도록 true 반환
-    // (consent 테이블 미생성/스키마 불일치 등)
-    console.error("[ServiceConsent] userHasCompletedServiceConsent failed, allowing access", {
+    console.error("[ServiceConsent] userHasCompletedServiceConsent failed, denying access", {
       userId: userId.slice(0, 8),
       error: error instanceof Error ? error.message : String(error),
     });
-    return true;
+    return false;
   }
 }
 
@@ -319,13 +313,7 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
       code: errCode,
       message: String((upsertError as any)?.message ?? "").slice(0, 200),
     });
-    // FK violation (23503) = rnest_users row missing; schema error = table missing.
-    // In all DB-error cases, return synthetic consent so new users are never blocked.
-    if (isServiceConsentSchemaUnavailableError(upsertError) || errCode === "23503") {
-      return buildSyntheticLegacyConsent();
-    }
-    // For any other error, still don't block the user — consent save is best-effort.
-    return buildSyntheticLegacyConsent();
+    throw upsertError;
   }
 
   // Step 2: read back the saved row via a separate SELECT
@@ -338,8 +326,6 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
     .maybeSingle();
 
   if (selectError || !data) {
-    // Upsert succeeded but read-back failed — consent was saved.
-    // Return synthetic so the client gets a valid response.
     console.error("[ServiceConsent] consent read-back after upsert failed", {
       userId: userId.slice(0, 8),
       code: (selectError as any)?.code,
@@ -350,7 +336,7 @@ export async function completeUserServiceConsent(userId: string): Promise<UserSe
       event_type: "granted",
       payload: buildServiceConsentEventPayload(),
     });
-    return buildSyntheticLegacyConsent();
+    return buildGrantedConsentSnapshot(now);
   }
 
   // Step 3: log the consent event (non-critical)

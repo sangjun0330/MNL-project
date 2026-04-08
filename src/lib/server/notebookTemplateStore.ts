@@ -107,16 +107,11 @@ async function loadLegacyTemplatePayload() {
 }
 
 async function saveLegacyTemplatePayload(templates: RNestMemoTemplate[]) {
-  const { loadUserState, saveUserState } = await import("@/lib/server/userStateStore")
-  const existing = await loadUserState(NOTEBOOK_TEMPLATE_SYSTEM_USER_ID)
-  const existingPayload = isRecord(existing?.payload) ? existing.payload : {}
+  const { saveUserState } = await import("@/lib/server/userStateStore")
 
   await saveUserState({
     userId: NOTEBOOK_TEMPLATE_SYSTEM_USER_ID,
-    payload: {
-      ...existingPayload,
-      ...buildStoredTemplatePayload(templates),
-    },
+    payload: buildStoredTemplatePayload(templates),
   })
 
   return {

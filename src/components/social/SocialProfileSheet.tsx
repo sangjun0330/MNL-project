@@ -145,6 +145,18 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
 
   const formattedCode = useMemo(() => formatCode(code), [code]);
 
+  const applyPreferenceState = useCallback((value: {
+    scheduleVisibility: ScheduleVisibility;
+    statusMessageVisible: boolean;
+    acceptInvites: boolean;
+    healthVisibility: HealthVisibility;
+  }) => {
+    setScheduleVisibility(value.scheduleVisibility);
+    setStatusMsgVisible(value.statusMessageVisible);
+    setAcceptInvites(value.acceptInvites);
+    setHealthVisibility(value.healthVisibility);
+  }, []);
+
   const handleSave = async () => {
     if (!trimmedNickname || saving) return;
     if (trimmedNickname.length > 12) {
@@ -235,21 +247,36 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     healthVisibility: HealthVisibility;
   }>) => {
     if (prefsSaving) return;
+    const previousPrefs = {
+      scheduleVisibility,
+      statusMessageVisible: statusMsgVisible,
+      acceptInvites,
+      healthVisibility,
+    };
     setPrefsSaving(true);
+    setError(null);
     try {
-      const res = await fetch("/api/social/preferences", {
+      const response = await fetch("/api/social/preferences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
-      }).then((r) => r.json());
-      if (res.ok) {
-        setScheduleVisibility(res.data?.scheduleVisibility ?? scheduleVisibility);
-        setStatusMsgVisible(res.data?.statusMessageVisible !== false);
-        setAcceptInvites(res.data?.acceptInvites !== false);
-        setHealthVisibility(res.data?.healthVisibility === "full" ? "full" : "hidden");
+      });
+      const res = await response.json().catch(() => null);
+      if (!response.ok || !res?.ok) {
+        throw new Error(String(res?.error ?? "failed_to_save_preferences"));
       }
-    } catch {}
-    setPrefsSaving(false);
+      applyPreferenceState({
+        scheduleVisibility: res.data?.scheduleVisibility ?? previousPrefs.scheduleVisibility,
+        statusMessageVisible: res.data?.statusMessageVisible !== false,
+        acceptInvites: res.data?.acceptInvites !== false,
+        healthVisibility: res.data?.healthVisibility === "full" ? "full" : "hidden",
+      });
+    } catch {
+      applyPreferenceState(previousPrefs);
+      setError("프라이버시 설정 저장에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setPrefsSaving(false);
+    }
   };
 
   const handleRegenerate = async () => {

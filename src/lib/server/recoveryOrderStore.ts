@@ -91,7 +91,6 @@ export async function writeRecoveryOrderCompletedIds(
   await saveUserState({
     userId,
     payload: {
-      ...payload,
       [STATE_KEY]: normalizeRecoveryOrderCompletions(nextCompletions, dateISO),
     },
   });

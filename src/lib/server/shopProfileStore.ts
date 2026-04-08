@@ -120,11 +120,9 @@ async function saveLegacyPayload(
   book: ShopShippingAddressBook,
   profile: ShopShippingProfile
 ): Promise<void> {
-  const existing = await loadUserStatePayload(userId);
   await saveUserState({
     userId,
     payload: {
-      ...existing,
       shopShippingProfile: profile,
       shopShippingAddressBook: {
         addresses: book.addresses,

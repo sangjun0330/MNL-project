@@ -3,41 +3,11 @@ import { NextResponse, after } from "next/server";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-function degradedGetResponse() {
+function errorResponse(status: number, error: string) {
   return NextResponse.json(
+    { ok: false, error },
     {
-      ok: true,
-      state: {
-        selected: null,
-        schedule: {},
-        shiftNames: {},
-        notes: {},
-        emotions: {},
-        bio: {},
-        memo: { folders: {}, documents: {}, recent: [], personalTemplates: [] },
-        records: { templates: {}, entries: {}, recent: [] },
-        settings: null,
-      },
-      stateRevision: null,
-      updatedAt: null,
-      recoverySummary: null,
-      degraded: true,
-    },
-    {
-      status: 200,
-      headers: {
-        "Cache-Control": "private, no-store, max-age=0",
-        Pragma: "no-cache",
-      },
-    }
-  );
-}
-
-function localOnlySaveResponse() {
-  return NextResponse.json(
-    { ok: true, syncedAt: null, stateRevision: null, degraded: true, localOnly: true },
-    {
-      status: 200,
+      status,
       headers: {
         "Cache-Control": "private, no-store, max-age=0",
         Pragma: "no-cache",
@@ -52,6 +22,7 @@ function isUserStateStorageUnavailable(error: unknown) {
   return (
     message.includes("supabase admin env missing") ||
     code === "42P01" ||
+    code === "42703" ||
     code === "PGRST204" ||
     code === "PGRST205" ||
     (message.includes("rnest_user_state") && message.includes("does not exist")) ||
@@ -71,10 +42,10 @@ export async function GET(req: Request) {
 
     const userId = await readUserIdFromRequest(req);
     if (!userId) {
-      return degradedGetResponse();
+      return errorResponse(401, "login_required");
     }
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return degradedGetResponse();
+      return errorResponse(403, "consent_required");
     }
     await ensureUserRow(userId);
     const row = await loadUserState(userId);
@@ -101,7 +72,10 @@ export async function GET(req: Request) {
     } catch {
       // Ignore logging failures.
     }
-    return degradedGetResponse();
+    if (isUserStateStorageUnavailable(error)) {
+      return errorResponse(503, "user_state_storage_unavailable");
+    }
+    return errorResponse(500, "failed_to_load_state");
   }
 }
 
@@ -128,11 +102,11 @@ export async function POST(req: Request) {
     const userId = await readUserIdFromRequest(req);
     const state = body?.state;
 
-    if (!userId) return localOnlySaveResponse();
+    if (!userId) return errorResponse(401, "login_required");
     if (!state) return jsonNoStore({ ok: false, error: "state required" }, { status: 400 });
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return localOnlySaveResponse();
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
     }
     const serialized = serializeStateForSupabase(state);
     const saved = await saveUserState({ userId, payload: serialized });
@@ -175,17 +149,8 @@ export async function POST(req: Request) {
       // Ignore logging failures.
     }
     if (isUserStateStorageUnavailable(error)) {
-      return localOnlySaveResponse();
+      return errorResponse(503, "user_state_storage_unavailable");
     }
-    return NextResponse.json(
-      { ok: false, error: "failed_to_save_state" },
-      {
-        status: 500,
-        headers: {
-          "Cache-Control": "private, no-store, max-age=0",
-          Pragma: "no-cache",
-        },
-      }
-    );
+    return errorResponse(500, "failed_to_save_state");
   }
 }

@@ -142,7 +142,6 @@ function normalizeBundleMap(raw: unknown): Record<string, ShopOrderBundleRecord>
 }
 
 async function saveBundleMap(userId: string, bundles: Record<string, ShopOrderBundleRecord>) {
-  const payload = await loadUserPayload(userId);
   const sorted = Object.values(bundles)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, MAX_BUNDLES);
@@ -155,7 +154,6 @@ async function saveBundleMap(userId: string, bundles: Record<string, ShopOrderBu
   await saveUserState({
     userId,
     payload: {
-      ...payload,
       [SHOP_ORDER_BUNDLES_KEY]: nextMap,
     },
   });

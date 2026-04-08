@@ -527,7 +527,6 @@ async function writeLegacyOrderByUserState(order: ShopOrderRecord) {
   await saveUserState({
     userId: order.userId,
     payload: {
-      ...currentPayload,
       [SHOP_ORDER_STATE_KEY]: serializeStoredOrderMap({
         ...currentMap,
         [nextOrder.orderId]: nextOrder,
@@ -1058,7 +1057,6 @@ async function savePurchaseConfirmationMap(userId: string, map: Record<string, s
   await saveUserState({
     userId,
     payload: {
-      ...payload,
       shopPurchaseConfirmations: normalized,
     },
   });

@@ -228,12 +228,11 @@ async function loadFallbackClaimsForUser(userId: string) {
 async function saveFallbackClaimsForUser(userId: string, claims: ShopClaimRecord[]) {
   const safeUserId = cleanText(userId, 120);
   if (!safeUserId) return;
-  const row = await loadUserState(safeUserId).catch(() => null);
-  const basePayload = isRecord(row?.payload) ? { ...row?.payload } : {};
-  basePayload[SHOP_CLAIMS_FALLBACK_KEY] = sortClaimsDesc(claims).map(toFallbackClaimPayload);
   await saveUserState({
     userId: safeUserId,
-    payload: basePayload,
+    payload: {
+      [SHOP_CLAIMS_FALLBACK_KEY]: sortClaimsDesc(claims).map(toFallbackClaimPayload),
+    },
   });
 }
 

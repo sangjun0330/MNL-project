@@ -79,12 +79,9 @@ async function loadNotebookStateFallback(userId: string): Promise<NotebookStateR
 }
 
 async function saveNotebookStateFallback(userId: string, payload: RNestNotebookState): Promise<RNestNotebookState> {
-  const existing = await loadUserState(userId)
-  const existingPayload = isRecord(existing?.payload) ? existing.payload : {}
   await saveUserState({
     userId,
     payload: {
-      ...existingPayload,
       [LEGACY_NOTEBOOK_STATE_KEY]: payload,
     },
   })

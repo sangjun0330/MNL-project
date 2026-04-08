@@ -22,12 +22,10 @@ async function loadUserPayload(userId: string) {
 }
 
 async function saveWishlist(userId: string, ids: string[]) {
-  const payload = await loadUserPayload(userId);
   const normalized = normalizeWishlistIds(ids);
   await saveUserState({
     userId,
     payload: {
-      ...payload,
       shopWishlist: normalized,
     },
   });

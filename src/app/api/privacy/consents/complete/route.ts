@@ -1,5 +1,3 @@
-import { PRIVACY_POLICY_VERSION, SERVICE_CONSENT_VERSION, TERMS_OF_SERVICE_VERSION } from "@/lib/serviceConsent";
-
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
@@ -8,27 +6,31 @@ type RequestBody = {
   aiUsage?: unknown;
 };
 
-function buildSyntheticConsentSnapshot() {
-  const now = new Date().toISOString();
-  return {
-    recordsStorageConsentedAt: now,
-    aiUsageConsentedAt: now,
-    consentCompletedAt: now,
-    consentVersion: SERVICE_CONSENT_VERSION,
-    privacyVersion: PRIVACY_POLICY_VERSION,
-    termsVersion: TERMS_OF_SERVICE_VERSION,
-  };
-}
-
-function fallbackJson(body: unknown) {
+function fallbackJson(body: unknown, status = 500) {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: {
       "content-type": "application/json",
       "Cache-Control": "private, no-store, max-age=0",
       Pragma: "no-cache",
     },
   });
+}
+
+function isRetriableConsentStorageError(error: unknown) {
+  const code = String((error as any)?.code ?? "").toUpperCase();
+  const message = String((error as any)?.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    code === "23503" ||
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find the table") ||
+    message.includes("could not find the column")
+  );
 }
 
 export async function POST(req: Request) {
@@ -63,24 +65,18 @@ export async function POST(req: Request) {
         code: (err as any)?.code,
         message: String((err as any)?.message ?? err).slice(0, 200),
       });
-      return jsonNoStore({
-        ok: true,
-        data: buildSyntheticConsentSnapshot(),
-      });
+      return jsonNoStore({ ok: false, error: "failed_to_save_service_consent" }, { status: isRetriableConsentStorageError(err) ? 503 : 500 });
     }
   } catch (outerErr) {
     console.error("[ConsentComplete] outer_catch", {
       message: String((outerErr as any)?.message ?? outerErr).slice(0, 200),
     });
-    const payload = {
-      ok: true,
-      data: buildSyntheticConsentSnapshot(),
-    };
+    const payload = { ok: false, error: "failed_to_save_service_consent" };
     try {
       const { jsonNoStore } = await import("@/lib/server/requestSecurity");
-      return jsonNoStore(payload);
+      return jsonNoStore(payload, { status: 500 });
     } catch {
-      return fallbackJson(payload);
+      return fallbackJson(payload, 500);
     }
   }
 }

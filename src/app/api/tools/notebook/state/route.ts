@@ -3,32 +3,11 @@ import { NextResponse } from "next/server"
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
 
-function degradedNotebookResponse() {
+function errorResponse(status: number, error: string) {
   return NextResponse.json(
+    { ok: false, error },
     {
-      ok: true,
-      state: {
-        memo: { folders: {}, documents: {}, recent: [], personalTemplates: [] },
-        records: { templates: {}, entries: {}, recent: [] },
-      },
-      updatedAt: null,
-      degraded: true,
-    },
-    {
-      status: 200,
-      headers: {
-        "Cache-Control": "private, no-store, max-age=0",
-        Pragma: "no-cache",
-      },
-    }
-  )
-}
-
-function localOnlyNotebookSaveResponse() {
-  return NextResponse.json(
-    { ok: true, syncedAt: null, degraded: true, localOnly: true },
-    {
-      status: 200,
+      status,
       headers: {
         "Cache-Control": "private, no-store, max-age=0",
         Pragma: "no-cache",
@@ -44,6 +23,7 @@ function isNotebookStateStorageUnavailable(error: unknown) {
     message.includes("supabase admin env missing") ||
     message.includes("notebook_state_table_missing") ||
     code === "42P01" ||
+    code === "42703" ||
     code === "PGRST204" ||
     code === "PGRST205" ||
     (message.includes("rnest_notebook_state") && message.includes("does not exist")) ||
@@ -61,11 +41,11 @@ export async function GET(req: Request) {
 
     const userId = await readUserIdFromRequest(req)
     if (!userId) {
-      return degradedNotebookResponse()
+      return errorResponse(401, "login_required")
     }
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return degradedNotebookResponse()
+      return errorResponse(403, "consent_required")
     }
 
     const row = await loadNotebookState(userId)
@@ -82,7 +62,10 @@ export async function GET(req: Request) {
     } catch {
       // Ignore logging failures.
     }
-    return degradedNotebookResponse()
+    if (isNotebookStateStorageUnavailable(error)) {
+      return errorResponse(503, "notebook_state_storage_unavailable")
+    }
+    return errorResponse(500, "failed_to_load_notebook_state")
   }
 }
 
@@ -109,11 +92,11 @@ export async function POST(req: Request) {
     const userId = await readUserIdFromRequest(req)
     const state = (body as { state?: unknown } | null)?.state
 
-    if (!userId) return localOnlyNotebookSaveResponse()
+    if (!userId) return errorResponse(401, "login_required")
     if (!state) return jsonNoStore({ ok: false, error: "state required" }, { status: 400 })
 
     if (!(await userHasCompletedServiceConsent(userId))) {
-      return localOnlyNotebookSaveResponse()
+      return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 })
     }
 
     await saveNotebookState({ userId, payload: sanitizeNotebookState(state) })
@@ -127,17 +110,8 @@ export async function POST(req: Request) {
       // Ignore logging failures.
     }
     if (isNotebookStateStorageUnavailable(error)) {
-      return localOnlyNotebookSaveResponse()
+      return errorResponse(503, "notebook_state_storage_unavailable")
     }
-    return NextResponse.json(
-      { ok: false, error: "failed_to_save_notebook_state" },
-      {
-        status: 500,
-        headers: {
-          "Cache-Control": "private, no-store, max-age=0",
-          Pragma: "no-cache",
-        },
-      }
-    )
+    return errorResponse(500, "failed_to_save_notebook_state")
   }
 }
