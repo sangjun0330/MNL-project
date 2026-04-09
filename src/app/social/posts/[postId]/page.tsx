@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { SocialPostDetailPage } from "@/components/pages/SocialPostDetailPage";
 
 export const dynamic = "force-dynamic";
+export const runtime = "edge";
 
 export default async function SocialPostRoute(
   props: {

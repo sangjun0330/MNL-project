@@ -235,6 +235,29 @@ async function reserveAvailableHandle(
   return `${base}-${crypto.randomUUID().slice(0, 6)}`;
 }
 
+async function assertHandleAvailable(
+  admin: any,
+  requestedHandle: string,
+  userId: string
+): Promise<string> {
+  const normalizedHandle = cleanSocialHandle(requestedHandle);
+  if (!normalizedHandle) {
+    throw Object.assign(new Error("invalid_handle"), { code: "invalid_handle" });
+  }
+
+  const { data } = await (admin as any)
+    .from("rnest_social_profiles")
+    .select("user_id")
+    .eq("handle", normalizedHandle)
+    .maybeSingle();
+
+  if (data && String(data.user_id) !== userId) {
+    throw Object.assign(new Error("handle_taken"), { code: "handle_taken" });
+  }
+
+  return normalizedHandle;
+}
+
 export async function ensureSocialProfile(admin: any, userId: string): Promise<SocialProfile> {
   const existing = await loadProfileRow(admin, userId);
   const seed = await getAuthSeed(admin, userId);
@@ -323,7 +346,7 @@ export async function saveSocialProfile(
     throw Object.assign(new Error("invalid_handle"), { code: "invalid_handle" });
   }
 
-  const handle = await reserveAvailableHandle(admin, requestedHandle, userId);
+  const handle = await assertHandleAvailable(admin, requestedHandle, userId);
   const bio = cleanSocialBio(input.bio ?? current.bio);
   const statusMessage = cleanStatusMessage(input.statusMessage ?? current.statusMessage);
   const discoverability = normalizeSocialDiscoverability(input.discoverability ?? current.discoverability);
