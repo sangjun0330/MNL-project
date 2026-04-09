@@ -514,7 +514,9 @@ export type SocialPost = {
   authorProfile: SocialAuthorProfile;
   body: string;
   imagePath: string | null;
-  imageUrl: string | null;     // Supabase Storage public URL
+  imageUrl: string | null;     // 첫 번째 Supabase Storage public URL (legacy fallback)
+  imagePaths: string[];
+  imageUrls: string[];
   tags: string[];
   visibility: SocialPostVisibility;
   groupId: number | null;

@@ -202,7 +202,7 @@ export function SocialFeedTab({
   return (
     <div className="relative">
       {/* 피드 목록 */}
-      <div className="flex flex-col gap-2.5 px-4 pt-3 pb-24">
+      <div className="flex flex-col gap-4 px-4 pt-4 pb-24">
         {loading && !hasLoaded ? (
           <>
             <PostCardSkeleton />

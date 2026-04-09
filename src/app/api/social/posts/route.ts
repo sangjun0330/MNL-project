@@ -8,6 +8,7 @@ import {
 import {
   cleanPostBody,
   cleanCommentBody as _cleanComment,
+  cleanPostImagePaths,
   cleanPostTags,
   getFeedPage,
   createPost,
@@ -60,10 +61,6 @@ export async function POST(req: Request) {
   }
 
   const postBody = cleanPostBody(body?.body);
-  if (!postBody) {
-    return jsonNoStore({ ok: false, error: "body_required" }, { status: 400 });
-  }
-
   const visibility: SocialPostVisibility =
     body?.visibility === "public_internal" ||
     body?.visibility === "followers" ||
@@ -75,10 +72,18 @@ export async function POST(req: Request) {
       ? Number(body.groupId)
       : null;
   const tags = cleanPostTags(body?.tags);
-  const imagePath =
-    body?.imagePath && typeof body.imagePath === "string"
-      ? String(body.imagePath).slice(0, 500)
-      : null;
+  const imagePaths = cleanPostImagePaths(
+    Array.isArray(body?.imagePaths)
+      ? body.imagePaths
+      : body?.imagePath && typeof body.imagePath === "string"
+        ? [body.imagePath]
+        : []
+  );
+  const imagePath = imagePaths[0] ?? null;
+
+  if (!postBody && imagePaths.length === 0) {
+    return jsonNoStore({ ok: false, error: "content_required" }, { status: 400 });
+  }
 
   const admin = getSupabaseAdmin();
 
@@ -98,6 +103,7 @@ export async function POST(req: Request) {
 
     const post = await createPost(admin, userId, postBody, {
       imagePath,
+      imagePaths,
       tags,
       groupId,
       visibility,

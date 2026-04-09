@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SocialPost } from "@/types/social";
 import { cn } from "@/lib/cn";
 
-// ── 상대 시간 포맷 ──────────────────────────────────────────────
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const sec = Math.floor(diff / 1000);
@@ -18,6 +17,10 @@ function formatRelativeTime(iso: string): string {
   if (day < 7) return `${day}일 전`;
   const d = new Date(iso);
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat("ko-KR").format(value);
 }
 
 type Props = {
@@ -48,24 +51,56 @@ export function SocialPostCard({
   const [likeLoading, setLikeLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [imgError, setImgError] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  useEffect(() => {
+    setLiked(post.isLiked);
+    setLikeCount(post.likeCount);
+    setSaved(post.isSaved);
+    setSaveCount(post.saveCount);
+  }, [post.isLiked, post.isSaved, post.likeCount, post.saveCount]);
+
+  useEffect(() => {
+    setExpanded(false);
+    setShowMenu(false);
+    setActiveImageIndex(0);
+  }, [post.id]);
 
   const isOwnPost = currentUserId === post.authorUserId;
   const canDelete = isOwnPost || isAdmin;
+  const mediaUrls = useMemo(
+    () => (post.imageUrls.length > 0 ? post.imageUrls : post.imageUrl ? [post.imageUrl] : []),
+    [post.imageUrl, post.imageUrls]
+  );
+  const activeMediaUrl = mediaUrls[activeImageIndex] ?? mediaUrls[0] ?? null;
+  const caption = post.body.trim();
+  const isLongCaption = caption.split("\n").length > 2 || caption.length > 140;
+  const profileLabel = post.authorProfile.displayName || post.authorProfile.nickname || "익명";
+
+  const goToProfile = useCallback(() => {
+    if (post.authorProfile.handle) {
+      router.push(`/social/profile/${post.authorProfile.handle}`);
+    }
+  }, [post.authorProfile.handle, router]);
+
+  const goToPost = useCallback(() => {
+    router.push(`/social/posts/${post.id}`);
+  }, [post.id, router]);
 
   const handleLike = useCallback(async () => {
     if (likeLoading) return;
-    // 낙관적 업데이트
     const prevLiked = liked;
     const prevCount = likeCount;
     setLiked(!liked);
-    setLikeCount((c) => (liked ? Math.max(0, c - 1) : c + 1));
+    setLikeCount((count) => (liked ? Math.max(0, count - 1) : count + 1));
     setLikeLoading(true);
+
     try {
       const res = await fetch(`/api/social/posts/${post.id}/like`, {
         method: "POST",
-      }).then((r) => r.json());
+      }).then((response) => response.json());
+
       if (res.ok) {
         setLiked(res.data.liked);
         setLikeCount(res.data.count);
@@ -74,7 +109,6 @@ export function SocialPostCard({
           likeCount: res.data.count,
         });
       } else {
-        // 실패 시 롤백
         setLiked(prevLiked);
         setLikeCount(prevCount);
       }
@@ -84,7 +118,7 @@ export function SocialPostCard({
     } finally {
       setLikeLoading(false);
     }
-  }, [likeLoading, liked, likeCount, onStatsChange, post.id]);
+  }, [likeCount, likeLoading, liked, onStatsChange, post.id]);
 
   const handleSave = useCallback(async () => {
     if (saveLoading) return;
@@ -93,10 +127,12 @@ export function SocialPostCard({
     setSaved(!saved);
     setSaveCount((count) => (saved ? Math.max(0, count - 1) : count + 1));
     setSaveLoading(true);
+
     try {
       const res = await fetch(`/api/social/posts/${post.id}/save`, {
         method: "POST",
-      }).then((r) => r.json());
+      }).then((response) => response.json());
+
       if (res.ok) {
         setSaved(res.data.saved);
         setSaveCount(res.data.count);
@@ -119,286 +155,302 @@ export function SocialPostCard({
   const handleShare = useCallback(async () => {
     const url = `${window.location.origin}/social/posts/${post.id}`;
     const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
+
     try {
       if (typeof nav.share === "function") {
         await nav.share({
-          title: `${post.authorProfile.displayName}님의 게시글`,
-          text: post.body.slice(0, 80),
+          title: `${profileLabel}님의 게시글`,
+          text: caption || "RNest 소셜 게시글",
           url,
         });
       } else {
         await navigator.clipboard.writeText(url);
       }
     } catch {}
-  }, [post.authorProfile.displayName, post.body, post.id]);
+  }, [caption, post.id, profileLabel]);
 
   const handleDelete = useCallback(async () => {
     if (!canDelete) return;
     setShowMenu(false);
+
     const res = await fetch(`/api/social/posts/${post.id}`, {
       method: "DELETE",
-    }).then((r) => r.json());
-    if (res.ok && onDelete) {
-      onDelete(post.id);
-    }
-  }, [canDelete, post.id, onDelete]);
+    }).then((response) => response.json());
 
-  const bodyLines = post.body.split("\n");
-  const isLong = bodyLines.length > 4 || post.body.length > 200;
+    if (res.ok) {
+      onDelete?.(post.id);
+    }
+  }, [canDelete, onDelete, post.id]);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      {/* 헤더: 아바타 + 닉네임 + 시간 + 메뉴 */}
-      <div className="flex items-center gap-3 px-4 pt-4 pb-2">
-        {/* 아바타 */}
+    <article className="overflow-hidden rounded-[30px] border border-black/[0.06] bg-white shadow-[0_18px_46px_rgba(15,23,42,0.08)]">
+      <div className="flex items-center gap-3 px-4 pb-3 pt-4">
         <button
           type="button"
-          onClick={() => post.authorProfile.handle && router.push(`/social/profile/${post.authorProfile.handle}`)}
-          className="w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0 overflow-hidden"
-          style={{ backgroundColor: "var(--rnest-lavender-soft)", border: "1px solid var(--rnest-lavender-border)" }}
-          aria-label={`${post.authorProfile.displayName} 프로필`}
+          onClick={goToProfile}
+          className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-black/[0.06] bg-[#f3f4f6] text-[18px]"
+          aria-label={`${profileLabel} 프로필`}
         >
           {post.authorProfile.profileImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={post.authorProfile.profileImageUrl} alt="" className="w-full h-full object-cover" />
+            <img src={post.authorProfile.profileImageUrl} alt="" className="h-full w-full object-cover" />
           ) : (
             post.authorProfile.avatarEmoji
           )}
         </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => post.authorProfile.handle && router.push(`/social/profile/${post.authorProfile.handle}`)}
-              className="text-[13px] font-semibold text-[var(--rnest-text)] truncate"
+              onClick={goToProfile}
+              className="truncate text-[14px] font-semibold tracking-[-0.01em] text-[#111827]"
             >
-              {post.authorProfile.displayName || post.authorProfile.nickname || "익명"}
+              {profileLabel}
             </button>
-            {post.authorProfile.handle ? (
-              <span className="text-[11px] text-[var(--rnest-muted)] shrink-0">
-                @{post.authorProfile.handle}
-              </span>
-            ) : null}
-            {post.groupName && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0"
-                style={{
-                  backgroundColor: "var(--rnest-lavender-soft)",
-                  color: "var(--rnest-lavender)",
-                  border: "1px solid var(--rnest-lavender-border)",
-                }}>
+            {post.groupName ? (
+              <span className="shrink-0 rounded-full bg-[#f3f4f6] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
                 {post.groupName}
               </span>
-            )}
+            ) : null}
           </div>
-          <span className="text-[11px] text-[var(--rnest-muted)]">{formatRelativeTime(post.createdAt)}</span>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-[#6b7280]">
+            {post.authorProfile.handle ? <span>@{post.authorProfile.handle}</span> : null}
+            {post.visibility === "followers" ? <span>팔로워 공개</span> : null}
+            {post.visibility === "public_internal" ? <span>허브 공개</span> : null}
+          </div>
         </div>
-        {/* 더보기 메뉴 */}
-        {canDelete && (
+
+        {canDelete ? (
           <div className="relative">
             <button
-              className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-black/5 text-[var(--rnest-muted)]"
-              onClick={() => setShowMenu((v) => !v)}
+              type="button"
+              onClick={() => setShowMenu((prev) => !prev)}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-[#6b7280] transition hover:bg-black/5"
               aria-label="게시글 옵션"
             >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <circle cx="10" cy="4" r="1.5" />
-                <circle cx="10" cy="10" r="1.5" />
-                <circle cx="10" cy="16" r="1.5" />
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <circle cx="12" cy="5" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="12" cy="19" r="1.5" />
               </svg>
             </button>
-            {showMenu && (
-              <div className="absolute right-0 top-8 bg-white rounded-xl shadow-lg border border-[var(--rnest-sep)] z-10 overflow-hidden min-w-[120px]">
+            {showMenu ? (
+              <div className="absolute right-0 top-10 z-20 min-w-[120px] overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
                 <button
-                  className="w-full text-left px-4 py-3 text-[13px] text-red-500 hover:bg-red-50 active:bg-red-100"
+                  type="button"
                   onClick={handleDelete}
+                  className="w-full px-4 py-3 text-left text-[13px] font-medium text-red-500 hover:bg-red-50"
                 >
                   삭제하기
                 </button>
                 <button
-                  className="w-full text-left px-4 py-3 text-[13px] text-[var(--rnest-sub)] hover:bg-black/5"
+                  type="button"
                   onClick={() => setShowMenu(false)}
+                  className="w-full px-4 py-3 text-left text-[13px] text-[#6b7280] hover:bg-black/[0.03]"
                 >
                   취소
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
       </div>
 
-      {/* 본문 */}
-      <div className="px-4 pb-2">
-        <p className={cn(
-          "text-[14px] leading-relaxed text-[var(--rnest-text)] whitespace-pre-wrap break-words",
-          !expanded && isLong && "line-clamp-4"
-        )}
-          onClick={() => router.push(`/social/posts/${post.id}`)}
-        >
-          {post.body}
-        </p>
-        {isLong && (
-          <button
-            className="mt-1 text-[12px] font-medium"
-            style={{ color: "var(--rnest-accent)" }}
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "접기" : "더 보기"}
+      {activeMediaUrl ? (
+        <div className="relative bg-black">
+          <button type="button" onClick={goToPost} className="block w-full text-left">
+            <div className="relative aspect-[4/5] w-full overflow-hidden bg-[#111]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={activeMediaUrl} alt="게시글 사진" className="h-full w-full object-cover" loading="lazy" />
+            </div>
           </button>
-        )}
-      </div>
 
-      {/* 이미지 */}
-      {post.imageUrl && !imgError && (
-        <div className="px-4 pb-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={post.imageUrl}
-            alt="게시글 이미지"
-            className="w-full rounded-xl object-cover"
-            style={{ maxHeight: "280px" }}
-            onError={() => setImgError(true)}
-            loading="lazy"
-          />
+          {mediaUrls.length > 1 ? (
+            <>
+              <div className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white">
+                {activeImageIndex + 1}/{mediaUrls.length}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveImageIndex((prev) => (prev === 0 ? mediaUrls.length - 1 : prev - 1))}
+                className="absolute left-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/45"
+                aria-label="이전 사진"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4 w-4">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveImageIndex((prev) => (prev + 1) % mediaUrls.length)}
+                className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/45"
+                aria-label="다음 사진"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4 w-4">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+
+              <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5">
+                {mediaUrls.map((_, index) => (
+                  <button
+                    key={`dot-${post.id}-${index}`}
+                    type="button"
+                    onClick={() => setActiveImageIndex(index)}
+                    className={cn(
+                      "h-1.5 rounded-full transition-all",
+                      index === activeImageIndex ? "w-5 bg-white" : "w-1.5 bg-white/45"
+                    )}
+                    aria-label={`${index + 1}번 사진으로 이동`}
+                  />
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {/* 태그 */}
-      {post.tags.length > 0 && (
-        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
-          {post.tags.map((tag) => (
-            <span
-              key={tag}
-              className="text-[11px] font-medium px-2.5 py-1 rounded-full"
-              style={{
-                backgroundColor: "var(--rnest-lavender-soft)",
-                color: "var(--rnest-lavender)",
-              }}
+      <div className="flex items-center justify-between px-4 pb-2 pt-3">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={handleLike}
+            disabled={likeLoading}
+            className={cn(
+              "flex items-center gap-1.5 text-[14px] font-medium transition active:scale-95",
+              liked ? "text-rose-500" : "text-[#111827]"
+            )}
+            aria-label={liked ? "좋아요 취소" : "좋아요"}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill={liked ? "currentColor" : "none"}
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-6 w-6"
             >
-              #{tag}
-            </span>
-          ))}
-        </div>
-      )}
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+            </svg>
+            {likeCount > 0 ? <span className="text-[13px]">{formatCount(likeCount)}</span> : null}
+          </button>
 
-      <div className="px-4 pb-2 flex items-center justify-between text-[11px] text-[var(--rnest-muted)]">
-        <span>
-          {post.visibility === "public_internal"
-            ? "허브 공개"
-            : post.visibility === "followers"
-              ? "팔로워 공개"
-              : post.visibility === "group"
-                ? "그룹 공개"
-                : "친구 공개"}
-        </span>
+          <button
+            type="button"
+            onClick={() => onCommentOpen?.(post)}
+            className="flex items-center gap-1.5 text-[14px] font-medium text-[#111827] transition active:scale-95"
+            aria-label="댓글"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-6 w-6"
+            >
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            {post.commentCount > 0 ? <span className="text-[13px]">{formatCount(post.commentCount)}</span> : null}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleShare}
+            className="text-[#111827] transition active:scale-95"
+            aria-label="공유"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-6 w-6"
+            >
+              <path d="M22 2 11 13" />
+              <path d="m22 2-7 20-4-9-9-4Z" />
+            </svg>
+          </button>
+        </div>
+
         <button
           type="button"
-          className="font-medium"
-          style={{ color: "var(--rnest-accent)" }}
-          onClick={() => router.push(`/social/posts/${post.id}`)}
-        >
-          자세히 보기
-        </button>
-      </div>
-
-      {/* 구분선 */}
-      <div className="mx-4" style={{ borderTop: "1px solid var(--rnest-sep)" }} />
-
-      {/* 액션 바: 좋아요 + 댓글 + 저장 + 공유 */}
-      <div className="flex items-center gap-1 px-2 py-1">
-        {/* 좋아요 버튼 */}
-        <button
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-95",
-            liked ? "text-rose-500" : "text-[var(--rnest-muted)]",
-            "hover:bg-black/5"
-          )}
-          onClick={handleLike}
-          disabled={likeLoading}
-          aria-label={liked ? "좋아요 취소" : "좋아요"}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className={cn(
-              "w-[18px] h-[18px] transition-transform",
-              liked ? "scale-110" : "scale-100"
-            )}
-            fill={liked ? "currentColor" : "none"}
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-          </svg>
-          <span>{likeCount > 0 ? likeCount : ""}</span>
-        </button>
-
-        {/* 댓글 버튼 */}
-        <button
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] font-medium text-[var(--rnest-muted)] hover:bg-black/5 transition-all active:scale-95"
-          onClick={() => onCommentOpen?.(post)}
-          aria-label="댓글 보기"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="w-[18px] h-[18px]"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <span>{post.commentCount > 0 ? post.commentCount : ""}</span>
-        </button>
-
-        <button
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-95",
-            saved ? "text-[var(--rnest-accent)]" : "text-[var(--rnest-muted)]",
-            "hover:bg-black/5"
-          )}
           onClick={handleSave}
           disabled={saveLoading}
+          className={cn("transition active:scale-95", saved ? "text-[#111827]" : "text-[#111827]")}
           aria-label={saved ? "저장 취소" : "저장"}
         >
           <svg
             viewBox="0 0 24 24"
-            className="w-[18px] h-[18px]"
             fill={saved ? "currentColor" : "none"}
             stroke="currentColor"
-            strokeWidth="1.8"
+            strokeWidth="1.9"
             strokeLinecap="round"
             strokeLinejoin="round"
+            className="h-6 w-6"
           >
             <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
           </svg>
-          <span>{saveCount > 0 ? saveCount : ""}</span>
-        </button>
-
-        <button
-          className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] font-medium text-[var(--rnest-muted)] hover:bg-black/5 transition-all active:scale-95"
-          onClick={handleShare}
-          aria-label="게시글 공유"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="w-[18px] h-[18px]"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-          </svg>
+          <span className="sr-only">{saveCount > 0 ? `${saveCount}개 저장` : "저장"}</span>
         </button>
       </div>
-    </div>
+
+      <div className="px-4 pb-4">
+        <div className="mb-2 flex items-center gap-4 text-[13px] font-semibold text-[#111827]">
+          {likeCount > 0 ? <span>{formatCount(likeCount)}명이 좋아합니다</span> : null}
+          {saveCount > 0 ? <span>{formatCount(saveCount)}회 저장됨</span> : null}
+        </div>
+
+        {caption ? (
+          <div className="text-[13.5px] leading-6 text-[#111827]">
+            <p className={cn(!expanded && isLongCaption ? "line-clamp-2" : undefined)}>
+              <button
+                type="button"
+                onClick={goToProfile}
+                className="mr-1 font-semibold"
+              >
+                {profileLabel}
+              </button>
+              <span className="whitespace-pre-wrap break-words">{caption}</span>
+            </p>
+            {isLongCaption ? (
+              <button
+                type="button"
+                onClick={() => setExpanded((prev) => !prev)}
+                className="mt-1 text-[13px] font-medium text-[#6b7280]"
+              >
+                {expanded ? "접기" : "more"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {post.tags.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[13px] font-medium text-[#4F46E5]">
+            {post.tags.map((tag) => (
+              <span key={tag}>#{tag}</span>
+            ))}
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => onCommentOpen?.(post)}
+          className="mt-2 text-[13px] text-[#6b7280]"
+        >
+          {post.commentCount > 0 ? `댓글 ${formatCount(post.commentCount)}개 모두 보기` : "댓글 남기기"}
+        </button>
+
+        <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[#9ca3af]">
+          {formatRelativeTime(post.createdAt)}
+        </p>
+      </div>
+    </article>
   );
 }

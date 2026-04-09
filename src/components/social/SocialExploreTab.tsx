@@ -137,7 +137,7 @@ export function SocialExploreTab({ userGroups = [], defaultVisibility = "friends
           </section>
         ) : null}
 
-        <section className="space-y-2.5">
+        <section className="space-y-4">
           <h3 className="text-[13px] font-semibold text-[var(--rnest-muted)]">
             {trimmedQuery ? "게시글 결과" : "허브 공개 게시글"}
           </h3>

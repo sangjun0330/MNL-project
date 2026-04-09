@@ -30,6 +30,7 @@ type PostRow = {
   author_user_id: string;
   body: string;
   image_path: string | null;
+  image_paths: string[] | null;
   tags: string[] | null;
   visibility: SocialPostVisibility;
   group_id: number | null;
@@ -62,6 +63,27 @@ function buildImageUrl(imagePath: string | null): string | null {
   const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
   if (!base) return null;
   return `${base}/storage/v1/object/public/social-post-images/${imagePath}`;
+}
+
+function buildImageUrls(imagePaths: string[]) {
+  return imagePaths
+    .map((imagePath) => buildImageUrl(imagePath))
+    .filter((value): value is string => Boolean(value));
+}
+
+function normalizeStoredImagePaths(row: Pick<PostRow, "image_path" | "image_paths">) {
+  const fromArray = Array.isArray(row.image_paths)
+    ? row.image_paths
+        .map((value) => String(value ?? "").replace(/^\/+/, "").trim())
+        .filter(Boolean)
+    : [];
+
+  if (fromArray.length > 0) {
+    return Array.from(new Set(fromArray));
+  }
+
+  const legacyPath = row.image_path ? String(row.image_path).replace(/^\/+/, "").trim() : "";
+  return legacyPath ? [legacyPath] : [];
 }
 
 export function cleanPostBody(value: unknown): string {
@@ -115,6 +137,24 @@ export function cleanPostTags(value: unknown): string[] {
   }
 
   return tags;
+}
+
+export function cleanPostImagePaths(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawPath of value) {
+    const imagePath = String(rawPath ?? "").replace(/^\/+/, "").trim().slice(0, 500);
+    if (!imagePath) continue;
+    if (seen.has(imagePath)) continue;
+    seen.add(imagePath);
+    normalized.push(imagePath);
+    if (normalized.length >= 10) break;
+  }
+
+  return normalized;
 }
 
 async function buildViewerAccessContext(admin: any, userId: string): Promise<ViewerAccessContext> {
@@ -231,14 +271,18 @@ function buildSocialPost(
   const profile = profileMap.get(authorUserId);
   const authorProfile = buildSocialAuthorProfile(authorUserId, profile);
   const groupId = row.group_id ? Number(row.group_id) : null;
+  const imagePaths = normalizeStoredImagePaths(row);
+  const imageUrls = buildImageUrls(imagePaths);
 
   return {
     id: Number(row.id),
     authorUserId,
     authorProfile,
     body: String(row.body ?? ""),
-    imagePath: row.image_path ? String(row.image_path) : null,
-    imageUrl: buildImageUrl(row.image_path ? String(row.image_path) : null),
+    imagePath: imagePaths[0] ?? null,
+    imageUrl: imageUrls[0] ?? null,
+    imagePaths,
+    imageUrls,
     tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
     visibility: normalizeVisibility(row.visibility),
     groupId,
@@ -303,7 +347,7 @@ export async function getFeedPage(
   const context = await buildViewerAccessContext(admin, userId);
 
   const selectColumns =
-    "id, author_user_id, body, image_path, tags, visibility, group_id, like_count, comment_count, created_at, updated_at";
+    "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at";
   let rawRows: PostRow[] = [];
 
   if (scope === "saved" || scope === "liked") {
@@ -434,7 +478,7 @@ export async function searchSocialPosts(
   const cleanedQuery = cleanPostBody(query).trim();
   let builder = (admin as any)
     .from("rnest_social_posts")
-    .select("id, author_user_id, body, image_path, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
+    .select("id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
     .eq("visibility", "public_internal")
     .order("created_at", { ascending: false })
     .limit(limit * 3);
@@ -464,7 +508,7 @@ export async function searchSocialPosts(
 export async function getPostById(admin: any, postId: number, userId: string) {
   const { data, error } = await (admin as any)
     .from("rnest_social_posts")
-    .select("id, author_user_id, body, image_path, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
+    .select("id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
     .eq("id", postId)
     .maybeSingle();
 
@@ -489,7 +533,13 @@ async function notifyFollowersAboutPost(admin: any, userId: string, post: Social
     ensureSocialProfile(admin, userId),
   ]);
 
-  const preview = post.body.length > 80 ? `${post.body.slice(0, 80)}…` : post.body;
+  const preview = post.body
+    ? post.body.length > 80
+      ? `${post.body.slice(0, 80)}…`
+      : post.body
+    : post.imagePaths.length > 0
+      ? "사진 게시글"
+      : "";
   for (const row of followerRows ?? []) {
     const recipientId = String(row.follower_user_id);
     if (!recipientId || recipientId === userId) continue;
@@ -516,6 +566,7 @@ export async function createPost(
   body: string,
   opts: {
     imagePath?: string | null;
+    imagePaths?: string[];
     tags?: string[];
     groupId?: number | null;
     visibility?: SocialPostVisibility;
@@ -523,10 +574,19 @@ export async function createPost(
 ): Promise<SocialPost> {
   const visibility = normalizeVisibility(opts.visibility ?? "friends");
   const groupId = visibility === "group" ? (opts.groupId ?? null) : null;
-  const imagePath = opts.imagePath ? String(opts.imagePath).replace(/^\/+/, "").trim() : null;
+  const imagePaths = cleanPostImagePaths(
+    opts.imagePaths && opts.imagePaths.length > 0
+      ? opts.imagePaths
+      : opts.imagePath
+        ? [opts.imagePath]
+        : []
+  );
+  const imagePath = imagePaths[0] ?? null;
 
-  if (imagePath && !isOwnedSocialPostImagePath(userId, imagePath)) {
-    throw Object.assign(new Error("invalid_image_path"), { code: "invalid_image_path" });
+  for (const candidatePath of imagePaths) {
+    if (!isOwnedSocialPostImagePath(userId, candidatePath)) {
+      throw Object.assign(new Error("invalid_image_path"), { code: "invalid_image_path" });
+    }
   }
 
   if (visibility === "group" && groupId) {
@@ -547,11 +607,12 @@ export async function createPost(
       author_user_id: userId,
       body,
       image_path: imagePath,
+      image_paths: imagePaths,
       tags: opts.tags ?? [],
       visibility,
       group_id: groupId,
     })
-    .select("id, author_user_id, body, image_path, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
+    .select("id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
     .single();
 
   if (error) throw error;
@@ -626,7 +687,7 @@ export async function togglePostLike(admin: any, postId: number, userId: string)
   const count = await updatePostLikeCount(admin, postId);
 
   if (liked && postRow?.author_user_id && String(postRow.author_user_id) !== userId) {
-    const preview = String(postRow.body ?? "").slice(0, 80);
+    const preview = String(postRow.body ?? "").slice(0, 80) || "사진 게시글";
     await appendSocialEvent({
       admin,
       recipientId: String(postRow.author_user_id),
