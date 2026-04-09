@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
-import type { SocialProfile, ScheduleVisibility, HealthVisibility } from "@/types/social";
+import type {
+  SocialProfile,
+  ScheduleVisibility,
+  HealthVisibility,
+  SocialPostVisibility,
+} from "@/types/social";
 import { useAppStoreSelector } from "@/lib/store";
 
 const AVATAR_OPTIONS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
@@ -73,10 +78,20 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const autoStatus = useMemo(() => generateAutoStatus(mySchedule), [mySchedule]);
 
   const [nickname, setNickname] = useState(profile?.nickname ?? "");
+  const [displayName, setDisplayName] = useState(profile?.displayName ?? "");
+  const [handle, setHandle] = useState(profile?.handle ?? "");
+  const [bio, setBio] = useState(profile?.bio ?? "");
   const [avatar, setAvatar] = useState(profile?.avatarEmoji ?? "🐧");
   const [statusMessage, setStatusMessage] = useState(profile?.statusMessage ?? "");
+  const [discoverability, setDiscoverability] = useState(profile?.discoverability ?? "off");
+  const [defaultPostVisibility, setDefaultPostVisibility] = useState<SocialPostVisibility>(
+    profile?.defaultPostVisibility ?? "friends"
+  );
+  const [profileImageUrl, setProfileImageUrl] = useState(profile?.profileImageUrl ?? null);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [code, setCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(false);
@@ -94,20 +109,63 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [prefsSaving, setPrefsSaving] = useState(false);
 
   const trimmedNickname = nickname.trim();
+  const trimmedDisplayName = displayName.trim();
+  const trimmedHandle = handle.trim().toLowerCase();
+  const trimmedBio = bio.trim();
   const trimmedStatusMessage = statusMessage.trim().slice(0, 30);
   const dirty =
     trimmedNickname !== (profile?.nickname ?? "") ||
+    trimmedDisplayName !== (profile?.displayName ?? "") ||
+    trimmedHandle !== (profile?.handle ?? "") ||
+    trimmedBio !== (profile?.bio ?? "") ||
     avatar !== (profile?.avatarEmoji ?? "🐧") ||
-    trimmedStatusMessage !== (profile?.statusMessage ?? "");
+    trimmedStatusMessage !== (profile?.statusMessage ?? "") ||
+    discoverability !== (profile?.discoverability ?? "off") ||
+    defaultPostVisibility !== (profile?.defaultPostVisibility ?? "friends");
 
   useEffect(() => {
     if (!open) return;
     setNickname(profile?.nickname ?? "");
+    setDisplayName(profile?.displayName ?? "");
+    setHandle(profile?.handle ?? "");
+    setBio(profile?.bio ?? "");
     setAvatar(profile?.avatarEmoji ?? "🐧");
     setStatusMessage(profile?.statusMessage ?? "");
+    setDiscoverability(profile?.discoverability ?? "off");
+    setDefaultPostVisibility(profile?.defaultPostVisibility ?? "friends");
+    setProfileImageUrl(profile?.profileImageUrl ?? null);
     setError(null);
     setCodeCopied(false);
   }, [open, profile]);
+
+  const handleProfileImageSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.set("file", file);
+      const res = await fetch("/api/social/profile/image", {
+        method: "POST",
+        body: formData,
+      }).then((response) => response.json());
+
+      if (!res.ok) {
+        if (res.error === "invalid_file_type") throw new Error("JPG, PNG, WEBP 이미지만 첨부할 수 있어요.");
+        if (res.error === "file_too_large") throw new Error("이미지는 5MB 이하만 첨부할 수 있어요.");
+        throw new Error("프로필 사진 업로드에 실패했어요.");
+      }
+
+      setProfileImageUrl(res.data?.profile?.profileImageUrl ?? null);
+      onSaved(res.data?.profile as SocialProfile);
+    } catch (uploadError: any) {
+      setError(String(uploadError?.message ?? "프로필 사진 업로드에 실패했어요."));
+    } finally {
+      setUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+    }
+  }, [onSaved]);
 
   const loadCode = useCallback(async () => {
     setCodeLoading(true);
@@ -158,9 +216,17 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   }, []);
 
   const handleSave = async () => {
-    if (!trimmedNickname || saving) return;
+    if (!trimmedNickname || !trimmedDisplayName || saving) return;
     if (trimmedNickname.length > 12) {
       setError("닉네임은 12자 이하로 입력해 주세요.");
+      return;
+    }
+    if (trimmedDisplayName.length > 24) {
+      setError("표시 이름은 24자 이하로 입력해 주세요.");
+      return;
+    }
+    if (!/^[a-z0-9][a-z0-9._-]{1,28}[a-z0-9]$/.test(trimmedHandle)) {
+      setError("핸들은 영문 소문자, 숫자, 점, 밑줄, 하이픈으로 3~30자여야 해요.");
       return;
     }
 
@@ -172,14 +238,21 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nickname: trimmedNickname,
+          displayName: trimmedDisplayName,
+          handle: trimmedHandle,
+          bio: trimmedBio,
           avatarEmoji: avatar,
           statusMessage: trimmedStatusMessage,
+          discoverability,
+          defaultPostVisibility,
         }),
       }).then((r) => r.json());
 
       if (!res.ok) {
         if (res.error === "nickname_required") throw new Error("닉네임을 입력해 주세요.");
         if (res.error === "invalid_avatar") throw new Error("아바타를 다시 선택해 주세요.");
+        if (res.error === "invalid_handle") throw new Error("핸들 형식을 다시 확인해 주세요.");
+        if (res.error === "handle_taken") throw new Error("이미 사용 중인 핸들이에요.");
         throw new Error("프로필 저장에 실패했어요.");
       }
 
@@ -316,18 +389,82 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
       <div className="space-y-5 pb-6">
         <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
           <div className="flex items-center gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[30px]">
-              {avatar}
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[30px]"
+            >
+              {profileImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profileImageUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                avatar
+              )}
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleProfileImageSelect}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-[16px] font-semibold text-ios-text">
+                {trimmedDisplayName || trimmedNickname || "프로필을 완성해 주세요"}
+              </p>
+              <p className="mt-0.5 text-[12.5px] text-ios-muted">
+                {trimmedHandle ? `@${trimmedHandle}` : "SNS 프로필에 표시됩니다."}
+              </p>
             </div>
-            <div className="min-w-0">
-              <p className="text-[16px] font-semibold text-ios-text">{trimmedNickname || "닉네임을 입력해 주세요"}</p>
-              <p className="text-[12.5px] text-ios-muted">친구에게 이 프로필로 표시됩니다.</p>
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              className="shrink-0 rounded-full bg-ios-bg px-3 py-2 text-[12px] font-semibold text-ios-text"
+            >
+              {uploadingImage ? "업로드 중…" : "사진 변경"}
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4">
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
+                표시 이름 <span className="font-normal text-ios-muted">(최대 24자)</span>
+              </label>
+              <input
+                value={displayName}
+                onChange={(e) => {
+                  setDisplayName(e.target.value.slice(0, 24));
+                  setError(null);
+                }}
+                placeholder="프로필에 표시할 이름"
+                maxLength={24}
+                className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
+                핸들 <span className="font-normal text-ios-muted">(3~30자)</span>
+              </label>
+              <div className="flex items-center rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
+                <span className="text-[15px] text-ios-muted">@</span>
+                <input
+                  value={handle}
+                  onChange={(e) => {
+                    setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ""));
+                    setError(null);
+                  }}
+                  placeholder="my-handle"
+                  maxLength={30}
+                  className="ml-1 w-full bg-transparent text-[15px] text-ios-text outline-none placeholder:text-ios-muted/60"
+                />
+              </div>
             </div>
           </div>
 
           <div className="mt-4">
             <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-              닉네임 <span className="font-normal text-ios-muted">(최대 12자)</span>
+              닉네임 <span className="font-normal text-ios-muted">(친구/그룹 fallback, 최대 12자)</span>
             </label>
             <input
               value={nickname}
@@ -339,6 +476,66 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               maxLength={12}
               className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
             />
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
+              소개 <span className="font-normal text-ios-muted">(최대 160자)</span>
+            </label>
+            <textarea
+              value={bio}
+              onChange={(e) => {
+                setBio(e.target.value.slice(0, 160));
+                setError(null);
+              }}
+              rows={3}
+              className="w-full resize-none rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] leading-6 text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
+              placeholder="내 소개를 적어보세요"
+            />
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-2 block text-[13px] font-semibold text-ios-text">탐색 노출</label>
+            <div className="flex gap-2">
+              {([
+                { id: "off", label: "비공개" },
+                { id: "internal", label: "허브 공개" },
+              ] as const).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setDiscoverability(item.id)}
+                  className={`flex-1 rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition ${
+                    discoverability === item.id ? "bg-[color:var(--rnest-accent)] text-white" : "bg-ios-bg text-ios-muted"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <label className="mb-2 block text-[13px] font-semibold text-ios-text">기본 게시글 공개 범위</label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { id: "public_internal", label: "허브 공개" },
+                { id: "followers", label: "팔로워" },
+                { id: "friends", label: "친구" },
+                { id: "group", label: "그룹" },
+              ] as const).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setDefaultPostVisibility(item.id)}
+                  className={`rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition ${
+                    defaultPostVisibility === item.id ? "bg-[color:var(--rnest-accent)] text-white" : "bg-ios-bg text-ios-muted"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mt-4">

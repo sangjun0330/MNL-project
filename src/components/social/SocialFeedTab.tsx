@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FeedPage, SocialPost, SocialGroupSummary } from "@/types/social";
+import type {
+  FeedPage,
+  SocialGroupSummary,
+  SocialPost,
+  SocialPostVisibility,
+} from "@/types/social";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
 import { SocialPostComposer } from "@/components/social/SocialPostComposer";
 import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentSheet";
@@ -53,12 +58,50 @@ function EmptyFeed({ onCompose }: { onCompose: () => void }) {
   );
 }
 
+type FeedScope = "following" | "profile" | "saved" | "liked";
+
 type Props = {
   userGroups?: Pick<SocialGroupSummary, "id" | "name">[];
   isAdmin?: boolean;
+  scope?: FeedScope;
+  handle?: string | null;
+  showComposer?: boolean;
+  defaultVisibility?: SocialPostVisibility;
 };
 
-export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
+function buildEmptyCopy(scope: FeedScope) {
+  if (scope === "saved") {
+    return {
+      title: "저장한 게시글이 없어요",
+      description: "나중에 다시 보고 싶은 글을 저장해두면\n여기에서 바로 모아볼 수 있어요",
+    };
+  }
+  if (scope === "liked") {
+    return {
+      title: "좋아요한 게시글이 없어요",
+      description: "좋아요를 누른 게시글이 생기면\n여기에서 다시 확인할 수 있어요",
+    };
+  }
+  if (scope === "profile") {
+    return {
+      title: "게시글이 아직 없어요",
+      description: "첫 게시글을 올리면\n프로필 타임라인이 채워져요",
+    };
+  }
+  return {
+    title: "아직 게시글이 없어요",
+    description: "팔로우를 시작하거나 그룹에 참여하면\n일상을 함께 나눌 수 있어요",
+  };
+}
+
+export function SocialFeedTab({
+  userGroups = [],
+  isAdmin = false,
+  scope = "following",
+  handle = null,
+  showComposer = true,
+  defaultVisibility = "friends",
+}: Props) {
   const { user } = useAuthState();
   const currentUserId = user?.userId;
 
@@ -75,6 +118,7 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
   // 무한 스크롤 sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const emptyCopy = buildEmptyCopy(scope);
 
   // 피드 로드
   const loadFeed = useCallback(async (cursor?: string | null) => {
@@ -83,7 +127,11 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
     else setLoadingMore(true);
 
     try {
-      const url = `/api/social/posts${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const params = new URLSearchParams();
+      params.set("scope", scope);
+      if (handle) params.set("handle", handle);
+      if (cursor) params.set("cursor", cursor);
+      const url = `/api/social/feed?${params.toString()}`;
       const res = await fetch(url).then((r) => r.json());
       if (res.ok) {
         const data = res.data as FeedPage;
@@ -103,7 +151,7 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
       setLoadingMore(false);
       setHasLoaded(true);
     }
-  }, []);
+  }, [handle, scope]);
 
   useEffect(() => {
     loadFeed();
@@ -136,6 +184,15 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }, []);
 
+  const handlePostStatsChange = useCallback(
+    (postId: number, patch: Partial<Pick<SocialPost, "commentCount" | "likeCount" | "saveCount" | "isLiked" | "isSaved">>) => {
+      setPosts((prev) =>
+        prev.map((post) => (post.id === postId ? { ...post, ...patch } : post))
+      );
+    },
+    []
+  );
+
   // 댓글 열기
   const handleCommentOpen = useCallback((post: SocialPost) => {
     setCommentPost(post);
@@ -153,7 +210,29 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
             <PostCardSkeleton />
           </>
         ) : hasLoaded && posts.length === 0 ? (
-          <EmptyFeed onCompose={() => setComposerOpen(true)} />
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 text-3xl"
+              style={{ backgroundColor: "var(--rnest-lavender-soft)" }}
+            >
+              📝
+            </div>
+            <h3 className="text-[15px] font-semibold text-[var(--rnest-text)] mb-1.5">
+              {emptyCopy.title}
+            </h3>
+            <p className="text-[13px] text-[var(--rnest-muted)] leading-relaxed mb-5 whitespace-pre-line">
+              {emptyCopy.description}
+            </p>
+            {showComposer ? (
+              <button
+                className="px-5 py-2.5 rounded-full text-[13px] font-semibold text-white transition-all active:scale-95"
+                style={{ backgroundColor: "var(--rnest-accent)" }}
+                onClick={() => setComposerOpen(true)}
+              >
+                첫 게시글 올리기
+              </button>
+            ) : null}
+          </div>
         ) : (
           <>
             {posts.map((post) => (
@@ -164,6 +243,7 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
                 onDelete={handleDelete}
                 currentUserId={currentUserId}
                 isAdmin={isAdmin}
+                onStatsChange={handlePostStatsChange}
               />
             ))}
 
@@ -187,21 +267,23 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
       </div>
 
       {/* FAB: 게시글 작성 */}
-      <button
-        className="fixed z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white transition-all active:scale-95 hover:brightness-110"
-        style={{
-          backgroundColor: "var(--rnest-accent)",
-          bottom: "calc(80px + env(safe-area-inset-bottom))",
-          right: "16px",
-        }}
-        onClick={() => setComposerOpen(true)}
-        aria-label="새 게시글 작성"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-6 h-6">
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-      </button>
+      {showComposer ? (
+        <button
+          className="fixed z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white transition-all active:scale-95 hover:brightness-110"
+          style={{
+            backgroundColor: "var(--rnest-accent)",
+            bottom: "calc(80px + env(safe-area-inset-bottom))",
+            right: "16px",
+          }}
+          onClick={() => setComposerOpen(true)}
+          aria-label="새 게시글 작성"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-6 h-6">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      ) : null}
 
       {/* 게시글 작성 시트 */}
       <SocialPostComposer
@@ -209,6 +291,7 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
         onClose={() => setComposerOpen(false)}
         onPosted={handlePosted}
         userGroups={userGroups}
+        defaultVisibility={defaultVisibility}
       />
 
       {/* 댓글 시트 */}
@@ -221,6 +304,9 @@ export function SocialFeedTab({ userGroups = [], isAdmin = false }: Props) {
         }}
         currentUserId={currentUserId}
         isAdmin={isAdmin}
+        onCommentCountChange={(postId, count) =>
+          handlePostStatsChange(postId, { commentCount: count })
+        }
       />
     </div>
   );

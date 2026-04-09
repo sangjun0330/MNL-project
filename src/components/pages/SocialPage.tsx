@@ -25,6 +25,7 @@ import { SocialGroupList } from "@/components/social/SocialGroupList";
 import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateSheet";
 import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
 import { SocialFeedTab } from "@/components/social/SocialFeedTab";
+import { SocialExploreTab } from "@/components/social/SocialExploreTab";
 import {
   SocialOverlapSelectorSheet,
   type SocialOverlapSelectorItem,
@@ -49,10 +50,11 @@ import {
 import { withReturnTo } from "@/lib/navigation";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
-type SocialViewTab = "feed" | "friends" | "groups";
+type SocialViewTab = "following" | "explore" | "friends" | "groups";
 
 function resolveSocialViewTab(value: string | null | undefined, fallback: SocialViewTab): SocialViewTab {
-  if (value === "feed") return "feed";
+  if (value === "feed" || value === "following") return "following";
+  if (value === "explore") return "explore";
   if (value === "groups") return "groups";
   if (value === "friends") return "friends";
   return fallback;
@@ -112,13 +114,13 @@ export function SocialPage() {
   const [groupsError, setGroupsError] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SocialViewTab>(
-    resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "feed")
+    resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "following")
   );
   const updateActiveTab = useCallback((nextTab: SocialViewTab) => {
     setActiveTab(nextTab);
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (nextTab === "feed") params.delete("tab");
+    if (nextTab === "following") params.delete("tab");
     else params.set("tab", nextTab);
     const nextQuery = params.toString();
     const nextPath = window.location.pathname;
@@ -249,7 +251,7 @@ export function SocialPage() {
   }, [currentUserId, status]);
 
   useEffect(() => {
-    const nextTab = resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "friends");
+    const nextTab = resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "following");
     const key = `${requestedTab ?? ""}:${groupInviteToken ? "groupInvite" : "none"}`;
     if (appliedTabKeyRef.current === key) return;
     appliedTabKeyRef.current = key;
@@ -1008,7 +1010,17 @@ export function SocialPage() {
           {/* 프로필 버튼 */}
           <button
             type="button"
-            onClick={() => (profile ? setOpenProfile(true) : setShowOnboarding(true))}
+            onClick={() => {
+              if (profile?.handle) {
+                router.push(`/social/profile/${profile.handle}`);
+                return;
+              }
+              if (profile) {
+                setOpenProfile(true);
+                return;
+              }
+              setShowOnboarding(true);
+            }}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[20px] shadow-apple transition hover:bg-ios-sep/20 active:opacity-60"
             title="내 소셜 프로필"
             aria-label="내 소셜 프로필"
@@ -1035,7 +1047,8 @@ export function SocialPage() {
       <div className="rounded-2xl bg-ios-bg p-1 shadow-apple">
         <div className="flex items-center gap-1">
           {([
-            { id: "feed", label: "피드" },
+            { id: "following", label: "팔로잉" },
+            { id: "explore", label: "탐색" },
             { id: "friends", label: "친구" },
             { id: "groups", label: "그룹" },
           ] as const).map((tab) => (
@@ -1056,10 +1069,19 @@ export function SocialPage() {
       </div>
 
       {/* ── 피드 탭 ────────────────────────────────────────── */}
-      {activeTab === "feed" && (
+      {activeTab === "following" && (
         <SocialFeedTab
+          scope="following"
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
           isAdmin={false}
+          defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+        />
+      )}
+
+      {activeTab === "explore" && (
+        <SocialExploreTab
+          userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
+          defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
         />
       )}
 

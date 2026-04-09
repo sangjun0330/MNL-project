@@ -23,6 +23,16 @@ function buildEventLabel(event: SocialEvent): string {
       return "님이 연결 요청을 수락했어요";
     case "connection_rejected":
       return "님이 연결 요청을 거절했어요";
+    case "followed":
+      return "님이 나를 팔로우했어요";
+    case "new_post":
+      return "님이 새 게시글을 올렸어요";
+    case "post_liked":
+      return "님이 내 게시글을 좋아해요";
+    case "post_commented":
+      return "님이 내 게시글에 댓글을 남겼어요";
+    case "comment_replied":
+      return "님이 내 댓글에 답글을 남겼어요";
     case "group_notice_posted":
       return `님이 ${groupName} 그룹에 새 공지를 올렸어요`;
     case "group_notice_updated":
@@ -65,6 +75,15 @@ function buildEventDetail(event: SocialEvent): string | null {
   if (event.type === "group_settings_updated") {
     const summary = String(event.payload?.summary ?? "").trim();
     return summary || null;
+  }
+  if (
+    event.type === "new_post" ||
+    event.type === "post_liked" ||
+    event.type === "post_commented" ||
+    event.type === "comment_replied"
+  ) {
+    const preview = String(event.payload?.bodyPreview ?? "").trim();
+    return preview || null;
   }
   return null;
 }
@@ -143,7 +162,7 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange, refreshT
       open={open}
       onClose={onClose}
       title="알림"
-      subtitle="친구 연결, 그룹 공지, 운영 변경 알림"
+      subtitle="팔로우, 게시글, 친구, 그룹 활동을 한곳에서 확인해요"
       variant="appstore"
       maxHeightClassName="max-h-[78dvh]"
     >

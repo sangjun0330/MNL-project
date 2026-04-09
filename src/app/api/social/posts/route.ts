@@ -9,9 +9,10 @@ import {
   cleanPostBody,
   cleanCommentBody as _cleanComment,
   cleanPostTags,
-  getFriendFeed,
+  getFeedPage,
   createPost,
 } from "@/lib/server/socialPosts";
+import type { SocialPostVisibility } from "@/types/social";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -24,9 +25,18 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
   const url = new URL(req.url);
   const cursor = url.searchParams.get("cursor") || null;
+  const scopeParam = url.searchParams.get("scope") ?? "following";
+  const scope =
+    scopeParam === "explore" ||
+    scopeParam === "profile" ||
+    scopeParam === "saved" ||
+    scopeParam === "liked"
+      ? scopeParam
+      : "following";
+  const handle = url.searchParams.get("handle") || null;
 
   try {
-    const feed = await getFriendFeed(admin, userId, cursor, 20);
+    const feed = await getFeedPage(admin, userId, { scope, cursor, handle, limit: 20 });
     return jsonNoStore({ ok: true, data: feed });
   } catch (err: any) {
     console.error("[SocialPosts/GET] err=%s", String(err?.message ?? err));
@@ -54,8 +64,12 @@ export async function POST(req: Request) {
     return jsonNoStore({ ok: false, error: "body_required" }, { status: 400 });
   }
 
-  const visibility: "friends" | "group" =
-    body?.visibility === "group" ? "group" : "friends";
+  const visibility: SocialPostVisibility =
+    body?.visibility === "public_internal" ||
+    body?.visibility === "followers" ||
+    body?.visibility === "group"
+      ? body.visibility
+      : "friends";
   const groupId =
     visibility === "group" && Number.isFinite(Number(body?.groupId))
       ? Number(body.groupId)

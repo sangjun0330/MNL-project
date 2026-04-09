@@ -52,7 +52,7 @@ export async function GET(
   }
 
   try {
-    const result = await getPostComments(admin, postId, cursor);
+    const result = await getPostComments(admin, postId, userId, cursor);
     return jsonNoStore({ ok: true, data: result });
   } catch (err: any) {
     console.error("[SocialPostComments/GET] err=%s", String(err?.message ?? err));
@@ -88,6 +88,10 @@ export async function POST(
   if (!commentBody) {
     return jsonNoStore({ ok: false, error: "body_required" }, { status: 400 });
   }
+  const parentId =
+    Number.isFinite(Number(body?.parentId)) && Number(body.parentId) > 0
+      ? Number(body.parentId)
+      : null;
 
   const admin = getSupabaseAdmin();
 
@@ -121,10 +125,13 @@ export async function POST(
       return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
     }
 
-    const comment = await addComment(admin, postId, userId, commentBody);
+    const comment = await addComment(admin, postId, userId, commentBody, { parentId });
     await recordSocialActionAttempt({ req, userId, action: "post_comment", success: true, detail: "ok" });
     return jsonNoStore({ ok: true, data: { comment } }, { status: 201 });
   } catch (err: any) {
+    if (err?.code === "invalid_parent_comment") {
+      return jsonNoStore({ ok: false, error: "invalid_parent_comment" }, { status: 400 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "post_comment", success: false, detail: "failed" });
     console.error("[SocialPostComments/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_add_comment" }, { status: 500 });

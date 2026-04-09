@@ -4,6 +4,13 @@ export type SocialProfile = {
   nickname: string;
   avatarEmoji: string;
   statusMessage: string;
+  handle: string | null;
+  displayName: string;
+  bio: string;
+  profileImagePath: string | null;
+  profileImageUrl: string | null;
+  discoverability: SocialProfileDiscoverability;
+  defaultPostVisibility: SocialPostVisibility;
 };
 
 export type SocialConnection = {
@@ -42,6 +49,7 @@ export type FriendMeta = {
 
 export type ScheduleVisibility = "full" | "off_only" | "hidden";
 export type HealthVisibility = "full" | "hidden";
+export type SocialProfileDiscoverability = "off" | "internal";
 
 export type SocialPreferences = {
   scheduleVisibility: ScheduleVisibility;
@@ -85,6 +93,11 @@ export type SocialEventType =
   | "connection_request"
   | "connection_accepted"
   | "connection_rejected"
+  | "followed"
+  | "new_post"
+  | "post_liked"
+  | "post_commented"
+  | "comment_replied"
   | "group_notice_posted"
   | "group_notice_updated"
   | "group_settings_updated"
@@ -110,10 +123,16 @@ export type SocialEvent = {
     title?: string;
     notice?: string;
     summary?: string;
+    handle?: string;
+    postId?: number;
+    commentId?: number;
+    bodyPreview?: string;
   };
   readAt: string | null;
   createdAt: string;
 };
+
+export type SocialInboxItem = SocialEvent;
 
 export type SocialGroupRole = "owner" | "admin" | "member";
 export type SocialGroupJoinMode = "open" | "approval";
@@ -438,35 +457,102 @@ export type CreateChallengePayload = {
 // Social Post Feed types
 // ══════════════════════════════════════════════════════════════
 
-export type PostVisibility = "friends" | "group";
+export type SocialPostVisibility = "public_internal" | "followers" | "friends" | "group";
+export type PostVisibility = SocialPostVisibility;
+
+export type SocialAuthorProfile = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+  handle: string | null;
+  displayName: string;
+  bio: string;
+  profileImageUrl: string | null;
+};
+
+export type SocialRelationshipState = {
+  isSelf: boolean;
+  isFollowing: boolean;
+  isFollowedByViewer: boolean;
+  followsViewer: boolean;
+  isFriend: boolean;
+  hasIncomingFriendRequest: boolean;
+  hasOutgoingFriendRequest: boolean;
+};
+
+export type SocialFollowSummary = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+  handle: string | null;
+  displayName: string;
+  bio: string;
+  profileImageUrl: string | null;
+  statusMessage: string;
+};
+
+export type SocialProfileHeader = {
+  userId: string;
+  nickname: string;
+  avatarEmoji: string;
+  handle: string | null;
+  displayName: string;
+  bio: string;
+  statusMessage: string;
+  profileImageUrl: string | null;
+  discoverability: SocialProfileDiscoverability;
+  defaultPostVisibility: SocialPostVisibility;
+  followerCount: number;
+  followingCount: number;
+  postCount: number;
+  relationship: SocialRelationshipState;
+};
 
 export type SocialPost = {
   id: number;
   authorUserId: string;
-  authorProfile: { nickname: string; avatarEmoji: string };
+  authorProfile: SocialAuthorProfile;
   body: string;
   imagePath: string | null;
   imageUrl: string | null;     // Supabase Storage public URL
   tags: string[];
-  visibility: PostVisibility;
+  visibility: SocialPostVisibility;
   groupId: number | null;
   groupName: string | null;    // visibility='group' 일 때 그룹명
   likeCount: number;
   commentCount: number;
+  saveCount: number;
   isLiked: boolean;            // 현재 사용자 좋아요 여부
+  isSaved: boolean;
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type SocialPostComment = {
   id: number;
   postId: number;
   authorUserId: string;
-  authorProfile: { nickname: string; avatarEmoji: string };
+  parentId: number | null;
+  authorProfile: SocialAuthorProfile;
   body: string;
   createdAt: string;
+  updatedAt: string | null;
+  isEdited: boolean;
+  likeCount: number;
+  isLiked: boolean;
+  replyCount: number;
+  replies: SocialPostComment[];
 };
 
 export type FeedPage = {
   posts: SocialPost[];
   nextCursor: string | null;   // 마지막 게시글의 created_at ISO string (cursor 페이지네이션)
+};
+
+export type SocialFeedItem = SocialPost;
+export type SocialSavedPage = FeedPage;
+
+export type SocialSearchResult = {
+  profiles: SocialFollowSummary[];
+  posts: SocialPost[];
 };

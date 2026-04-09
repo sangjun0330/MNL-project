@@ -2,10 +2,36 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
-import { deletePost } from "@/lib/server/socialPosts";
+import { deletePost, getPostById } from "@/lib/server/socialPosts";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ postId: string }> }
+) {
+  const userId = await readUserIdFromRequest(req);
+  if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
+
+  const { postId: rawPostId } = await params;
+  const postId = Number.parseInt(rawPostId, 10);
+  if (!Number.isFinite(postId) || postId <= 0) {
+    return jsonNoStore({ ok: false, error: "invalid_post_id" }, { status: 400 });
+  }
+
+  const admin = getSupabaseAdmin();
+  try {
+    const post = await getPostById(admin, postId, userId);
+    if (!post) {
+      return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
+    }
+    return jsonNoStore({ ok: true, data: { post } });
+  } catch (err: any) {
+    console.error("[SocialPost/GET] err=%s", String(err?.message ?? err));
+    return jsonNoStore({ ok: false, error: "failed_to_get_post" }, { status: 500 });
+  }
+}
 
 // DELETE /api/social/posts/[postId]
 // - 본인 게시글: 누구나 삭제 가능

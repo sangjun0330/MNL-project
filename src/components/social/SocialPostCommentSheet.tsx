@@ -22,14 +22,52 @@ type Props = {
   onClose: () => void;
   currentUserId?: string;
   isAdmin?: boolean;
+  onCommentCountChange?: (postId: number, count: number) => void;
 };
 
-export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isAdmin }: Props) {
+function updateCommentTree(
+  comments: SocialPostComment[],
+  commentId: number,
+  updater: (comment: SocialPostComment) => SocialPostComment
+): SocialPostComment[] {
+  return comments.map((comment) => {
+    if (comment.id === commentId) return updater(comment);
+    if (comment.replies.length === 0) return comment;
+    return { ...comment, replies: updateCommentTree(comment.replies, commentId, updater) };
+  });
+}
+
+function removeCommentTree(comments: SocialPostComment[], commentId: number): SocialPostComment[] {
+  return comments
+    .filter((comment) => comment.id !== commentId)
+    .map((comment) => {
+      const nextReplies = removeCommentTree(comment.replies, commentId);
+      return {
+        ...comment,
+        replies: nextReplies,
+        replyCount: nextReplies.length,
+      };
+    });
+}
+
+function countComments(comments: SocialPostComment[]): number {
+  return comments.reduce((total, comment) => total + 1 + countComments(comment.replies), 0);
+}
+
+export function SocialPostCommentSheet({
+  open,
+  post,
+  onClose,
+  currentUserId,
+  isAdmin,
+  onCommentCountChange,
+}: Props) {
   const [comments, setComments] = useState<SocialPostComment[]>([]);
   const [loading, setLoading] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<SocialPostComment | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -57,6 +95,7 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
     setComments([]);
     setNextCursor(null);
     setInput("");
+    setReplyTarget(null);
     loadComments(post.id);
   }, [open, post, loadComments]);
 
@@ -70,10 +109,25 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
       const res = await fetch(`/api/social/posts/${post.id}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, parentId: replyTarget?.parentId ? replyTarget.parentId : replyTarget?.id ?? null }),
       }).then((r) => r.json());
       if (res.ok) {
-        setComments((prev) => [...prev, res.data.comment]);
+        const nextComment = res.data.comment as SocialPostComment;
+        setComments((prev) => {
+          const nextComments = !nextComment.parentId
+            ? [...prev, nextComment]
+            : prev.map((comment) => {
+            if (comment.id !== nextComment.parentId) return comment;
+            return {
+              ...comment,
+              replyCount: comment.replyCount + 1,
+              replies: [...comment.replies, nextComment],
+            };
+          });
+          onCommentCountChange?.(post.id, countComments(nextComments));
+          return nextComments;
+        });
+        setReplyTarget(null);
         // 스크롤 아래로
         requestAnimationFrame(() => {
           listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -82,7 +136,7 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
     } finally {
       setSending(false);
     }
-  }, [input, post, sending]);
+  }, [input, onCommentCountChange, post, replyTarget, sending]);
 
   // 댓글 삭제
   const handleDeleteComment = useCallback(async (commentId: number) => {
@@ -92,7 +146,36 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
       { method: "DELETE" }
     ).then((r) => r.json());
     if (res.ok) {
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      setComments((prev) => {
+        const nextComments = removeCommentTree(prev, commentId);
+        onCommentCountChange?.(post.id, countComments(nextComments));
+        return nextComments;
+      });
+    }
+  }, [onCommentCountChange, post]);
+
+  const handleLikeComment = useCallback(async (commentId: number, liked: boolean) => {
+    if (!post) return;
+    setComments((prev) =>
+      updateCommentTree(prev, commentId, (comment) => ({
+        ...comment,
+        isLiked: !liked,
+        likeCount: liked ? Math.max(0, comment.likeCount - 1) : comment.likeCount + 1,
+      }))
+    );
+
+    const res = await fetch(`/api/social/posts/${post.id}/comments/${commentId}/like`, {
+      method: "POST",
+    }).then((r) => r.json());
+
+    if (res.ok) {
+      setComments((prev) =>
+        updateCommentTree(prev, commentId, (comment) => ({
+          ...comment,
+          isLiked: res.data.liked,
+          likeCount: res.data.count,
+        }))
+      );
     }
   }, [post]);
 
@@ -122,7 +205,7 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
                 if (Array.from(val).length <= 200) setInput(val);
               }}
               onKeyDown={handleKeyDown}
-              placeholder="댓글을 입력하세요..."
+              placeholder={replyTarget ? `${replyTarget.authorProfile.displayName || replyTarget.authorProfile.nickname}님에게 답글 남기기...` : "댓글을 입력하세요..."}
               rows={1}
               className="flex-1 resize-none rounded-xl px-3 py-2.5 text-[14px] leading-relaxed outline-none bg-[var(--rnest-bg)] placeholder:text-[var(--rnest-muted)] text-[var(--rnest-text)]"
               style={{ maxHeight: "96px", minHeight: "40px", border: "1px solid var(--rnest-sep)" }}
@@ -140,6 +223,16 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
               </svg>
             </button>
           </div>
+          {replyTarget ? (
+            <div className="mt-2 flex items-center justify-between rounded-xl bg-[var(--rnest-bg)] px-3 py-2 text-[12px] text-[var(--rnest-muted)]">
+              <span>
+                @{replyTarget.authorProfile.handle ?? replyTarget.authorProfile.nickname} 님에게 답글 작성 중
+              </span>
+              <button type="button" onClick={() => setReplyTarget(null)} className="font-medium">
+                취소
+              </button>
+            </div>
+          ) : null}
           {charCount > 160 && (
             <p className="text-[11px] mt-1 text-right" style={{ color: charCount > 195 ? "#ef4444" : "var(--rnest-muted)" }}>
               {charCount}/200
@@ -182,15 +275,25 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
               const canDeleteComment = currentUserId === comment.authorUserId || isAdmin;
               return (
                 <div key={comment.id} className="flex items-start gap-2.5 py-2.5 group">
-                  <span className="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 mt-0.5"
-                    style={{ backgroundColor: "var(--rnest-lavender-soft)" }}>
-                    {comment.authorProfile.avatarEmoji}
+                  <span
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 mt-0.5 overflow-hidden"
+                    style={{ backgroundColor: "var(--rnest-lavender-soft)" }}
+                  >
+                    {comment.authorProfile.profileImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={comment.authorProfile.profileImageUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      comment.authorProfile.avatarEmoji
+                    )}
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-[12px] font-semibold text-[var(--rnest-text)]">
-                        {comment.authorProfile.nickname}
+                        {comment.authorProfile.displayName || comment.authorProfile.nickname}
                       </span>
+                      {comment.authorProfile.handle ? (
+                        <span className="text-[11px] text-[var(--rnest-muted)]">@{comment.authorProfile.handle}</span>
+                      ) : null}
                       <span className="text-[11px] text-[var(--rnest-muted)]">
                         {formatRelativeTime(comment.createdAt)}
                       </span>
@@ -198,6 +301,68 @@ export function SocialPostCommentSheet({ open, post, onClose, currentUserId, isA
                     <p className="text-[13px] text-[var(--rnest-sub)] leading-relaxed break-words">
                       {comment.body}
                     </p>
+                    <div className="mt-1.5 flex items-center gap-3 text-[11px] text-[var(--rnest-muted)]">
+                      <button type="button" onClick={() => handleLikeComment(comment.id, comment.isLiked)}>
+                        {comment.isLiked ? "좋아요 취소" : "좋아요"}
+                        {comment.likeCount > 0 ? ` ${comment.likeCount}` : ""}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplyTarget(comment);
+                          inputRef.current?.focus();
+                        }}
+                      >
+                        답글
+                        {comment.replyCount > 0 ? ` ${comment.replyCount}` : ""}
+                      </button>
+                    </div>
+                    {comment.replies.length > 0 ? (
+                      <div className="mt-3 space-y-2 rounded-2xl bg-[var(--rnest-bg)] px-3 py-2.5">
+                        {comment.replies.map((reply) => {
+                          const canDeleteReply = currentUserId === reply.authorUserId || isAdmin;
+                          return (
+                            <div key={reply.id} className="flex items-start gap-2">
+                              <span
+                                className="w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 overflow-hidden"
+                                style={{ backgroundColor: "var(--rnest-lavender-soft)" }}
+                              >
+                                {reply.authorProfile.profileImageUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={reply.authorProfile.profileImageUrl} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  reply.authorProfile.avatarEmoji
+                                )}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11.5px] font-semibold text-[var(--rnest-text)]">
+                                    {reply.authorProfile.displayName || reply.authorProfile.nickname}
+                                  </span>
+                                  <span className="text-[10.5px] text-[var(--rnest-muted)]">
+                                    {formatRelativeTime(reply.createdAt)}
+                                  </span>
+                                </div>
+                                <p className="text-[12px] text-[var(--rnest-sub)] leading-relaxed break-words">
+                                  {reply.body}
+                                </p>
+                                <div className="mt-1 flex items-center gap-3 text-[10.5px] text-[var(--rnest-muted)]">
+                                  <button type="button" onClick={() => handleLikeComment(reply.id, reply.isLiked)}>
+                                    {reply.isLiked ? "좋아요 취소" : "좋아요"}
+                                    {reply.likeCount > 0 ? ` ${reply.likeCount}` : ""}
+                                  </button>
+                                  {canDeleteReply ? (
+                                    <button type="button" onClick={() => handleDeleteComment(reply.id)}>
+                                      삭제
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                   {canDeleteComment && (
                     <button

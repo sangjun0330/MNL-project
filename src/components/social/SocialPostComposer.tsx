@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
-import type { SocialGroupSummary, SocialPost } from "@/types/social";
+import type { SocialGroupSummary, SocialPost, SocialPostVisibility } from "@/types/social";
 
 const QUICK_TAGS = [
   "야간후회복",
@@ -23,13 +23,20 @@ type Props = {
   onClose: () => void;
   onPosted: (post: SocialPost) => void;
   userGroups?: Pick<SocialGroupSummary, "id" | "name">[];
+  defaultVisibility?: SocialPostVisibility;
 };
 
-export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }: Props) {
+export function SocialPostComposer({
+  open,
+  onClose,
+  onPosted,
+  userGroups = [],
+  defaultVisibility = "friends",
+}: Props) {
   const maxImageBytes = 5 * 1024 * 1024;
   const [body, setBody] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [visibility, setVisibility] = useState<"friends" | "group">("friends");
+  const [visibility, setVisibility] = useState<SocialPostVisibility>(defaultVisibility);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -43,13 +50,13 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
     if (!open) return;
     setBody("");
     setSelectedTags([]);
-    setVisibility("friends");
+    setVisibility(defaultVisibility);
     setSelectedGroupId(null);
     setImageFile(null);
     setImagePreview(null);
     setPosting(false);
     setError(null);
-  }, [open]);
+  }, [defaultVisibility, open]);
 
   const charCount = Array.from(body).length;
 
@@ -281,6 +288,32 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
         <div>
           <p className="text-[11px] font-medium text-[var(--rnest-muted)] mb-2">공개 범위</p>
           <div className="flex gap-2">
+            <button
+              type="button"
+              className="flex-1 py-2.5 rounded-xl text-[13px] font-medium transition-all active:scale-95"
+              style={{
+                backgroundColor: visibility === "public_internal" ? "var(--rnest-accent)" : "var(--rnest-lavender-soft)",
+                color: visibility === "public_internal" ? "white" : "var(--rnest-lavender)",
+                border: `1px solid ${visibility === "public_internal" ? "var(--rnest-accent)" : "var(--rnest-lavender-border)"}`,
+              }}
+              onClick={() => setVisibility("public_internal")}
+            >
+              🌍 전체 허브
+            </button>
+            <button
+              type="button"
+              className="flex-1 py-2.5 rounded-xl text-[13px] font-medium transition-all active:scale-95"
+              style={{
+                backgroundColor: visibility === "followers" ? "var(--rnest-accent)" : "var(--rnest-lavender-soft)",
+                color: visibility === "followers" ? "white" : "var(--rnest-lavender)",
+                border: `1px solid ${visibility === "followers" ? "var(--rnest-accent)" : "var(--rnest-lavender-border)"}`,
+              }}
+              onClick={() => setVisibility("followers")}
+            >
+              👀 팔로워
+            </button>
+          </div>
+          <div className="mt-2 flex gap-2">
             <button
               type="button"
               className="flex-1 py-2.5 rounded-xl text-[13px] font-medium transition-all active:scale-95"
