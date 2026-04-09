@@ -1,81 +1,69 @@
-<!--
-Keep this root file short and broadly applicable.
-If project instructions become too large, move path-specific guidance into .claude/rules/ or focused docs.
--->
-
 # RNest
 
-## Product Identity
-- RNest is a Korean, mobile-first nurse/shift-worker recovery platform, not a generic wellness demo.
-- Core surfaces: Home, Schedule, Insights/Recovery Planner, Tools (AI clinical search, notebook, nurse calculators), Social/Groups/Challenges, Shop/Orders, Billing/Admin.
-- Preserve the current product tone: practical, calm, supportive, clinically cautious, and Korean-first by default.
-- Preserve the current visual language: light UI, rounded cards, soft shadows, lavender accent, Apple-like spacing/motion, and phone-first flows.
+## 프로젝트 성격
+- RNest는 한국어 우선의 간호사/교대근무자용 회복 + 임상 AI 서비스다. 일반 웰니스 데모처럼 단순화하지 말 것.
+- 핵심 표면은 Home, Schedule, Insights/Recovery, Tools, Social, Shop, Billing/Admin이다.
+- Social, Shop, Billing, AI 검색은 실제 운영 기능이다. mock 또는 임시 화면처럼 다루지 말 것.
 
-## Stack
-- Next.js 15 App Router + React 19 + TypeScript strict + Tailwind CSS.
-- Supabase handles auth, database, storage, and realtime.
-- Many API routes run on Edge (`runtime = "edge"`). Avoid Node-only APIs unless you intentionally change runtime and verify deployment impact.
-- Payments use TossPayments.
-- AI features use the OpenAI Responses API, optionally through Cloudflare AI Gateway helpers.
-- Use the `@/*` import alias for `src/*`.
+## 기본 기술 기준
+- Next.js 15 App Router, React 19, TypeScript strict, Tailwind CSS, Supabase를 사용한다.
+- 패키지 매니저는 `npm`이다. `package-lock.json` 기준으로 작업한다.
+- 이 저장소는 Edge 런타임 전제가 강하다. 많은 페이지와 API가 `runtime = "edge"`이며, 새 코드도 가능하면 Edge-safe하게 유지한다.
+- Node 전용 API가 꼭 필요하면 추가 전에 런타임 영향과 배포 영향부터 확인한다.
+- import alias는 `@/* -> src/*`를 사용한다.
 
-## High-Value Architecture
-- Global client state lives in `src/lib/store.ts` and the domain model in `src/lib/model.ts`.
-- App bootstrap/auth gating lives in `src/components/shell/AppShell.tsx`, `src/lib/auth.ts`, `/api/user/bootstrap`, and `/api/user/state`.
-- Main health-state sync goes through `src/components/system/CloudStateSync.tsx`; notebook sync is separate via `CloudNotebookSync`.
-- Recovery/vitals logic lives in `src/lib/bodyBattery.ts`, `src/lib/rnestBatteryEngine.ts`, `src/lib/rnestInsight.ts`, and related `insights*` modules.
-- Billing logic lives in `src/lib/billing/*`, `src/lib/server/billing*`, and `src/app/api/billing/*`.
-- AI clinical search flows live in `src/components/pages/tools/ToolMedSafetyPage.tsx`, `src/app/api/tools/med-safety/analyze/route.ts`, and `src/lib/server/openaiMedSafety.ts`.
-- Shop and social are real product areas, not mock pages. Treat `src/lib/server/shop*`, `src/lib/server/social*`, and matching API routes as production code.
-- API routes commonly rely on `src/lib/server/requestSecurity.ts` helpers for `no-store` responses and same-origin mutation checks.
-- Supabase schema changes must go through `supabase/migrations/` and stay aligned with `src/types/supabase.ts`.
+## 자주 쓰는 명령
+- 설치: `npm install`
+- 개발 서버: `npm run dev`
+- 린트: `npm run lint`
+- 타입 체크: `npx tsc --noEmit`
+- 빌드 검증: `npm run build`
+- `next build`를 직접 실행하지 말고 `npm run build`를 사용한다. `scripts/run-next-build.mjs`가 Desktop 작업공간용 dist 처리까지 맡는다.
+- 정식 `npm test` 스크립트는 없다. 위험한 변경은 lint, typecheck, build와 수동 검증으로 끝낸다.
 
-## Commands
-- Install deps: `npm install`
-- Dev server: `npm run dev`
-- Build check: `npm run build`
-- Lint: `npm run lint`
-- Optional TS-only check: `npx tsc --noEmit`
-- Prefer `npm run build` over raw `next build` because the repo uses `scripts/run-next-build.mjs` and custom prebuild cleanup.
-- There is no dedicated `npm test` script today. For risky changes, use build/lint plus targeted manual verification.
+## 현재 코드베이스의 핵심 경로
+- 앱 부트스트랩/인증 게이트: `src/components/shell/AppShell.tsx`, `src/lib/auth.ts`
+- 전역 상태와 도메인 모델: `src/lib/store.ts`, `src/lib/model.ts`
+- 사용자 상태 저장의 단일 소유자: `src/components/system/CloudStateSync.tsx`
+- 사용자 상태 API/저장: `src/app/api/user/state/route.ts`, `src/lib/server/userStateStore.ts`
+- 결제/플랜 단일 진실 소스: `src/lib/billing/plans.ts`, `src/lib/billing/entitlements.ts`
+- AI 임상 검색: `src/app/api/tools/med-safety/analyze/route.ts`, `src/lib/server/openaiMedSafety.ts`
+- AI 회복/오더: `src/lib/server/openaiRecovery.ts`, `src/lib/server/recoveryOrderStore.ts`
+- 보안 응답 헬퍼: `src/lib/server/requestSecurity.ts`
+- Supabase 스키마 변경점: `supabase/migrations/`, `src/types/supabase.ts`
 
-## Manual Verification
-- Validate the exact affected surface in the browser whenever UI, auth, billing, AI, social, shop, or sync logic changes.
-- In local development, `GET /api/dev/login?user=1&redirect=/path` can fast-login seeded test users. This route is development-only.
-- For auth/sync changes, verify login, bootstrap, remote state load, local draft fallback, and save/refresh flows.
-- For billing changes, verify plan state, checkout start/confirm/fail paths, and admin/refund flows.
-- For schema changes, inspect relevant migrations and confirm store/API contracts still line up.
+## 작업 원칙
+- 먼저 영향 범위를 읽고, 기존 패턴을 재사용하고, 필요한 만큼만 수정한다.
+- 새 store, 새 sync 경로, 새 billing 계산 경로를 만들기 전에 기존 helper와 server store를 먼저 확장할 수 있는지 본다.
+- README보다 현재 `src/`, `docs/`, `supabase/migrations/` 상태를 우선 신뢰한다.
+- 플랜/권한/크레딧 관련 판단은 반드시 `src/lib/billing/plans.ts`와 `src/lib/billing/entitlements.ts`를 기준으로 맞춘다.
+- 경로 전용 규칙이 필요해지면 루트 파일을 비대하게 늘리지 말고 `.claude/rules/`로 분리하는 것을 우선 고려한다.
 
-## Product and UX Constraints
-- Default to Korean UX and copy unless the task explicitly targets English i18n. Existing bilingual support uses `src/lib/i18n.ts` and `useI18n()`.
-- Keep the app mobile-first and PWA-friendly. Many screens rely on bottom sheets, touch interactions, and narrow-width layouts.
-- Prefer existing `src/components/ui/*` primitives and RNest tokens in `src/app/globals.css` over ad hoc one-off UI patterns.
-- Do not flatten recovery features into generic wellness advice. Shift work, fatigue, sleep debt, menstrual cycle, caffeine, and nurse workflow context are first-class inputs.
-- Preserve plan boundaries and value differentiation between Free / Plus / Pro when changing billing or AI access flows.
+## 제품/UX 가드레일
+- 기본 카피와 UX는 한국어 우선이다. 영어 변경이 필요하면 기존 `src/lib/i18n.ts`, `src/lib/useI18n.ts` 흐름을 따른다.
+- 모바일 퍼스트, PWA 친화적 흐름, 좁은 화면 기준 레이아웃을 유지한다.
+- 현재 시각 톤은 light UI, lavender identity, rounded card, Apple-like spacing/motion이다. `src/app/globals.css`와 기존 `src/components/ui/*` 패턴을 우선 재사용한다.
+- 교대근무, 수면부채, 피로, 생리주기, 카페인, 간호 workflow는 1급 도메인 입력이다. generic wellness copy로 흐리지 말 것.
+- Free / Plus / Pro의 가치 차이를 무너뜨리지 말 것.
+- 통합 간호 계산기는 현재 모든 플랜 공통 제공이다. 명시적 요구 없이 유료 제한을 새로 만들지 않는다.
 
-## Safety, Privacy, and Security
-- This repo handles health-like data, account state, payment state, and AI outputs. Be conservative with persistence, logs, and error messages.
-- Never commit secrets, tokens, `.env*`, or real user data.
-- Never reintroduce tracked local dumps such as `.wnl_*` data.
-- Preserve `no-store` response behavior and same-origin checks on mutating routes unless there is a clear, reviewed reason to change them.
-- Do not weaken service-consent gates, auth checks, billing entitlement checks, credit/quota accounting, or admin authorization.
-- In AI clinical search and recovery flows, keep safety language, sensitive-query blocking, and quota/history-retention logic intact.
+## 보안/데이터 가드레일
+- 건강 관련 데이터, 결제 상태, AI 결과를 다루므로 과도한 로그, 넓은 에러 노출, 불필요한 영구 저장을 피한다.
+- mutating route에서는 same-origin 검사와 `no-store` 응답 정책을 유지한다.
+- 서비스 동의, 인증, 관리자 권한, 크레딧 차감/복원, 환불 권한 경계를 약화시키지 말 것.
+- 보안성 있는 식별자나 주문 ID가 필요하면 `Math.random()` 대신 Web Crypto(`crypto.randomUUID()`, `crypto.getRandomValues`)를 사용한다.
+- `.env*`, `.wnl_users`, `.wnl_logs`, 로컬 복구 산출물, 실제 사용자 데이터는 절대 커밋하지 않는다.
+- Supabase 스키마 변경은 migration 없이 가정하지 말고, 타입 및 서버 계약까지 함께 맞춘다.
 
-## Working Style For This Repo
-- For multi-file or ambiguous work, follow: explore first, then plan, then implement, then verify.
-- Read the existing local pattern before editing. This codebase is large and mixed; follow nearby conventions instead of imposing a new style.
-- Reuse existing helpers, stores, and route utilities before creating parallel abstractions.
-- Keep diffs tight. Avoid unrelated refactors unless they are required to safely complete the task.
-- If README and code disagree, trust the current `src/`, `docs/`, and `supabase/migrations/` state over the older README summary.
+## 검증 기준
+- UI 변경: 영향을 받은 모바일 화면을 직접 확인한다.
+- 인증/상태 저장 변경: 로그인 -> bootstrap -> local draft -> remote load/save -> 새로고침 흐름을 확인한다.
+- 결제 변경: checkout -> confirm/fail -> subscription/refund/admin 흐름을 확인한다.
+- AI 검색/회복 변경: quota, history retention, continuation, timeout, 이미지 제한 경계를 확인한다.
+- PWA 변경: production build 기준 service worker/manifest 동작을 확인한다.
+- 개발 중 빠른 로그인은 `GET /api/dev/login?user=1&redirect=/path`를 사용한다.
 
-## High-Signal References
-- Product scope and monetization context: `docs/rnest-paid-plan-strategy-report.md`
-- State/storage flow: `docs/supabase-storage-map.md`
-- Main runtime shell: `src/components/shell/AppShell.tsx`
-- App state model/store: `src/lib/model.ts`, `src/lib/store.ts`
-- Billing plans and entitlements: `src/lib/billing/plans.ts`, `src/lib/billing/entitlements.ts`
-- Supabase route/admin clients: `src/lib/server/supabaseRouteClient.ts`, `src/lib/server/supabaseAdmin.ts`
-
-## Keep This File Lean
-- Only keep instructions here that change Claude's behavior across many tasks.
-- If this file gets large, split path-specific guidance into `.claude/rules/` or focused docs instead of bloating the root memory.
+## 참고 문서
+- `docs/supabase-storage-map.md`
+- `next.config.mjs`
+- `src/app/globals.css`
