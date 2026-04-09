@@ -433,3 +433,40 @@ export type CreateChallengePayload = {
   targetDays?: number;
   durationDays: 7 | 14 | 21 | 30;
 };
+
+// ══════════════════════════════════════════════════════════════
+// Social Post Feed types
+// ══════════════════════════════════════════════════════════════
+
+export type PostVisibility = "friends" | "group";
+
+export type SocialPost = {
+  id: number;
+  authorUserId: string;
+  authorProfile: { nickname: string; avatarEmoji: string };
+  body: string;
+  imagePath: string | null;
+  imageUrl: string | null;     // Supabase Storage public URL
+  tags: string[];
+  visibility: PostVisibility;
+  groupId: number | null;
+  groupName: string | null;    // visibility='group' 일 때 그룹명
+  likeCount: number;
+  commentCount: number;
+  isLiked: boolean;            // 현재 사용자 좋아요 여부
+  createdAt: string;
+};
+
+export type SocialPostComment = {
+  id: number;
+  postId: number;
+  authorUserId: string;
+  authorProfile: { nickname: string; avatarEmoji: string };
+  body: string;
+  createdAt: string;
+};
+
+export type FeedPage = {
+  posts: SocialPost[];
+  nextCursor: string | null;   // 마지막 게시글의 created_at ISO string (cursor 페이지네이션)
+};

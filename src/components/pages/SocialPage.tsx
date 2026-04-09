@@ -24,6 +24,7 @@ import { SocialEventCenter } from "@/components/social/SocialEventCenter";
 import { SocialGroupList } from "@/components/social/SocialGroupList";
 import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateSheet";
 import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
+import { SocialFeedTab } from "@/components/social/SocialFeedTab";
 import {
   SocialOverlapSelectorSheet,
   type SocialOverlapSelectorItem,
@@ -48,10 +49,13 @@ import {
 import { withReturnTo } from "@/lib/navigation";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
-type SocialViewTab = "friends" | "groups";
+type SocialViewTab = "feed" | "friends" | "groups";
 
 function resolveSocialViewTab(value: string | null | undefined, fallback: SocialViewTab): SocialViewTab {
-  return value === "groups" ? "groups" : value === "friends" ? "friends" : fallback;
+  if (value === "feed") return "feed";
+  if (value === "groups") return "groups";
+  if (value === "friends") return "friends";
+  return fallback;
 }
 
 // 현재 월 YYYY-MM
@@ -108,13 +112,13 @@ export function SocialPage() {
   const [groupsError, setGroupsError] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SocialViewTab>(
-    resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "friends")
+    resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "feed")
   );
   const updateActiveTab = useCallback((nextTab: SocialViewTab) => {
     setActiveTab(nextTab);
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (nextTab === "friends") params.delete("tab");
+    if (nextTab === "feed") params.delete("tab");
     else params.set("tab", nextTab);
     const nextQuery = params.toString();
     const nextPath = window.location.pathname;
@@ -1031,6 +1035,7 @@ export function SocialPage() {
       <div className="rounded-2xl bg-ios-bg p-1 shadow-apple">
         <div className="flex items-center gap-1">
           {([
+            { id: "feed", label: "피드" },
             { id: "friends", label: "친구" },
             { id: "groups", label: "그룹" },
           ] as const).map((tab) => (
@@ -1049,6 +1054,14 @@ export function SocialPage() {
           ))}
         </div>
       </div>
+
+      {/* ── 피드 탭 ────────────────────────────────────────── */}
+      {activeTab === "feed" && (
+        <SocialFeedTab
+          userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
+          isAdmin={false}
+        />
+      )}
 
       {/* ── 에러 상태 ──────────────────────────────────────── */}
       {activeTab === "friends" && connectionsError && !connectionsLoading && (
