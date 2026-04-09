@@ -26,6 +26,7 @@ type Props = {
 };
 
 export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }: Props) {
+  const maxImageBytes = 5 * 1024 * 1024;
   const [body, setBody] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<"friends" | "group">("friends");
@@ -67,7 +68,12 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (!allowedTypes.has(file.type)) {
+      setError("JPG, PNG, WEBP 이미지만 첨부할 수 있어요.");
+      return;
+    }
+    if (file.size > maxImageBytes) {
       setError("이미지는 5MB 이하만 첨부할 수 있어요.");
       return;
     }
@@ -76,7 +82,7 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
     const reader = new FileReader();
     reader.onload = (ev) => setImagePreview(ev.target?.result as string);
     reader.readAsDataURL(file);
-  }, []);
+  }, [maxImageBytes]);
 
   const removeImage = useCallback(() => {
     setImageFile(null);
@@ -85,27 +91,31 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
   }, []);
 
   // Supabase Storage에 이미지 업로드 (게시글 생성 전에 수행)
-  const uploadImage = useCallback(async (userId: string): Promise<string | null> => {
+  const uploadImage = useCallback(async (): Promise<string | null> => {
     if (!imageFile) return null;
-    const ext = imageFile.name.split(".").pop()?.toLowerCase() ?? "jpg";
-    const path = `${userId}/${Date.now()}.${ext}`;
+    const formData = new FormData();
+    formData.set("file", imageFile);
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !anonKey) return null;
-
-    const uploadUrl = `${supabaseUrl}/storage/v1/object/social-post-images/${path}`;
-    const res = await fetch(uploadUrl, {
+    const res = await fetch("/api/social/posts/image", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${anonKey}`,
-        "Content-Type": imageFile.type,
-        "x-upsert": "false",
-      },
-      body: imageFile,
-    });
-    if (!res.ok) return null;
-    return path;
+      body: formData,
+    }).then((r) => r.json());
+
+    if (!res.ok) {
+      if (res.error === "login_required") throw new Error("로그인이 필요해요. 다시 로그인한 뒤 시도해 주세요.");
+      if (res.error === "invalid_file_type") throw new Error("JPG, PNG, WEBP 이미지만 첨부할 수 있어요.");
+      if (res.error === "file_too_large") throw new Error("이미지는 5MB 이하만 첨부할 수 있어요.");
+      throw new Error("이미지 업로드에 실패했어요.");
+    }
+
+    const imagePath =
+      res.data?.imagePath && typeof res.data.imagePath === "string"
+        ? String(res.data.imagePath)
+        : null;
+    if (!imagePath) {
+      throw new Error("이미지 업로드 응답이 올바르지 않아요.");
+    }
+    return imagePath;
   }, [imageFile]);
 
   // 게시글 전송
@@ -121,22 +131,9 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
     setError(null);
 
     try {
-      // 이미지가 있으면 먼저 업로드 (userId를 경로에 포함하기 위해 auth에서 가져옴)
       let imagePath: string | null = null;
       if (imageFile) {
-        // userId는 Supabase 세션에서 가져옴 - 없으면 'unknown' 사용
-        let uploadUserId = "unknown";
-        try {
-          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-          const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-          if (supabaseUrl && anonKey) {
-            const authRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-              headers: { Authorization: `Bearer ${anonKey}`, apikey: anonKey },
-            }).then((r) => r.json());
-            if (authRes?.id) uploadUserId = String(authRes.id);
-          }
-        } catch { /* ignore, use fallback */ }
-        imagePath = await uploadImage(uploadUserId);
+        imagePath = await uploadImage();
       }
 
       const res = await fetch("/api/social/posts", {
@@ -152,6 +149,7 @@ export function SocialPostComposer({ open, onClose, onPosted, userGroups = [] }:
       }).then((r) => r.json());
 
       if (!res.ok) {
+        if (res.error === "invalid_image_path") throw new Error("이미지 업로드 정보가 올바르지 않아요. 다시 시도해 주세요.");
         if (res.error === "too_many_requests") throw new Error("게시글을 너무 많이 올리고 있어요. 잠시 후 다시 시도해 주세요.");
         if (res.error === "not_group_member") throw new Error("해당 그룹의 멤버가 아니에요.");
         throw new Error("게시글을 올리지 못했어요.");

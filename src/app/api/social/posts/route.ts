@@ -95,6 +95,9 @@ export async function POST(req: Request) {
     if (err?.code === "not_group_member") {
       return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
     }
+    if (err?.code === "invalid_image_path") {
+      return jsonNoStore({ ok: false, error: "invalid_image_path" }, { status: 400 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "post_create", success: false, detail: "failed" });
     console.error("[SocialPosts/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_create_post" }, { status: 500 });

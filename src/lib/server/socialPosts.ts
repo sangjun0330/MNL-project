@@ -1,5 +1,6 @@
 import type { FeedPage, SocialPost, SocialPostComment } from "@/types/social";
 import { loadSocialGroupProfileMap } from "@/lib/server/socialGroups";
+import { isOwnedSocialPostImagePath } from "@/lib/server/socialPostImageStore";
 
 const INVISIBLE_UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069]/g;
 
@@ -239,6 +240,11 @@ export async function createPost(
 ): Promise<SocialPost> {
   const visibility = opts.visibility ?? "friends";
   const groupId = visibility === "group" ? (opts.groupId ?? null) : null;
+  const imagePath = opts.imagePath ? String(opts.imagePath).replace(/^\/+/, "").trim() : null;
+
+  if (imagePath && !isOwnedSocialPostImagePath(userId, imagePath)) {
+    throw Object.assign(new Error("invalid_image_path"), { code: "invalid_image_path" });
+  }
 
   // 그룹 게시글이면 멤버 여부 확인
   if (visibility === "group" && groupId) {
@@ -257,7 +263,7 @@ export async function createPost(
     .insert({
       author_user_id: userId,
       body,
-      image_path: opts.imagePath ?? null,
+      image_path: imagePath,
       tags: opts.tags ?? [],
       visibility,
       group_id: groupId,
