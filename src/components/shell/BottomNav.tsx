@@ -43,12 +43,12 @@ const ToolIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const ShopIcon = (props: SVGProps<SVGSVGElement>) => (
+const SocialIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
-    <path d="M5 9h14" />
-    <path d="M6 9l1.2-4a1.4 1.4 0 0 1 1.34-1H15.5a1.4 1.4 0 0 1 1.34 1L18 9" />
-    <path d="M6.5 9v8a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V9" />
-    <path d="M9.5 12a2.5 2.5 0 0 0 5 0" />
+    <circle cx="9" cy="7" r="3" />
+    <path d="M3 20c0-3.3 2.7-6 6-6" />
+    <circle cx="17" cy="9" r="2.5" />
+    <path d="M13 20c0-2.8 1.8-5.1 4-5.8" />
   </svg>
 );
 
@@ -57,7 +57,7 @@ const ITEMS: NavItem[] = [
   { href: "/schedule", label: "일정", Icon: CalendarIcon },
   { href: "/insights", label: "인사이트", Icon: InsightsIcon },
   { href: "/tools", label: "툴", Icon: ToolIcon },
-  { href: "/shop", label: "쇼핑", Icon: ShopIcon },
+  { href: "/social", label: "소셜", Icon: SocialIcon },
 ];
 
 export function BottomNav() {
