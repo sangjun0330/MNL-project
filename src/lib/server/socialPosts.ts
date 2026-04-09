@@ -16,19 +16,6 @@ import { isOwnedSocialPostImagePath } from "@/lib/server/socialPostImageStore";
 const INVISIBLE_UNSAFE_CHARS =
   /[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069]/g;
 
-const ALLOWED_TAGS = [
-  "야간후회복",
-  "수면기록",
-  "오프데이",
-  "번아웃주의",
-  "활력",
-  "꿀휴식",
-  "나이트회복",
-  "감사한하루",
-  "소소한일상",
-  "간호사일상",
-];
-
 type FeedScope = "following" | "explore" | "profile" | "saved" | "liked";
 
 type ViewerAccessContext = {
@@ -103,10 +90,31 @@ export function cleanCommentBody(value: unknown): string {
 
 export function cleanPostTags(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((tag) => String(tag ?? "").trim())
-    .filter((tag) => ALLOWED_TAGS.includes(tag))
-    .slice(0, 5);
+  const seen = new Set<string>();
+  const tags: string[] = [];
+
+  for (const rawTag of value) {
+    const normalized = String(rawTag ?? "")
+      .normalize("NFKC")
+      .replace(/<[^>]*>/g, "")
+      .replace(INVISIBLE_UNSAFE_CHARS, "")
+      .replace(/^#+/, "")
+      .replace(/[，]/g, ",")
+      .replace(/\s+/g, "")
+      .trim();
+
+    const tag = Array.from(normalized).slice(0, 24).join("");
+    if (!tag) continue;
+
+    const dedupeKey = tag.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    tags.push(tag);
+
+    if (tags.length >= 5) break;
+  }
+
+  return tags;
 }
 
 async function buildViewerAccessContext(admin: any, userId: string): Promise<ViewerAccessContext> {
