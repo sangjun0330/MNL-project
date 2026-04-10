@@ -183,6 +183,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthed = Boolean(auth?.userId);
   const isMedSafetyImmersive = pathname === "/tools/med-safety";
   const isNotebookImmersive = pathname === "/tools/notebook";
+  const isSocialImmersive = pathname?.startsWith("/social");
   const isPolicyPage = pathname?.startsWith("/privacy") || pathname?.startsWith("/terms");
   const allowPrompt =
     AUTH_INTERACTION_GUARD_ENABLED &&
@@ -583,7 +584,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="safe-top" />
         <div
           className={`mx-auto w-full ${
-            isNotebookImmersive ? "max-w-none" : isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : "max-w-[720px] px-4"
+            isNotebookImmersive ? "max-w-none" : isMedSafetyImmersive ? "max-w-[1180px] px-3 sm:px-5" : isSocialImmersive ? "max-w-[720px]" : "max-w-[720px] px-4"
           } ${isNotebookImmersive ? "pb-0" : isMedSafetyImmersive ? "pb-[calc(24px+env(safe-area-inset-bottom))]" : "pb-[calc(96px+env(safe-area-inset-bottom))]"}`}
           onPointerDownCapture={handleGuardedInteraction}
           onKeyDownCapture={handleGuardedInteraction}

@@ -12,48 +12,32 @@ import { SocialPostComposer } from "@/components/social/SocialPostComposer";
 import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentSheet";
 import { useAuthState } from "@/lib/auth";
 
-// ── 스켈레톤 카드 ──────────────────────────────────────────────
+// ── 스켈레톤 카드 (edge-to-edge) ─────────────────────────────
 function PostCardSkeleton() {
   return (
-    <div className="bg-white rounded-2xl shadow-sm p-4 animate-pulse">
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-full bg-gray-100" />
+    <div className="bg-white animate-pulse">
+      {/* 헤더 */}
+      <div className="flex items-center gap-3 px-3 py-3">
+        <div className="w-10 h-10 rounded-full bg-gray-100" />
         <div className="flex-1">
-          <div className="h-3 bg-gray-100 rounded w-24 mb-1.5" />
-          <div className="h-2.5 bg-gray-100 rounded w-16" />
+          <div className="h-3 bg-gray-100 rounded-full w-24 mb-1.5" />
+          <div className="h-2.5 bg-gray-100 rounded-full w-16" />
         </div>
       </div>
-      <div className="space-y-2">
-        <div className="h-3 bg-gray-100 rounded w-full" />
-        <div className="h-3 bg-gray-100 rounded w-4/5" />
-        <div className="h-3 bg-gray-100 rounded w-3/5" />
+      {/* 이미지 플레이스홀더 */}
+      <div className="aspect-[4/5] w-full bg-gray-100" />
+      {/* 액션바 */}
+      <div className="flex items-center gap-4 px-3 pt-2.5 pb-1">
+        <div className="h-6 w-6 rounded-full bg-gray-100" />
+        <div className="h-6 w-6 rounded-full bg-gray-100" />
+        <div className="h-6 w-6 rounded-full bg-gray-100" />
       </div>
-    </div>
-  );
-}
-
-// ── 빈 상태 ───────────────────────────────────────────────────
-function EmptyFeed({ onCompose }: { onCompose: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 text-3xl"
-        style={{ backgroundColor: "var(--rnest-lavender-soft)" }}>
-        📝
+      {/* 캡션 */}
+      <div className="px-3 pb-3 space-y-2">
+        <div className="h-3 bg-gray-100 rounded-full w-full" />
+        <div className="h-3 bg-gray-100 rounded-full w-4/5" />
       </div>
-      <h3 className="text-[15px] font-semibold text-[var(--rnest-text)] mb-1.5">
-        아직 게시글이 없어요
-      </h3>
-      <p className="text-[13px] text-[var(--rnest-muted)] leading-relaxed mb-5">
-        친구를 추가하거나 그룹에 참여하면<br />
-        일상을 함께 나눌 수 있어요
-      </p>
-      <button
-        className="px-5 py-2.5 rounded-full text-[13px] font-semibold text-white transition-all active:scale-95"
-        style={{ backgroundColor: "var(--rnest-accent)" }}
-        onClick={onCompose}
-      >
-        첫 게시글 올리기
-      </button>
+      <div className="h-[1px] bg-gray-100" />
     </div>
   );
 }
@@ -115,12 +99,10 @@ export function SocialFeedTab({
   const [commentPost, setCommentPost] = useState<SocialPost | null>(null);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
 
-  // 무한 스크롤 sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const emptyCopy = buildEmptyCopy(scope);
 
-  // 피드 로드
   const loadFeed = useCallback(async (cursor?: string | null) => {
     const isInitial = !cursor;
     if (isInitial) setLoading(true);
@@ -157,7 +139,6 @@ export function SocialFeedTab({
     loadFeed();
   }, [loadFeed]);
 
-  // IntersectionObserver 무한 스크롤
   useEffect(() => {
     if (!sentinelRef.current || !nextCursor) return;
 
@@ -174,12 +155,10 @@ export function SocialFeedTab({
     return () => observerRef.current?.disconnect();
   }, [nextCursor, loadingMore, loadFeed]);
 
-  // 새 게시글 추가 (피드 맨 위에 삽입)
   const handlePosted = useCallback((post: SocialPost) => {
     setPosts((prev) => [post, ...prev]);
   }, []);
 
-  // 게시글 삭제
   const handleDelete = useCallback((postId: number) => {
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }, []);
@@ -193,7 +172,6 @@ export function SocialFeedTab({
     []
   );
 
-  // 댓글 열기
   const handleCommentOpen = useCallback((post: SocialPost) => {
     setCommentPost(post);
     setCommentSheetOpen(true);
@@ -201,8 +179,8 @@ export function SocialFeedTab({
 
   return (
     <div className="relative">
-      {/* 피드 목록 */}
-      <div className="flex flex-col gap-4 px-4 pt-4 pb-24">
+      {/* ── 피드 목록 (edge-to-edge, no px padding) ──────── */}
+      <div className="flex flex-col pb-24">
         {loading && !hasLoaded ? (
           <>
             <PostCardSkeleton />
@@ -247,13 +225,14 @@ export function SocialFeedTab({
               />
             ))}
 
-            {/* 더 불러오기 sentinel */}
             <div ref={sentinelRef} className="h-1" />
 
             {loadingMore && (
               <div className="flex justify-center py-4">
-                <div className="w-5 h-5 rounded-full border-2 animate-spin"
-                  style={{ borderColor: "var(--rnest-accent)", borderTopColor: "transparent" }} />
+                <div
+                  className="w-5 h-5 rounded-full border-2 animate-spin"
+                  style={{ borderColor: "var(--rnest-accent)", borderTopColor: "transparent" }}
+                />
               </div>
             )}
 
@@ -266,7 +245,7 @@ export function SocialFeedTab({
         )}
       </div>
 
-      {/* FAB: 게시글 작성 */}
+      {/* ── FAB: 게시글 작성 ──────────────────────────────── */}
       {showComposer ? (
         <button
           className="fixed z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white transition-all active:scale-95 hover:brightness-110"
@@ -285,7 +264,6 @@ export function SocialFeedTab({
         </button>
       ) : null}
 
-      {/* 게시글 작성 시트 */}
       <SocialPostComposer
         open={composerOpen}
         onClose={() => setComposerOpen(false)}
@@ -294,7 +272,6 @@ export function SocialFeedTab({
         defaultVisibility={defaultVisibility}
       />
 
-      {/* 댓글 시트 */}
       <SocialPostCommentSheet
         open={commentSheetOpen}
         post={commentPost}

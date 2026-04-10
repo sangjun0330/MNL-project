@@ -26,6 +26,7 @@ import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateShe
 import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
 import { SocialFeedTab } from "@/components/social/SocialFeedTab";
 import { SocialExploreTab } from "@/components/social/SocialExploreTab";
+import { SocialStoriesBar } from "@/components/social/SocialStoriesBar";
 import {
   SocialOverlapSelectorSheet,
   type SocialOverlapSelectorItem,
@@ -904,25 +905,30 @@ export function SocialPage() {
 
   if (status === "loading") {
     return (
-      <div className="space-y-3 pb-4">
-        <div className="flex items-center justify-between pt-1">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
-            aria-label="뒤로"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <h1 className="text-[17px] font-bold text-ios-text">소셜</h1>
-          <div className="h-9 w-9 rounded-full bg-ios-sep/70" />
+      <div className="min-h-screen bg-white">
+        {/* 인스타 스타일 헤더 스켈레톤 */}
+        <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
+          <div className="h-6 w-16 rounded-full bg-gray-100 animate-pulse" />
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-full bg-gray-100 animate-pulse" />
+            <div className="h-8 w-8 rounded-full bg-gray-100 animate-pulse" />
+          </div>
+        </header>
+        <div className="flex border-b border-gray-100">
+          {[0,1,2,3].map(i => (
+            <div key={i} className="flex-1 py-3 flex justify-center">
+              <div className="h-5 w-5 rounded bg-gray-100 animate-pulse" />
+            </div>
+          ))}
         </div>
-        <div className="rounded-apple border border-ios-sep bg-white p-4 shadow-apple space-y-2.5">
-          <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
-          <div className="h-3 w-44 rounded-full bg-ios-sep/60 animate-pulse" />
-          <div className="h-3 w-36 rounded-full bg-ios-sep/40 animate-pulse" />
+        {/* 스토리 스켈레톤 */}
+        <div className="flex items-start gap-3 overflow-hidden px-3 py-3 border-b border-gray-100">
+          {[0,1,2,3,4].map(i => (
+            <div key={i} className="flex flex-col items-center gap-1.5 shrink-0">
+              <div className="w-[60px] h-[60px] rounded-full bg-gray-100 animate-pulse" />
+              <div className="h-2.5 w-12 rounded-full bg-gray-100 animate-pulse" />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -930,152 +936,199 @@ export function SocialPage() {
 
   if (status !== "authenticated") {
     return (
-      <div className="space-y-3 pb-4">
-        <div className="flex items-center justify-between pt-1">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
-            aria-label="뒤로"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <h1 className="text-[17px] font-bold text-ios-text">소셜</h1>
-          <div className="h-9 w-9" />
-        </div>
+      <div className="min-h-screen bg-white">
+        {/* 인스타 스타일 헤더 */}
+        <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
+          <span className="text-[22px] font-black italic tracking-tight text-gray-900">소셜</span>
+        </header>
 
-        <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-          <div className="text-[16px] font-semibold text-ios-text">로그인 후 소셜을 사용할 수 있어요</div>
-          <p className="mt-2 text-[13px] leading-6 text-ios-muted">
-            {groupInviteToken
-              ? "그룹 초대 링크를 열었어요. 로그인하면 그룹 참여 화면이 자동으로 열립니다."
-              : inviteToken
-                ? "공유 링크를 열었어요. 로그인하면 친구 코드 입력창이 자동으로 열립니다."
-                : "친구 코드를 주고받고, 서로의 일정을 보려면 로그인해야 해요."}
-          </p>
-          {authError ? (
-            <div className="mt-3 rounded-2xl border border-[#F3D7A8] bg-[#FFF8EC] px-3 py-3 text-[12.5px] leading-6 text-[#8A5A12]">
-              {authError === "unauthorized_email" || authError === "unauthorized_new_user"
-                ? "이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요."
-                : "Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요."}
-            </div>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => signInWithProvider("google")}
-            className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[14px] font-semibold text-white transition active:opacity-60"
-            data-auth-allow
-          >
-            Google로 로그인
-          </button>
+        <div className="px-4 pt-6 pb-4">
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="text-[16px] font-semibold text-gray-900">로그인 후 소셜을 사용할 수 있어요</div>
+            <p className="mt-2 text-[13px] leading-6 text-gray-500">
+              {groupInviteToken
+                ? "그룹 초대 링크를 열었어요. 로그인하면 그룹 참여 화면이 자동으로 열립니다."
+                : inviteToken
+                  ? "공유 링크를 열었어요. 로그인하면 친구 코드 입력창이 자동으로 열립니다."
+                  : "친구 코드를 주고받고, 서로의 일정을 보려면 로그인해야 해요."}
+            </p>
+            {authError ? (
+              <div className="mt-3 rounded-2xl border border-[#F3D7A8] bg-[#FFF8EC] px-3 py-3 text-[12.5px] leading-6 text-[#8A5A12]">
+                {authError === "unauthorized_email" || authError === "unauthorized_new_user"
+                  ? "이 계정은 현재 테스트 허용 목록에 없어 로그인할 수 없어요."
+                  : "Google 로그인 처리에 실패했어요. 잠시 후 다시 시도해 주세요."}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => signInWithProvider("google")}
+              className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-black px-5 text-[14px] font-semibold text-white transition active:opacity-60"
+              data-auth-allow
+            >
+              Google로 로그인
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 pb-4">
+    <div className="min-h-screen bg-white">
 
-      {/* ── 헤더 ─────────────────────────────────────────── */}
-      <div className="flex items-center justify-between pt-1">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
-          aria-label="뒤로"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-        <h1 className="text-[17px] font-bold text-ios-text">소셜</h1>
-        <div className="flex items-center gap-2">
-          {/* 🔔 알림 버튼 */}
-          <button
-            type="button"
-            onClick={() => setOpenEventCenter(true)}
-            className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-apple transition hover:bg-ios-sep/20 active:opacity-60"
-            title="알림"
-            aria-label="알림"
-          >
-            <SocialBellIcon className="h-[18px] w-[18px] text-ios-text" />
-            {unreadEventCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold text-white leading-none">
-                {unreadEventCount > 9 ? "9+" : unreadEventCount}
-              </span>
-            )}
-          </button>
-          {/* 프로필 버튼 */}
-          <button
-            type="button"
-            onClick={() => {
-              if (profile?.handle) {
-                router.push(`/social/profile/${profile.handle}`);
-                return;
-              }
-              if (profile) {
-                setOpenProfile(true);
-                return;
-              }
-              setShowOnboarding(true);
-            }}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[20px] shadow-apple transition hover:bg-ios-sep/20 active:opacity-60"
-            title="내 소셜 프로필"
-            aria-label="내 소셜 프로필"
-          >
-            <span>{profile?.avatarEmoji ?? "👤"}</span>
-          </button>
+      {/* ── 인스타그램 스타일 sticky 헤더 ─────────────────── */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-gray-100">
+        <div className="flex items-center justify-between px-4 py-3">
+          {/* 앱 로고 */}
+          <span className="text-[22px] font-black italic tracking-tight text-gray-900 select-none">
+            소셜
+          </span>
+
+          <div className="flex items-center gap-2">
+            {/* 알림 버튼 */}
+            <button
+              type="button"
+              onClick={() => setOpenEventCenter(true)}
+              className="relative flex h-9 w-9 items-center justify-center rounded-full text-gray-800 transition hover:bg-gray-100 active:opacity-60"
+              aria-label="알림"
+            >
+              <SocialBellIcon className="h-[22px] w-[22px]" />
+              {unreadEventCount > 0 && (
+                <span className="absolute right-1 top-1 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-red-500 px-0.5 text-[8.5px] font-bold text-white leading-none">
+                  {unreadEventCount > 9 ? "9+" : unreadEventCount}
+                </span>
+              )}
+            </button>
+
+            {/* 프로필 아바타 */}
+            <button
+              type="button"
+              onClick={() => {
+                if (profile?.handle) {
+                  router.push(`/social/profile/${profile.handle}`);
+                  return;
+                }
+                if (profile) {
+                  setOpenProfile(true);
+                  return;
+                }
+                setShowOnboarding(true);
+              }}
+              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-[18px] transition active:opacity-60"
+              aria-label="내 소셜 프로필"
+            >
+              {profile?.profileImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span>{profile?.avatarEmoji ?? "👤"}</span>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
 
+        {/* ── 아이콘 탭 내비게이션 ─────────────────────────── */}
+        <div className="flex">
+          {([
+            {
+              id: "following" as const,
+              label: "피드",
+              icon: (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
+                  <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+              ),
+            },
+            {
+              id: "explore" as const,
+              label: "탐색",
+              icon: (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              ),
+            },
+            {
+              id: "friends" as const,
+              label: "친구",
+              icon: (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              ),
+            },
+            {
+              id: "groups" as const,
+              label: "그룹",
+              icon: (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="7" height="7" rx="1" />
+                </svg>
+              ),
+            },
+          ]).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => updateActiveTab(tab.id)}
+              className={`flex flex-1 flex-col items-center justify-center py-2.5 gap-0.5 border-b-2 transition-colors ${
+                activeTab === tab.id
+                  ? "border-gray-900 text-gray-900"
+                  : "border-transparent text-gray-400"
+              }`}
+              aria-label={tab.label}
+            >
+              {tab.icon}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* ── 알림 배너 ─────────────────────────────────────── */}
       {notice && (
         <div
-          className={`rounded-apple px-4 py-3 text-[13px] shadow-apple ${
+          className={`mx-4 mt-3 rounded-2xl px-4 py-3 text-[13px] ${
             notice.tone === "error"
               ? "border border-red-200 bg-red-50 text-red-700"
               : notice.tone === "success"
                 ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border border-ios-sep bg-white text-ios-text"
+                : "border border-gray-100 bg-white text-gray-700"
           }`}
         >
           {notice.text}
         </div>
       )}
 
-      <div className="rounded-2xl bg-ios-bg p-1 shadow-apple">
-        <div className="flex items-center gap-1">
-          {([
-            { id: "following", label: "팔로잉" },
-            { id: "explore", label: "탐색" },
-            { id: "friends", label: "친구" },
-            { id: "groups", label: "그룹" },
-          ] as const).map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => updateActiveTab(tab.id)}
-              className={`flex-1 rounded-[14px] px-3 py-2.5 text-[13px] font-semibold transition ${
-                activeTab === tab.id
-                  ? "bg-white text-ios-text shadow-sm"
-                  : "text-ios-muted"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* ── 피드 탭 ────────────────────────────────────────── */}
       {activeTab === "following" && (
-        <SocialFeedTab
-          scope="following"
-          userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
-          isAdmin={false}
-          defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
-        />
+        <div>
+          {/* 스토리 바 */}
+          <SocialStoriesBar
+            connections={connections?.accepted ?? []}
+            currentProfile={profile}
+            onComposePost={() => {
+              /* SocialFeedTab의 FAB와 동일 역할: feed 탭 내부 composer 트리거를 위해
+                 직접 접근 불가하므로 FeedTab에서 showComposer FAB를 클릭하는 방식 유지.
+                 여기서는 scroll to top + 피드 내 FAB 안내용으로만 사용 */
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            onFriendTap={() => updateActiveTab("friends")}
+          />
+          <SocialFeedTab
+            scope="following"
+            userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
+            isAdmin={false}
+            defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+          />
+        </div>
       )}
 
       {activeTab === "explore" && (
@@ -1085,131 +1138,139 @@ export function SocialPage() {
         />
       )}
 
-      {/* ── 에러 상태 ──────────────────────────────────────── */}
-      {activeTab === "friends" && connectionsError && !connectionsLoading && (
-        <div className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
-          <p className="text-[13px] text-ios-muted">연결 목록을 불러오지 못했어요.</p>
-          <button
-            type="button"
-            onClick={fetchConnections}
-            className="ml-3 shrink-0 rounded-full bg-ios-bg px-3 py-1.5 text-[12.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
-          >
-            재시도
-          </button>
+      {/* ── 친구 / 그룹 탭 래퍼 (px-4 패딩 추가) ──────────── */}
+      {(activeTab === "friends" || activeTab === "groups") && (
+        <div className="px-4 pt-3 space-y-3 pb-[calc(96px+env(safe-area-inset-bottom))]">
+
+          {/* ── 에러 상태 ────────────────────────────────────── */}
+          {activeTab === "friends" && connectionsError && !connectionsLoading && (
+            <div className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
+              <p className="text-[13px] text-ios-muted">연결 목록을 불러오지 못했어요.</p>
+              <button
+                type="button"
+                onClick={fetchConnections}
+                className="ml-3 shrink-0 rounded-full bg-ios-bg px-3 py-1.5 text-[12.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
+              >
+                재시도
+              </button>
+            </div>
+          )}
+
+          {activeTab === "groups" && groupsError && !groupsLoading && (
+            <div className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
+              <p className="text-[13px] text-ios-muted">그룹 목록을 불러오지 못했어요.</p>
+              <button
+                type="button"
+                onClick={fetchGroups}
+                className="ml-3 shrink-0 rounded-full bg-ios-bg px-3 py-1.5 text-[12.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
+              >
+                재시도
+              </button>
+            </div>
+          )}
+
+          {/* ── 로딩 스켈레톤 ──────────────────────────────────── */}
+          {activeTab === "friends" && connectionsLoading && (
+            <div className="rounded-apple border border-ios-sep bg-white shadow-apple p-4 space-y-2.5">
+              <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
+              <div className="h-3 w-44 rounded-full bg-ios-sep/60 animate-pulse" />
+              <div className="h-3 w-36 rounded-full bg-ios-sep/40 animate-pulse" />
+            </div>
+          )}
+
+          {activeTab === "groups" && groupsLoading && (
+            <div className="rounded-apple border border-ios-sep bg-white shadow-apple p-4 space-y-2.5">
+              <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
+              <div className="h-14 rounded-2xl bg-ios-sep/70 animate-pulse" />
+              <div className="h-14 rounded-2xl bg-ios-sep/50 animate-pulse" />
+            </div>
+          )}
+
+          {/* ── 받은/보낸 연결 요청 ─────────────────────────────── */}
+          {activeTab === "friends" && !connectionsLoading && !connectionsError && (
+            <SocialPendingCard
+              incoming={pendingIncoming}
+              sent={pendingSent}
+              onRefresh={handleRefresh}
+            />
+          )}
+
+          {/* ── 이번 주 근무 현황 ────────────────────────────────── */}
+          {activeTab === "friends" && !scheduleLoading && friendSchedules.length > 0 && (
+            <SocialThisWeek
+              friends={friendSchedules}
+              mySchedule={mySchedule}
+            />
+          )}
+
+          {/* ── 다음 같이 쉬는 날 (친구별) ──────────────────────── */}
+          {activeTab === "friends" && !scheduleLoading && accepted.length > 0 && (
+            <SocialNextCommonOff
+              connections={accepted}
+              pairCommonOffByUserId={pairCommonOffByUserId}
+            />
+          )}
+
+          {/* ── 선택한 친구와 같이 쉬는 날 ───────────────────────── */}
+          {activeTab === "friends" && !scheduleLoading && selectableCommonOffFriends.length > 0 && (
+            <SocialSelectableCommonOffCard
+              title="선택한 친구와 같이 쉬는 날"
+              subtitle="내 일정은 자동 포함돼요. 원하는 친구만 골라서 이번 달 교집합을 바로 볼 수 있어요."
+              dates={selectedCommonOffDates}
+              selectedLabels={selectedCommonOffLabels}
+              selectedCount={selectedCommonOffFriendIds.length}
+              availableCount={selectableCommonOffFriends.length}
+              selectionNoun="친구"
+              onSelectClick={() => setOpenCommonOffSelector(true)}
+              emptyText={
+                selectedCommonOffFriendIds.length === 0
+                  ? "친구를 선택하면 이번 달 같이 쉬는 날을 바로 계산해드려요."
+                  : "선택한 친구와 이번 달 같이 쉬는 날이 아직 없어요."
+              }
+            />
+          )}
+
+          {/* ── 친구 목록 ──────────────────────────────────────── */}
+          {activeTab === "friends" && !connectionsLoading && !connectionsError && (
+            <SocialConnectionList
+              connections={accepted}
+              friendSchedules={friendSchedules}
+              month={month}
+              mySchedule={mySchedule}
+              pairCommonOffByUserId={pairCommonOffByUserId}
+              friendMeta={friendMeta}
+              onMetaChange={(userId, patch) => {
+                setFriendMeta((prev) => ({
+                  ...prev,
+                  [userId]: { ...(prev[userId] ?? { pinned: false, alias: "" }), ...patch },
+                }));
+              }}
+              onAddFriend={() => {
+                setConnectPrefillCode(null);
+                setConnectPrefillMessage(null);
+                setOpenConnect(true);
+              }}
+              onRefresh={handleRefresh}
+            />
+          )}
+
+          {/* ── 그룹 목록 ─────────────────────────────────────── */}
+          {activeTab === "groups" && !groupsLoading && !groupsError && (
+            <SocialGroupList
+              groups={groups}
+              canCreateGroup={canCreateGroup}
+              createGroupDisabled={billingLoading}
+              onCreateGroup={() => setOpenGroupCreate(true)}
+              onUpgradeForCreateGroup={handleUpgradeForCreateGroup}
+              onPrefetchGroup={(group) => prefetchGroupBoard(group.id)}
+              onOpenGroup={(group) => {
+                prefetchGroupBoard(group.id);
+                router.push(withReturnTo(`/social/groups/${group.id}`, groupsTabHref));
+              }}
+            />
+          )}
+
         </div>
-      )}
-
-      {activeTab === "groups" && groupsError && !groupsLoading && (
-        <div className="flex items-center justify-between rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
-          <p className="text-[13px] text-ios-muted">그룹 목록을 불러오지 못했어요.</p>
-          <button
-            type="button"
-            onClick={fetchGroups}
-            className="ml-3 shrink-0 rounded-full bg-ios-bg px-3 py-1.5 text-[12.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
-          >
-            재시도
-          </button>
-        </div>
-      )}
-
-      {/* ── 로딩 스켈레톤 ──────────────────────────────────── */}
-      {activeTab === "friends" && connectionsLoading && (
-        <div className="rounded-apple border border-ios-sep bg-white shadow-apple p-4 space-y-2.5">
-          <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
-          <div className="h-3 w-44 rounded-full bg-ios-sep/60 animate-pulse" />
-          <div className="h-3 w-36 rounded-full bg-ios-sep/40 animate-pulse" />
-        </div>
-      )}
-
-      {activeTab === "groups" && groupsLoading && (
-        <div className="rounded-apple border border-ios-sep bg-white shadow-apple p-4 space-y-2.5">
-          <div className="h-4 w-28 rounded-full bg-ios-sep animate-pulse" />
-          <div className="h-14 rounded-2xl bg-ios-sep/70 animate-pulse" />
-          <div className="h-14 rounded-2xl bg-ios-sep/50 animate-pulse" />
-        </div>
-      )}
-
-      {/* ── 받은/보낸 연결 요청 ─────────────────────────────── */}
-      {activeTab === "friends" && !connectionsLoading && !connectionsError && (
-        <SocialPendingCard
-          incoming={pendingIncoming}
-          sent={pendingSent}
-          onRefresh={handleRefresh}
-        />
-      )}
-
-      {/* ── 이번 주 근무 현황 ────────────────────────────────── */}
-      {activeTab === "friends" && !scheduleLoading && friendSchedules.length > 0 && (
-        <SocialThisWeek
-          friends={friendSchedules}
-          mySchedule={mySchedule}
-        />
-      )}
-
-      {/* ── 다음 같이 쉬는 날 (친구별) ──────────────────────── */}
-      {activeTab === "friends" && !scheduleLoading && accepted.length > 0 && (
-        <SocialNextCommonOff
-          connections={accepted}
-          pairCommonOffByUserId={pairCommonOffByUserId}
-        />
-      )}
-
-      {/* ── 선택한 친구와 같이 쉬는 날 ───────────────────────── */}
-      {activeTab === "friends" && !scheduleLoading && selectableCommonOffFriends.length > 0 && (
-        <SocialSelectableCommonOffCard
-          title="선택한 친구와 같이 쉬는 날"
-          subtitle="내 일정은 자동 포함돼요. 원하는 친구만 골라서 이번 달 교집합을 바로 볼 수 있어요."
-          dates={selectedCommonOffDates}
-          selectedLabels={selectedCommonOffLabels}
-          selectedCount={selectedCommonOffFriendIds.length}
-          availableCount={selectableCommonOffFriends.length}
-          selectionNoun="친구"
-          onSelectClick={() => setOpenCommonOffSelector(true)}
-          emptyText={
-            selectedCommonOffFriendIds.length === 0
-              ? "친구를 선택하면 이번 달 같이 쉬는 날을 바로 계산해드려요."
-              : "선택한 친구와 이번 달 같이 쉬는 날이 아직 없어요."
-          }
-        />
-      )}
-
-      {/* ── 친구 목록 ──────────────────────────────────────── */}
-      {activeTab === "friends" && !connectionsLoading && !connectionsError && (
-        <SocialConnectionList
-          connections={accepted}
-          friendSchedules={friendSchedules}
-          month={month}
-          mySchedule={mySchedule}
-          pairCommonOffByUserId={pairCommonOffByUserId}
-          friendMeta={friendMeta}
-          onMetaChange={(userId, patch) => {
-            setFriendMeta((prev) => ({
-              ...prev,
-              [userId]: { ...(prev[userId] ?? { pinned: false, alias: "" }), ...patch },
-            }));
-          }}
-          onAddFriend={() => {
-            setConnectPrefillCode(null);
-            setConnectPrefillMessage(null);
-            setOpenConnect(true);
-          }}
-          onRefresh={handleRefresh}
-        />
-      )}
-
-      {activeTab === "groups" && !groupsLoading && !groupsError && (
-        <SocialGroupList
-          groups={groups}
-          canCreateGroup={canCreateGroup}
-          createGroupDisabled={billingLoading}
-          onCreateGroup={() => setOpenGroupCreate(true)}
-          onUpgradeForCreateGroup={handleUpgradeForCreateGroup}
-          onPrefetchGroup={(group) => prefetchGroupBoard(group.id)}
-          onOpenGroup={(group) => {
-            prefetchGroupBoard(group.id);
-            router.push(withReturnTo(`/social/groups/${group.id}`, groupsTabHref));
-          }}
-        />
       )}
 
       {/* ── 바텀시트들 ─────────────────────────────────────── */}
