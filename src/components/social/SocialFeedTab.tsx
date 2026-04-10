@@ -51,6 +51,8 @@ type Props = {
   handle?: string | null;
   showComposer?: boolean;
   defaultVisibility?: SocialPostVisibility;
+  externalComposerOpen?: boolean;
+  onExternalComposerOpenChange?: (open: boolean) => void;
 };
 
 function buildEmptyCopy(scope: FeedScope) {
@@ -85,6 +87,8 @@ export function SocialFeedTab({
   handle = null,
   showComposer = true,
   defaultVisibility = "friends",
+  externalComposerOpen = false,
+  onExternalComposerOpenChange,
 }: Props) {
   const { user } = useAuthState();
   const currentUserId = user?.userId;
@@ -138,6 +142,12 @@ export function SocialFeedTab({
   useEffect(() => {
     loadFeed();
   }, [loadFeed]);
+
+  useEffect(() => {
+    if (!showComposer || !externalComposerOpen) return;
+    setComposerOpen(true);
+    onExternalComposerOpenChange?.(false);
+  }, [externalComposerOpen, onExternalComposerOpenChange, showComposer]);
 
   useEffect(() => {
     if (!sentinelRef.current || !nextCursor) return;

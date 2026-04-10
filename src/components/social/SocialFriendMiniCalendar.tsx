@@ -44,7 +44,7 @@ export function SocialFriendMiniCalendar({ friend, month, mySchedule }: Props) {
 
   if (shiftDays.length === 0) {
     return (
-      <p className="text-[12px] text-ios-muted">이번 달 일정이 없어요</p>
+      <p className="text-[12px] text-gray-500">이번 달 일정이 없어요</p>
     );
   }
 
@@ -63,7 +63,7 @@ export function SocialFriendMiniCalendar({ friend, month, mySchedule }: Props) {
             key={iso}
             className={cn(
               "flex min-w-[36px] flex-col items-center rounded-xl px-1.5 py-1",
-              SHIFT_COLORS[shift] ?? "bg-ios-bg text-ios-text",
+              SHIFT_COLORS[shift] ?? "bg-gray-100 text-gray-700",
               isToday && "ring-1 ring-offset-0 ring-[color:var(--rnest-accent)]",
               isCommonOff && !isToday && "ring-2 ring-offset-0 ring-emerald-500"
             )}

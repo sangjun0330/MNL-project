@@ -103,21 +103,21 @@ export function SocialSelectableCommonOffCard({
   }, [availableCount, selectedCount, selectedLabels, selectionNoun]);
 
   return (
-    <div className="rounded-apple border border-ios-sep bg-white px-4 py-3 shadow-apple">
+    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
               <SocialCalendarIcon className="h-[18px] w-[18px]" />
             </span>
-            <span className="text-[13.5px] font-semibold text-ios-text">{title}</span>
+            <span className="text-[13.5px] font-semibold text-gray-900">{title}</span>
           </div>
-          <p className="mt-1.5 text-[11.5px] leading-5 text-ios-muted">{subtitle}</p>
+          <p className="mt-1.5 text-[11.5px] leading-5 text-gray-500">{subtitle}</p>
         </div>
         <button
           type="button"
           onClick={onSelectClick}
-          className="shrink-0 rounded-full bg-ios-bg px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
+          className="shrink-0 rounded-full bg-gray-100 px-3 py-1.5 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
         >
           {selectionNoun} 선택
         </button>
@@ -130,7 +130,7 @@ export function SocialSelectableCommonOffCard({
             className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
               chip.tone === "accent"
                 ? "bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]"
-                : "bg-ios-bg text-ios-muted"
+                : "bg-gray-100 text-gray-500"
             }`}
           >
             {chip.text}
@@ -145,7 +145,7 @@ export function SocialSelectableCommonOffCard({
               <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[12px] font-semibold text-emerald-700">
                 {nearestDaysUntil === 0 ? "오늘!" : `D-${nearestDaysUntil}`}
               </span>
-              <span className="text-[12px] text-ios-muted">{formatKorean(nearestDate)}</span>
+              <span className="text-[12px] text-gray-500">{formatKorean(nearestDate)}</span>
             </div>
           ) : null}
 
@@ -165,7 +165,7 @@ export function SocialSelectableCommonOffCard({
           </div>
         </>
       ) : (
-        <div className="mt-3 rounded-[22px] bg-ios-bg px-4 py-3 text-[12px] leading-5 text-ios-muted">
+        <div className="mt-3 rounded-[22px] bg-gray-50 px-4 py-3 text-[12px] leading-5 text-gray-500">
           {emptyText}
         </div>
       )}

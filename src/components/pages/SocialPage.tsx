@@ -113,6 +113,7 @@ export function SocialPage() {
   const [groups, setGroups] = useState<SocialGroupSummary[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState(false);
+  const [feedComposerOpen, setFeedComposerOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SocialViewTab>(
     resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "following")
@@ -1114,12 +1115,7 @@ export function SocialPage() {
           <SocialStoriesBar
             connections={connections?.accepted ?? []}
             currentProfile={profile}
-            onComposePost={() => {
-              /* SocialFeedTab의 FAB와 동일 역할: feed 탭 내부 composer 트리거를 위해
-                 직접 접근 불가하므로 FeedTab에서 showComposer FAB를 클릭하는 방식 유지.
-                 여기서는 scroll to top + 피드 내 FAB 안내용으로만 사용 */
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
+            onComposePost={() => setFeedComposerOpen(true)}
             onFriendTap={() => updateActiveTab("friends")}
           />
           <SocialFeedTab
@@ -1127,6 +1123,8 @@ export function SocialPage() {
             userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
             isAdmin={false}
             defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+            externalComposerOpen={feedComposerOpen}
+            onExternalComposerOpenChange={setFeedComposerOpen}
           />
         </div>
       )}

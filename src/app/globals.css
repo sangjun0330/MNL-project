@@ -93,6 +93,15 @@ body.rnest-sheet-open {
   overflow: hidden;
 }
 
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* ✅ iOS-like tap behaviour */
 * { -webkit-tap-highlight-color: transparent; }
 

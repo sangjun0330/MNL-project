@@ -53,12 +53,12 @@ export function SocialNextCommonOff({ connections, pairCommonOffByUserId }: Prop
   const visibleItems = items.slice(0, 3);
 
   return (
-    <div className="rounded-apple border border-ios-sep bg-white shadow-apple px-4 py-3">
+    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
       <div className="flex items-center gap-2 mb-2.5">
         <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
           <SocialCalendarIcon className="h-[18px] w-[18px]" />
         </span>
-        <span className="text-[13.5px] font-semibold text-ios-text">다음 같이 쉬는 날</span>
+        <span className="text-[13.5px] font-semibold text-gray-900">다음 같이 쉬는 날</span>
       </div>
 
       <div className="space-y-2">
@@ -66,7 +66,7 @@ export function SocialNextCommonOff({ connections, pairCommonOffByUserId }: Prop
           <div key={connection.userId} className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-[18px] leading-none">{connection.avatarEmoji || "🐧"}</span>
-              <span className="text-[13px] font-medium text-ios-text truncate max-w-[120px]">
+              <span className="max-w-[120px] truncate text-[13px] font-medium text-gray-900">
                 {connection.nickname || "친구"}
               </span>
               <span
@@ -87,7 +87,7 @@ export function SocialNextCommonOff({ connections, pairCommonOffByUserId }: Prop
       </div>
 
       {items.length > 3 && (
-        <p className="mt-2 text-[11px] text-ios-muted text-center">+{items.length - 3}명 더</p>
+        <p className="mt-2 text-center text-[11px] text-gray-500">+{items.length - 3}명 더</p>
       )}
     </div>
   );

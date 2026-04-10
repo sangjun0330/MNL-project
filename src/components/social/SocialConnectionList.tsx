@@ -82,22 +82,29 @@ export function SocialConnectionList({
       .slice(0, 6);
 
   return (
-    <div className="rounded-apple border border-ios-sep bg-white shadow-apple">
+    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <span className="text-[12px] font-semibold text-ios-muted">
+        <span className="text-[12px] font-semibold text-gray-500">
           친구 {connections.length}
         </span>
       </div>
 
       {connections.length === 0 ? (
         <div className="px-4 pb-4 pt-2 text-center">
-          <p className="text-[13px] text-ios-muted">아직 연결된 친구가 없어요</p>
-          <p className="mt-0.5 text-[12px] text-ios-muted opacity-70">
+          <p className="text-[13px] text-gray-500">아직 연결된 친구가 없어요</p>
+          <p className="mt-0.5 text-[12px] text-gray-500/80">
             코드를 공유하거나 친구 코드를 입력해 연결해 보세요
           </p>
+          <button
+            type="button"
+            onClick={onAddFriend}
+            className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[color:var(--rnest-accent)] px-5 text-[13px] font-semibold text-white transition active:opacity-60"
+          >
+            친구 추가하기
+          </button>
         </div>
       ) : (
-        <div className="divide-y divide-ios-sep">
+        <div className="divide-y divide-gray-100">
           {connections.map((c) => {
             const friendSchedule = scheduleByUserId.get(c.userId);
             const isExpanded = expandedId === c.userId;
@@ -122,30 +129,30 @@ export function SocialConnectionList({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <p className="text-[13.5px] font-semibold text-ios-text truncate">
+                      <p className="text-[13.5px] font-semibold text-gray-900 truncate">
                         {displayName}
                       </p>
                       {meta.alias && (
-                        <span className="text-[10.5px] text-ios-muted shrink-0">
+                        <span className="text-[10.5px] text-gray-500 shrink-0">
                           ({c.nickname})
                         </span>
                       )}
                     </div>
                     {c.statusMessage && (
-                      <p className="text-[11.5px] text-ios-muted mt-0.5 truncate">{c.statusMessage}</p>
+                      <p className="mt-0.5 truncate text-[11.5px] text-gray-500">{c.statusMessage}</p>
                     )}
                     {!isExpanded && !c.statusMessage && preview.length > 0 && (
                       <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
                         {preview.map(([date, shift]) => {
                           const day = parseInt(date.split("-")[2], 10);
                           return (
-                            <span key={date} className="text-[10.5px] text-ios-muted">
+                            <span key={date} className="text-[10.5px] text-gray-500">
                               {day}일 <span className="font-medium">{shift}</span>
                             </span>
                           );
                         })}
                         {Object.keys(friendSchedule?.schedule ?? {}).length > 6 && (
-                          <span className="text-[10.5px] text-ios-muted opacity-60">…</span>
+                          <span className="text-[10.5px] text-gray-500/70">…</span>
                         )}
                       </div>
                     )}
@@ -159,7 +166,7 @@ export function SocialConnectionList({
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className={`shrink-0 text-ios-muted transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                    className={`shrink-0 text-gray-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
                   >
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
@@ -176,7 +183,7 @@ export function SocialConnectionList({
                         className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition active:opacity-70 ${
                           meta.pinned
                             ? "bg-amber-100 text-amber-700"
-                            : "bg-ios-bg text-ios-muted"
+                            : "bg-gray-100 text-gray-500"
                         }`}
                       >
                         📌 {meta.pinned ? "핀 해제" : "핀"}
@@ -192,7 +199,7 @@ export function SocialConnectionList({
                               setAliasInput(Array.from(e.target.value).slice(0, 12).join(""))
                             }
                             placeholder="별칭 입력 (최대 12자)"
-                            className="flex-1 min-w-0 rounded-xl bg-ios-bg px-2.5 py-1 text-[11.5px] text-ios-text outline-none border border-ios-sep focus:border-[color:var(--rnest-accent)]"
+                            className="flex-1 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11.5px] text-gray-900 outline-none focus:border-[color:var(--rnest-accent)]"
                           />
                           <button
                             type="button"
@@ -207,7 +214,7 @@ export function SocialConnectionList({
                           <button
                             type="button"
                             onClick={() => setEditingAliasId(null)}
-                            className="text-[11px] text-ios-muted shrink-0"
+                            className="shrink-0 text-[11px] text-gray-500"
                           >
                             취소
                           </button>
@@ -219,7 +226,7 @@ export function SocialConnectionList({
                             setAliasInput(meta.alias);
                             setEditingAliasId(c.userId);
                           }}
-                          className="flex items-center gap-1 rounded-full bg-ios-bg px-2.5 py-1 text-[11px] font-semibold text-ios-muted transition active:opacity-70"
+                          className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-500 transition active:opacity-70"
                         >
                           ✏️ {meta.alias ? "별칭 수정" : "별칭"}
                         </button>
@@ -229,14 +236,14 @@ export function SocialConnectionList({
                     {/* 나와의 공통 오프 날짜 */}
                     {pairCommonOff.length > 0 ? (
                       <div className="mb-3">
-                        <p className="text-[11.5px] font-semibold text-ios-muted mb-1.5">
+                        <p className="mb-1.5 text-[11.5px] font-semibold text-gray-500">
                           {displayName}와 같이 쉬는 날
                         </p>
                         <div className="flex flex-wrap gap-1">
                           {pairCommonOff.map((iso) => (
                             <span
                               key={iso}
-                              className="rounded-full bg-emerald-500/10 text-emerald-700 px-2.5 py-0.5 text-[11.5px] font-medium"
+                              className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-medium text-emerald-700"
                             >
                               {formatKoreanShort(iso)}
                             </span>
@@ -244,7 +251,7 @@ export function SocialConnectionList({
                         </div>
                       </div>
                     ) : (
-                      <p className="mb-3 text-[11.5px] text-ios-muted">
+                      <p className="mb-3 text-[11.5px] text-gray-500">
                         이번 달 같이 쉬는 날이 없어요
                       </p>
                     )}
@@ -257,7 +264,7 @@ export function SocialConnectionList({
                         mySchedule={mySchedule}
                       />
                     ) : (
-                      <p className="text-[12px] text-ios-muted">이번 달 일정 정보가 없어요</p>
+                      <p className="text-[12px] text-gray-500">이번 달 일정 정보가 없어요</p>
                     )}
 
                     {/* 액션 버튼: 차단 + 연결 해제 */}
@@ -269,7 +276,7 @@ export function SocialConnectionList({
                           e.stopPropagation();
                           void handleAction(c.id, "block");
                         }}
-                        className="text-[12px] text-ios-muted underline underline-offset-2 transition active:opacity-60 disabled:opacity-40"
+                        className="text-[12px] text-gray-500 underline underline-offset-2 transition active:opacity-60 disabled:opacity-40"
                       >
                         {loadingId === c.id ? "처리 중…" : "차단"}
                       </button>
@@ -293,20 +300,21 @@ export function SocialConnectionList({
         </div>
       )}
 
-      {/* 친구 추가 버튼 */}
-      <div className="border-t border-ios-sep">
-        <button
-          type="button"
-          onClick={onAddFriend}
-          className="flex w-full items-center justify-center gap-2 py-3.5 text-[13.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          친구 추가
-        </button>
-      </div>
+      {connections.length > 0 ? (
+        <div className="border-t border-gray-100">
+          <button
+            type="button"
+            onClick={onAddFriend}
+            className="flex w-full items-center justify-center gap-2 py-3.5 text-[13.5px] font-semibold text-[color:var(--rnest-accent)] transition active:opacity-60"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            친구 추가
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -388,7 +388,7 @@ export function SocialPostComposer({
               onClick={handlePost}
               disabled={!canSubmit}
               className="h-12 w-full rounded-[18px] text-[14px] font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-[#c8ccd3]"
-              style={{ backgroundColor: canSubmit ? "#4F46E5" : undefined }}
+              style={{ backgroundColor: canSubmit ? "var(--rnest-accent)" : undefined }}
             >
               {posting ? "게시 중..." : "게시하기"}
             </button>
@@ -420,13 +420,13 @@ export function SocialPostComposer({
                   <path d="m6 6 12 12" />
                 </svg>
               </button>
-              <p className="text-[16px] font-semibold tracking-[-0.02em]">New post</p>
+              <p className="text-[16px] font-semibold tracking-[-0.02em]">새 게시글</p>
               <button
                 type="button"
                 onClick={() => setStep("details")}
                 className="min-w-[52px] text-right text-[15px] font-semibold text-[#7C82FF]"
               >
-                {selectedImages.length > 0 ? "Next" : "Skip"}
+                {selectedImages.length > 0 ? "다음" : "건너뛰기"}
               </button>
             </div>
           </div>
@@ -474,8 +474,8 @@ export function SocialPostComposer({
 
             <div className="mt-4 flex items-center justify-between px-1">
               <div>
-                <p className="text-[15px] font-semibold tracking-[-0.02em]">Recents</p>
-                <p className="mt-1 text-[12px] text-white/55">텍스트만 올리려면 오른쪽 위 Skip을 누르세요.</p>
+                <p className="text-[15px] font-semibold tracking-[-0.02em]">최근 선택</p>
+                <p className="mt-1 text-[12px] text-white/55">텍스트만 올리려면 오른쪽 위 건너뛰기를 누르세요.</p>
               </div>
               <button
                 type="button"
@@ -553,14 +553,14 @@ export function SocialPostComposer({
                   <path d="m15 18-6-6 6-6" />
                 </svg>
               </button>
-              <p className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">New post</p>
+              <p className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">새 게시글</p>
               <div className="w-9" />
             </div>
           </div>
 
           <div className="space-y-4 px-4 pb-6 pt-4">
             {selectedImages.length > 0 ? (
-              <section className="overflow-hidden rounded-[28px] border border-black/[0.05] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+              <section className="overflow-hidden rounded-2xl border border-black/[0.05] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
                 <div className="relative aspect-square bg-[#f2f3f5]">
                   {activeImage ? (
                     <>
@@ -598,7 +598,7 @@ export function SocialPostComposer({
                         {index + 1}
                       </span>
                       {index === activeImageIndex ? (
-                        <div className="absolute inset-0 rounded-[16px] ring-2 ring-[#4F46E5]" />
+                        <div className="absolute inset-0 rounded-[16px] ring-2 ring-[color:var(--rnest-accent)]" />
                       ) : null}
                     </button>
                   ))}
@@ -617,7 +617,7 @@ export function SocialPostComposer({
                 </div>
               </section>
             ) : (
-              <section className="rounded-[26px] border border-dashed border-black/10 bg-white px-5 py-6 text-center shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
+              <section className="rounded-2xl border border-dashed border-black/10 bg-white px-5 py-6 text-center shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
                 <p className="text-[14px] font-semibold text-[#111827]">텍스트만 작성하는 게시글</p>
                 <p className="mt-1 text-[12px] leading-5 text-[#6b7280]">
                   필요하면 언제든 위 단계로 돌아가 사진을 추가할 수 있어요.
@@ -632,9 +632,9 @@ export function SocialPostComposer({
               </section>
             )}
 
-            <section className="rounded-[26px] border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+            <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
               <div className="flex items-center justify-between">
-                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">CAPTION</p>
+                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">캡션</p>
                 <p className="text-[12px] text-[#9ca3af]">{charCount}/500</p>
               </div>
               <textarea
@@ -646,14 +646,14 @@ export function SocialPostComposer({
                   }
                 }}
                 rows={5}
-                placeholder="Add a caption..."
+                placeholder="캡션을 입력하세요..."
                 className="mt-3 w-full resize-none bg-transparent text-[15px] leading-7 text-[#111827] outline-none placeholder:text-[#9ca3af]"
               />
             </section>
 
-            <section className="rounded-[26px] border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+            <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
               <div className="flex items-center justify-between">
-                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">TAGS</p>
+                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">태그</p>
                 <p className="text-[12px] text-[#9ca3af]">{outgoingTags.length}/5</p>
               </div>
               <div className="mt-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-3 py-3">
@@ -689,8 +689,8 @@ export function SocialPostComposer({
               </div>
             </section>
 
-            <section className="rounded-[26px] border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
-              <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">AUDIENCE</p>
+            <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+              <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">공개 범위</p>
               <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
                 <span className="text-[18px]">{selectedVisibility.icon}</span>
                 <select
