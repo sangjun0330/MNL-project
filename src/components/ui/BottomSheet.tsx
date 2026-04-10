@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
-const SHEET_DURATION_MS = 500;
+export const BOTTOM_SHEET_DURATION_MS = 500;
 let OPEN_SHEET_COUNT = 0;
 
 type Props = {
@@ -13,17 +13,22 @@ type Props = {
   title?: string;
   subtitle?: string;
   children: React.ReactNode;
+  dismissible?: boolean;
   /**
    * Optional fixed footer area (e.g. action buttons).
    * - 내부 스크롤 영역과 분리되어 항상 하단에 고정됩니다.
    */
   footer?: React.ReactNode;
+  footerClassName?: string;
   /**
    * Sheet panel max height.
    * 기본값은 iOS 스타일(반 화면 + 조금)로 설정.
    * 예) "max-h-[70dvh]"
    */
   maxHeightClassName?: string;
+  contentClassName?: string;
+  panelClassName?: string;
+  presentation?: "sheet" | "fullscreen";
   /**
    * Visual style variant.
    */
@@ -40,8 +45,13 @@ export function BottomSheet({
   title,
   subtitle,
   children,
+  dismissible = true,
   footer,
+  footerClassName,
   maxHeightClassName,
+  contentClassName,
+  panelClassName,
+  presentation = "sheet",
   variant = "default",
   backdropClassName,
 }: Props) {
@@ -52,6 +62,7 @@ export function BottomSheet({
 
   const maxH = useMemo(() => maxHeightClassName ?? "max-h-[68dvh]", [maxHeightClassName]);
   const isAppStore = variant === "appstore";
+  const isFullscreen = presentation === "fullscreen";
 
   useEffect(() => {
     // open/close 상태에 맞춰 mount/visible을 동기화
@@ -63,18 +74,18 @@ export function BottomSheet({
     }
     // close: exit 애니메이션 후 unmount
     setVisible(false);
-    const t = setTimeout(() => setMounted(false), SHEET_DURATION_MS);
+    const t = setTimeout(() => setMounted(false), BOTTOM_SHEET_DURATION_MS);
     return () => clearTimeout(t);
   }, [open]);
 
   useEffect(() => {
     if (!mounted) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && dismissible) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mounted, onClose]);
+  }, [dismissible, mounted, onClose]);
 
   useEffect(() => {
     setPortalEl(typeof document !== "undefined" ? document.body : null);
@@ -106,9 +117,8 @@ export function BottomSheet({
 
   return createPortal(
     <div className="fixed inset-0 z-[80]">
-      <button
-        type="button"
-        aria-label="Close"
+      <div
+        aria-hidden="true"
         className={cn(
           "absolute inset-0",
           backdropClassName
@@ -118,29 +128,36 @@ export function BottomSheet({
               : "bg-black/35 backdrop-blur-[6px]",
           "transition-[opacity,backdrop-filter] duration-[500ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           "rnest-backdrop",
-          visible ? "opacity-100" : "opacity-0"
+          visible ? "opacity-100" : "opacity-0",
+          dismissible ? "cursor-pointer" : "cursor-default"
         )}
-        onClick={onClose}
+        onClick={dismissible ? onClose : undefined}
         data-auth-allow
       />
-      <div className="absolute bottom-0 left-0 right-0 mx-auto max-w-[460px]">
+      <div
+        className={cn(
+          "absolute mx-auto w-full",
+          isFullscreen ? "inset-0 max-w-[460px]" : "bottom-0 left-0 right-0 max-w-[460px]"
+        )}
+      >
         <div
           className={cn(
-            isAppStore
-              ? "rounded-[28px] border border-black/5 bg-[#F1F1F1] shadow-apple-lg"
-              : "rounded-t-[26px] border border-ios-sep bg-white shadow-apple-lg",
-            // ✅ iOS/Safari에서 스크롤이 제대로 동작하려면
-            // 부모가 height 제한 + overflow-hidden + flex-col 구조여야 합니다.
-            maxH,
+            isFullscreen
+              ? "h-[100dvh] max-h-none rounded-none border-0 bg-transparent shadow-none"
+              : isAppStore
+                ? "rounded-[28px] border border-black/5 bg-[#F1F1F1] shadow-apple-lg"
+                : "rounded-t-[26px] border border-ios-sep bg-white shadow-apple-lg",
+            !isFullscreen ? maxH : null,
             "overflow-hidden flex flex-col",
             // enter/exit (slide up)
             "transition-[transform,opacity] duration-[500ms] ease-[cubic-bezier(0.175,0.885,0.32,1.05)] will-change-transform",
-            visible ? "translate-y-0 opacity-100" : "translate-y-full opacity-0"
+            visible ? "translate-y-0 opacity-100" : "translate-y-full opacity-0",
+            panelClassName
           )}
           role="dialog"
           aria-modal="true"
         >
-          {!isAppStore ? (
+          {!isFullscreen && !isAppStore ? (
             <>
               <div className="flex justify-center pt-2">
                 <div className="h-1.5 w-12 rounded-full bg-ios-sep" />
@@ -157,7 +174,7 @@ export function BottomSheet({
                 </div>
               ) : null}
             </>
-          ) : (
+          ) : !isFullscreen ? (
             <div className="px-5 pt-3">
               <div className="mb-3 flex justify-center">
                 <div className="h-1.5 w-12 rounded-full bg-black/15" />
@@ -174,29 +191,43 @@ export function BottomSheet({
                 <button
                   type="button"
                   aria-label="Close"
+                  disabled={!dismissible}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/80 text-[16px] text-ios-text"
-                  onClick={onClose}
+                  onClick={dismissible ? onClose : undefined}
                   data-auth-allow
                 >
                   ✕
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
           <div
             className={cn(
-              // ✅ flex-1 + min-h-0 로 내부 scroll 컨테이너 높이가 고정되어 스크롤됨
-              "flex-1 min-h-0 overflow-y-auto overscroll-contain",
-              isAppStore ? "px-4 pt-4" : "px-5 pt-4",
-              footer ? "pb-4" : "pb-[calc(20px+env(safe-area-inset-bottom))]"
+              isFullscreen
+                ? "flex-1 min-h-0 overflow-hidden"
+                : "flex-1 min-h-0 overflow-y-auto overscroll-contain",
+              isFullscreen ? "px-0 pt-0" : isAppStore ? "px-4 pt-4" : "px-5 pt-4",
+              footer
+                ? isFullscreen
+                  ? "pb-0"
+                  : "pb-4"
+                : isFullscreen
+                  ? "pb-0"
+                  : "pb-[calc(20px+env(safe-area-inset-bottom))]",
+              contentClassName
             )}
           >
             {children}
           </div>
 
           {footer ? (
-            <div className="border-t border-ios-sep bg-white px-5 py-4">
+            <div
+              className={cn(
+                "border-t border-ios-sep bg-white px-5 py-4",
+                footerClassName
+              )}
+            >
               <div className="pb-[env(safe-area-inset-bottom)]">{footer}</div>
             </div>
           ) : null}

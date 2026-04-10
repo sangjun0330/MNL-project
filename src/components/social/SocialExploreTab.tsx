@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   SocialFollowSummary,
@@ -70,7 +70,7 @@ function GridThumbnail({ post, onClick }: { post: SocialPost; onClick: () => voi
     <button
       type="button"
       onClick={onClick}
-      className="relative aspect-square overflow-hidden bg-gray-100 w-full"
+      className="group relative aspect-square overflow-hidden bg-gray-100 w-full"
       aria-label={post.body || "게시글 보기"}
     >
       {firstImage ? (
@@ -101,10 +101,11 @@ function GridThumbnail({ post, onClick }: { post: SocialPost; onClick: () => voi
 
       {/* 좋아요 수 오버레이 (호버/포커스 시 나타남) */}
       {post.likeCount > 0 ? (
-        <div className="absolute bottom-1.5 left-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+        <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
           <svg viewBox="0 0 24 24" fill="white" className="w-3 h-3 drop-shadow">
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
           </svg>
+          <span className="text-[11px] font-medium text-white">{post.likeCount}</span>
         </div>
       ) : null}
     </button>
@@ -126,6 +127,16 @@ export function SocialExploreTab({ userGroups = [], defaultVisibility = "friends
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
   const isSearching = trimmedQuery.length > 0;
+
+  const handlePosted = useCallback(
+    (post: SocialPost) => {
+      if (!isSearching && post.visibility === "public_internal") {
+        setPosts((prev) => [post, ...prev]);
+      }
+      setComposerOpen(false);
+    },
+    [isSearching]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -312,11 +323,7 @@ export function SocialExploreTab({ userGroups = [], defaultVisibility = "friends
       <SocialPostComposer
         open={composerOpen}
         onClose={() => setComposerOpen(false)}
-        onPosted={(post) => {
-          setPosts((prev) => [post, ...prev]);
-          setComposerOpen(false);
-          router.refresh();
-        }}
+        onPosted={handlePosted}
         userGroups={userGroups}
         defaultVisibility={defaultVisibility}
       />

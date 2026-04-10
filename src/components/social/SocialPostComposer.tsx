@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BottomSheet } from "@/components/ui/BottomSheet";
+import { BOTTOM_SHEET_DURATION_MS, BottomSheet } from "@/components/ui/BottomSheet";
 import type { SocialGroupSummary, SocialPost, SocialPostVisibility } from "@/types/social";
 
 type Props = {
@@ -99,58 +99,85 @@ export function SocialPostComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedImagesRef = useRef<SelectedImage[]>([]);
+  const resetTimeoutRef = useRef<number | null>(null);
+  const wasOpenRef = useRef(open);
 
   useEffect(() => {
     selectedImagesRef.current = selectedImages;
   }, [selectedImages]);
 
-  useEffect(() => {
-    if (!open) {
-      revokeImageUrls(selectedImagesRef.current);
-      selectedImagesRef.current = [];
-      setSelectedImages([]);
-      setActiveImageIndex(0);
-      setStep("media");
-      setBody("");
-      setSelectedTags([]);
-      setTagInput("");
-      setVisibility(defaultVisibility);
-      setSelectedGroupId(null);
-      setPosting(false);
-      setError(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
+  const clearScheduledReset = useCallback(() => {
+    if (resetTimeoutRef.current === null) return;
+    window.clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = null;
+  }, []);
 
+  const resetComposerState = useCallback(() => {
+    revokeImageUrls(selectedImagesRef.current);
+    selectedImagesRef.current = [];
+    setSelectedImages([]);
+    setActiveImageIndex(0);
     setStep("media");
     setBody("");
     setSelectedTags([]);
     setTagInput("");
     setVisibility(defaultVisibility);
-    setSelectedGroupId(null);
+    setSelectedGroupId(defaultVisibility === "group" ? userGroups[0]?.id ?? null : null);
     setPosting(false);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [defaultVisibility, open]);
+  }, [defaultVisibility, userGroups]);
+
+  useEffect(() => {
+    const hadPendingReset = resetTimeoutRef.current !== null;
+    clearScheduledReset();
+
+    if (open) {
+      if (!wasOpenRef.current || hadPendingReset) {
+        wasOpenRef.current = true;
+        resetComposerState();
+      }
+      return;
+    }
+
+    if (!wasOpenRef.current) return;
+
+    resetTimeoutRef.current = window.setTimeout(() => {
+      resetComposerState();
+      resetTimeoutRef.current = null;
+      wasOpenRef.current = false;
+    }, BOTTOM_SHEET_DURATION_MS);
+
+    return clearScheduledReset;
+  }, [clearScheduledReset, open, resetComposerState]);
 
   useEffect(() => {
     return () => {
+      clearScheduledReset();
       revokeImageUrls(selectedImagesRef.current);
     };
-  }, []);
+  }, [clearScheduledReset]);
 
   useEffect(() => {
     if (open && step === "details") {
-      window.setTimeout(() => textareaRef.current?.focus(), 40);
+      const timeoutId = window.setTimeout(() => textareaRef.current?.focus(), 40);
+      return () => window.clearTimeout(timeoutId);
     }
   }, [open, step]);
 
   useEffect(() => {
-    if (visibility === "group" && userGroups.length === 0) {
+    if (visibility !== "group") return;
+
+    if (userGroups.length === 0) {
       setVisibility(defaultVisibility === "group" ? "friends" : defaultVisibility);
       setSelectedGroupId(null);
+      return;
     }
-  }, [defaultVisibility, userGroups.length, visibility]);
+
+    if (selectedGroupId === null || !userGroups.some((group) => group.id === selectedGroupId)) {
+      setSelectedGroupId(userGroups[0]?.id ?? null);
+    }
+  }, [defaultVisibility, selectedGroupId, userGroups, visibility]);
 
   const selectedVisibility =
     VISIBILITY_OPTIONS.find((option) => option.value === visibility) ?? VISIBILITY_OPTIONS[2];
@@ -218,8 +245,9 @@ export function SocialPostComposer({
   );
 
   const openFilePicker = useCallback(() => {
+    if (posting) return;
     fileInputRef.current?.click();
-  }, []);
+  }, [posting]);
 
   const handleImageSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -370,16 +398,50 @@ export function SocialPostComposer({
   }, [body, canSubmit, onClose, onPosted, outgoingTags, selectedGroupId, uploadImages, visibility]);
 
   const activeImage = selectedImages[activeImageIndex] ?? null;
+  const handleRequestClose = useCallback(() => {
+    if (posting) return;
+    onClose();
+  }, [onClose, posting]);
+
+  const handleAdvanceStep = useCallback(() => {
+    if (posting) return;
+    setError(null);
+    setStep("details");
+  }, [posting]);
+
+  const handleReturnToMedia = useCallback(() => {
+    if (posting) return;
+    setError(null);
+    setStep("media");
+  }, [posting]);
+
+  const handleVisibilityChange = useCallback(
+    (nextVisibility: SocialPostVisibility) => {
+      if (nextVisibility === "group" && userGroups.length === 0) return;
+      setVisibility(nextVisibility);
+      if (nextVisibility !== "group") {
+        setSelectedGroupId(null);
+        return;
+      }
+      if (userGroups[0]) {
+        setSelectedGroupId((current) => current ?? userGroups[0]?.id ?? null);
+      }
+    },
+    [userGroups]
+  );
 
   return (
     <BottomSheet
       open={open}
-      onClose={onClose}
-      maxHeightClassName="max-h-[94dvh]"
+      onClose={handleRequestClose}
+      dismissible={!posting}
+      presentation="fullscreen"
+      panelClassName="bg-transparent"
+      contentClassName="bg-transparent"
       backdropClassName="bg-black/50 backdrop-blur-[10px]"
       footer={
         step === "details" ? (
-          <div className="px-4 pb-[env(safe-area-inset-bottom)] pt-1">
+          <div className="pt-1">
             {error ? (
               <p className="mb-2 text-center text-[12px] text-red-500">{error}</p>
             ) : null}
@@ -395,24 +457,27 @@ export function SocialPostComposer({
           </div>
         ) : undefined
       }
+      footerClassName="border-t border-black/5 bg-white px-4 py-3"
     >
       <input
         ref={fileInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
         multiple
+        disabled={posting}
         hidden
         onChange={handleImageSelect}
       />
 
       {step === "media" ? (
-        <div className="-mx-5 -mt-4 min-h-[78dvh] overflow-hidden rounded-t-[26px] bg-[#0b0b0c] text-white">
-          <div className="px-5 pb-5 pt-5">
+        <div className="flex h-full min-h-0 flex-col bg-[#09090c] text-white">
+          <div className="shrink-0 px-4 pb-4 pt-[calc(14px+env(safe-area-inset-top))]">
             <div className="flex items-center justify-between">
               <button
                 type="button"
-                onClick={onClose}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/15"
+                onClick={handleRequestClose}
+                disabled={posting}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/15 disabled:opacity-40"
                 aria-label="닫기"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" className="h-5 w-5">
@@ -423,130 +488,141 @@ export function SocialPostComposer({
               <p className="text-[16px] font-semibold tracking-[-0.02em]">새 게시글</p>
               <button
                 type="button"
-                onClick={() => setStep("details")}
-                className="min-w-[52px] text-right text-[15px] font-semibold text-[#7C82FF]"
+                onClick={handleAdvanceStep}
+                disabled={posting}
+                className="min-w-[58px] text-right text-[15px] font-semibold text-[#9f9cff] disabled:opacity-40"
               >
                 {selectedImages.length > 0 ? "다음" : "건너뛰기"}
               </button>
             </div>
           </div>
 
-          <div className="px-4 pb-6">
-            <div className="overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
-              <div className="relative aspect-[4/5] bg-[#141416]">
-                {activeImage ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={activeImage.previewUrl}
-                      alt="선택한 사진"
-                      className="h-full w-full object-cover"
-                    />
-                    {selectedImages.length > 1 ? (
-                      <div className="absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(24px+env(safe-area-inset-bottom))]">
+            <div className="mx-auto flex max-w-[420px] flex-col">
+              <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+                <div className="relative aspect-[4/5] bg-[#141416]">
+                  {activeImage ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={activeImage.previewUrl}
+                        alt="선택한 사진"
+                        className="h-full w-full object-cover"
+                      />
+                      <div className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white">
                         {activeImageIndex + 1}/{selectedImages.length}
                       </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/10">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-8 w-8">
-                        <path d="M4 7a2 2 0 0 1 2-2h8l2 2h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-                        <circle cx="12" cy="13" r="3.5" />
-                      </svg>
+                    </>
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+                      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/10">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-8 w-8">
+                          <path d="M4 7a2 2 0 0 1 2-2h8l2 2h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                          <circle cx="12" cy="13" r="3.5" />
+                        </svg>
+                      </div>
+                      <p className="text-[18px] font-semibold tracking-[-0.02em]">사진을 먼저 골라보세요</p>
+                      <p className="mt-2 text-[13px] leading-6 text-white/65">
+                        갤러리에서 여러 장을 고를 수 있고, 텍스트만으로도 게시할 수 있어요.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openFilePicker}
+                        disabled={posting}
+                        className="mt-6 rounded-full bg-white px-5 py-2.5 text-[13px] font-semibold text-black transition hover:bg-white/90"
+                      >
+                        사진 선택
+                      </button>
                     </div>
-                    <p className="text-[18px] font-semibold tracking-[-0.02em]">사진을 먼저 골라보세요</p>
-                    <p className="mt-2 text-[13px] leading-6 text-white/65">
-                      여러 장을 선택하면 현재 선택된 순서대로 게시글에 올라가요.
-                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-end justify-between gap-3 px-1">
+                <div>
+                  <p className="text-[15px] font-semibold tracking-[-0.02em]">선택한 사진</p>
+                  <p className="mt-1 text-[12px] text-white/55">
+                    {selectedImages.length > 0
+                      ? `${selectedImages.length}장을 골랐어요. 오른쪽 위에서 다음 단계로 넘어갈 수 있어요.`
+                      : "텍스트만 올리려면 오른쪽 위 건너뛰기를 눌러주세요."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openFilePicker}
+                  disabled={posting}
+                  className="shrink-0 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-[12px] font-semibold text-white transition hover:bg-white/15"
+                >
+                  {selectedImages.length > 0 ? "사진 추가" : "선택"}
+                </button>
+              </div>
+
+              <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  onClick={openFilePicker}
+                  disabled={posting}
+                  className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[22px] border border-dashed border-white/15 bg-white/[0.05] text-white/70 transition hover:bg-white/[0.08]"
+                  aria-label="사진 추가"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-6 w-6">
+                    <path d="M12 5v14" />
+                    <path d="M5 12h14" />
+                  </svg>
+                </button>
+
+                {selectedImages.map((image, index) => (
+                  <div
+                    key={image.id}
+                    className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[22px] border border-white/10 bg-white/5"
+                  >
                     <button
                       type="button"
-                      onClick={openFilePicker}
-                      className="mt-6 rounded-full bg-white px-5 py-2.5 text-[13px] font-semibold text-black transition hover:bg-white/90"
+                      onClick={() => setActiveImageIndex(index)}
+                      disabled={posting}
+                      className="h-full w-full"
+                      aria-label={`${index + 1}번 사진 선택`}
                     >
-                      사진 선택
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={image.previewUrl} alt="" className="h-full w-full object-cover" />
+                      <span className="absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
+                        {index + 1}
+                      </span>
+                      {index === activeImageIndex ? (
+                        <div className="absolute inset-0 rounded-[22px] ring-2 ring-[color:var(--rnest-accent)]" />
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeImage(image.id)}
+                      disabled={posting}
+                      className="absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                      aria-label="사진 제거"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                      </svg>
                     </button>
                   </div>
-                )}
+                ))}
               </div>
+
+              {error ? (
+                <p className="mt-4 px-1 text-[12px] leading-5 text-red-300">{error}</p>
+              ) : null}
             </div>
-
-            <div className="mt-4 flex items-center justify-between px-1">
-              <div>
-                <p className="text-[15px] font-semibold tracking-[-0.02em]">최근 선택</p>
-                <p className="mt-1 text-[12px] text-white/55">텍스트만 올리려면 오른쪽 위 건너뛰기를 누르세요.</p>
-              </div>
-              <button
-                type="button"
-                onClick={openFilePicker}
-                className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-[12px] font-semibold text-white transition hover:bg-white/15"
-              >
-                {selectedImages.length > 0 ? "사진 더 추가" : "선택"}
-              </button>
-            </div>
-
-            <div className="mt-4 grid grid-cols-4 gap-2.5">
-              <button
-                type="button"
-                onClick={openFilePicker}
-                className="flex aspect-square items-center justify-center rounded-[18px] border border-dashed border-white/15 bg-white/[0.05] text-white/70 transition hover:bg-white/[0.08]"
-                aria-label="사진 추가"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-6 w-6">
-                  <path d="M12 5v14" />
-                  <path d="M5 12h14" />
-                </svg>
-              </button>
-
-              {selectedImages.map((image, index) => (
-                <div
-                  key={image.id}
-                  className="group relative aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-white/5"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setActiveImageIndex(index)}
-                    className="h-full w-full"
-                    aria-label={`${index + 1}번 사진 선택`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={image.previewUrl} alt="" className="h-full w-full object-cover" />
-                    <span className="absolute right-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-black/70 px-1.5 text-[11px] font-semibold text-white">
-                      {index + 1}
-                    </span>
-                    {index === activeImageIndex ? (
-                      <div className="absolute inset-0 rounded-[18px] ring-2 ring-white/90" />
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeImage(image.id)}
-                    className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition group-hover:opacity-100"
-                    aria-label="사진 제거"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-                      <path d="M18 6 6 18" />
-                      <path d="m6 6 12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {error ? (
-              <p className="mt-4 px-1 text-[12px] leading-5 text-red-300">{error}</p>
-            ) : null}
           </div>
         </div>
       ) : (
-        <div className="-mx-5 -mt-4 min-h-[72dvh] bg-[#f4f5f7]">
-          <div className="border-b border-black/5 bg-white/95 px-5 py-4 backdrop-blur">
+        <div className="flex h-full min-h-0 flex-col bg-[#f4f5f7]">
+          <div className="shrink-0 border-b border-black/5 bg-white/95 px-4 pb-3 pt-[calc(14px+env(safe-area-inset-top))] backdrop-blur">
             <div className="flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => setStep("media")}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-[#1c1c1e] transition hover:bg-black/5"
+                onClick={handleReturnToMedia}
+                disabled={posting}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[#1c1c1e] transition hover:bg-black/5 disabled:opacity-40"
                 aria-label="이전 단계"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" className="h-5 w-5">
@@ -558,184 +634,161 @@ export function SocialPostComposer({
             </div>
           </div>
 
-          <div className="space-y-4 px-4 pb-6 pt-4">
-            {selectedImages.length > 0 ? (
-              <section className="overflow-hidden rounded-2xl border border-black/[0.05] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
-                <div className="relative aspect-square bg-[#f2f3f5]">
-                  {activeImage ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={activeImage.previewUrl}
-                        alt="게시할 사진"
-                        className="h-full w-full object-cover"
-                      />
-                      {selectedImages.length > 1 ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="space-y-4 px-4 pb-6 pt-4">
+              {selectedImages.length > 0 ? (
+                <section className="overflow-hidden rounded-2xl border border-black/[0.05] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+                  <div className="relative aspect-square bg-[#f2f3f5]">
+                    {activeImage ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={activeImage.previewUrl}
+                          alt="게시할 사진"
+                          className="h-full w-full object-cover"
+                        />
                         <div className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white">
                           {activeImageIndex + 1}/{selectedImages.length}
                         </div>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
+                      </>
+                    ) : null}
+                  </div>
 
-                <div className="flex gap-2 overflow-x-auto px-3 py-3">
-                  {selectedImages.map((image, index) => (
+                  <div className="flex gap-2 overflow-x-auto px-3 py-3">
+                    {selectedImages.map((image, index) => (
+                      <button
+                        key={image.id}
+                        type="button"
+                        onClick={() => setActiveImageIndex(index)}
+                        disabled={posting}
+                        className="relative shrink-0 overflow-hidden rounded-[16px]"
+                        aria-label={`${index + 1}번 사진 보기`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={image.previewUrl}
+                          alt=""
+                          className="h-16 w-16 object-cover"
+                        />
+                        <span className="absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
+                          {index + 1}
+                        </span>
+                        {index === activeImageIndex ? (
+                          <div className="absolute inset-0 rounded-[16px] ring-2 ring-[color:var(--rnest-accent)]" />
+                        ) : null}
+                      </button>
+                    ))}
+
                     <button
-                      key={image.id}
                       type="button"
-                      onClick={() => setActiveImageIndex(index)}
-                      className="relative shrink-0 overflow-hidden rounded-[16px]"
-                      aria-label={`${index + 1}번 사진 보기`}
+                      onClick={openFilePicker}
+                      disabled={posting}
+                      className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[16px] border border-dashed border-black/10 bg-[#f6f7f9] text-[#6b7280]"
+                      aria-label="사진 추가"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={image.previewUrl}
-                        alt=""
-                        className="h-16 w-16 object-cover"
-                      />
-                      <span className="absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
-                        {index + 1}
-                      </span>
-                      {index === activeImageIndex ? (
-                        <div className="absolute inset-0 rounded-[16px] ring-2 ring-[color:var(--rnest-accent)]" />
-                      ) : null}
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5">
+                        <path d="M12 5v14" />
+                        <path d="M5 12h14" />
+                      </svg>
                     </button>
-                  ))}
-
+                  </div>
+                </section>
+              ) : (
+                <section className="rounded-2xl border border-dashed border-black/10 bg-white px-5 py-6 text-center shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
+                  <p className="text-[14px] font-semibold text-[#111827]">텍스트만 작성하는 게시글</p>
+                  <p className="mt-1 text-[12px] leading-5 text-[#6b7280]">
+                    필요하면 언제든 이전 단계로 돌아가 사진을 추가할 수 있어요.
+                  </p>
                   <button
                     type="button"
                     onClick={openFilePicker}
-                    className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[16px] border border-dashed border-black/10 bg-[#f6f7f9] text-[#6b7280]"
-                    aria-label="사진 추가"
+                    disabled={posting}
+                    className="mt-4 rounded-full border border-black/10 px-4 py-2 text-[12px] font-semibold text-[#111827]"
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5">
-                      <path d="M12 5v14" />
-                      <path d="M5 12h14" />
-                    </svg>
+                    사진 추가
                   </button>
+                </section>
+              )}
+
+              <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+                <div className="flex items-center justify-between">
+                  <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">캡션</p>
+                  <p className="text-[12px] text-[#9ca3af]">{charCount}/500</p>
                 </div>
-              </section>
-            ) : (
-              <section className="rounded-2xl border border-dashed border-black/10 bg-white px-5 py-6 text-center shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
-                <p className="text-[14px] font-semibold text-[#111827]">텍스트만 작성하는 게시글</p>
-                <p className="mt-1 text-[12px] leading-5 text-[#6b7280]">
-                  필요하면 언제든 위 단계로 돌아가 사진을 추가할 수 있어요.
-                </p>
-                <button
-                  type="button"
-                  onClick={openFilePicker}
-                  className="mt-4 rounded-full border border-black/10 px-4 py-2 text-[12px] font-semibold text-[#111827]"
-                >
-                  사진 추가
-                </button>
-              </section>
-            )}
-
-            <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
-              <div className="flex items-center justify-between">
-                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">캡션</p>
-                <p className="text-[12px] text-[#9ca3af]">{charCount}/500</p>
-              </div>
-              <textarea
-                ref={textareaRef}
-                value={body}
-                onChange={(event) => {
-                  if (Array.from(event.target.value).length <= 500) {
-                    setBody(event.target.value);
-                  }
-                }}
-                rows={5}
-                placeholder="캡션을 입력하세요..."
-                className="mt-3 w-full resize-none bg-transparent text-[15px] leading-7 text-[#111827] outline-none placeholder:text-[#9ca3af]"
-              />
-            </section>
-
-            <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
-              <div className="flex items-center justify-between">
-                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">태그</p>
-                <p className="text-[12px] text-[#9ca3af]">{outgoingTags.length}/5</p>
-              </div>
-              <div className="mt-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-3 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  {selectedTags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 rounded-full bg-[#eef2ff] px-3 py-1.5 text-[12px] font-medium text-[#4338ca]"
-                    >
-                      #{tag}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedTags((prev) => prev.filter((item) => item !== tag))}
-                        className="text-[#6366f1]"
-                        aria-label={`${tag} 태그 삭제`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-
-                  {selectedTags.length < 5 ? (
-                    <input
-                      value={tagInput}
-                      onChange={handleTagChange}
-                      onKeyDown={handleTagKeyDown}
-                      onBlur={commitTagInput}
-                      placeholder="태그 입력 후 Enter"
-                      className="min-w-[140px] flex-1 bg-transparent text-[13px] text-[#111827] outline-none placeholder:text-[#9ca3af]"
-                    />
-                  ) : null}
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
-              <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">공개 범위</p>
-              <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
-                <span className="text-[18px]">{selectedVisibility.icon}</span>
-                <select
-                  value={visibility}
+                <textarea
+                  ref={textareaRef}
+                  value={body}
+                  disabled={posting}
                   onChange={(event) => {
-                    const nextVisibility = event.target.value as SocialPostVisibility;
-                    if (nextVisibility === "group" && userGroups.length === 0) return;
-                    setVisibility(nextVisibility);
-                    if (nextVisibility !== "group") {
-                      setSelectedGroupId(null);
-                    } else if (userGroups[0]) {
-                      setSelectedGroupId((current) => current ?? userGroups[0]?.id ?? null);
+                    if (Array.from(event.target.value).length <= 500) {
+                      setBody(event.target.value);
                     }
                   }}
-                  className="w-full appearance-none bg-transparent text-[14px] font-medium text-[#111827] outline-none"
-                >
-                  {VISIBILITY_OPTIONS.map((option) => (
-                    <option
-                      key={option.value}
-                      value={option.value}
-                      disabled={option.value === "group" && userGroups.length === 0}
-                    >
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 text-[#9ca3af]">
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </div>
+                  rows={5}
+                  placeholder="캡션을 입력하세요..."
+                  className="mt-3 w-full resize-none bg-transparent text-[15px] leading-7 text-[#111827] outline-none placeholder:text-[#9ca3af]"
+                />
+              </section>
 
-              {visibility === "group" ? (
+              <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+                <div className="flex items-center justify-between">
+                  <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">태그</p>
+                  <p className="text-[12px] text-[#9ca3af]">{outgoingTags.length}/5</p>
+                </div>
+                <div className="mt-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-3 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 rounded-full bg-[color:var(--rnest-accent-soft)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)]"
+                      >
+                        #{tag}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTags((prev) => prev.filter((item) => item !== tag))}
+                          disabled={posting}
+                          className="text-[color:var(--rnest-accent)]"
+                          aria-label={`${tag} 태그 삭제`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+
+                    {selectedTags.length < 5 ? (
+                      <input
+                        value={tagInput}
+                        disabled={posting}
+                        onChange={handleTagChange}
+                        onKeyDown={handleTagKeyDown}
+                        onBlur={commitTagInput}
+                        placeholder="태그 입력 후 Enter"
+                        className="min-w-[140px] flex-1 bg-transparent text-[13px] text-[#111827] outline-none placeholder:text-[#9ca3af]"
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+                <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">공개 범위</p>
                 <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
-                  <span className="text-[18px]">🏷️</span>
+                  <span className="text-[18px]">{selectedVisibility.icon}</span>
                   <select
-                    value={selectedGroupId ?? ""}
-                    onChange={(event) => setSelectedGroupId(Number(event.target.value) || null)}
+                    value={visibility}
+                    disabled={posting}
+                    onChange={(event) =>
+                      handleVisibilityChange(event.target.value as SocialPostVisibility)
+                    }
                     className="w-full appearance-none bg-transparent text-[14px] font-medium text-[#111827] outline-none"
                   >
-                    <option value="" disabled>
-                      그룹을 선택하세요
-                    </option>
-                    {userGroups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
+                    {VISIBILITY_OPTIONS.map((option) => (
+                      <option
+                        key={option.value}
+                        value={option.value}
+                        disabled={option.value === "group" && userGroups.length === 0}
+                      >
+                        {option.label}
                       </option>
                     ))}
                   </select>
@@ -743,8 +796,37 @@ export function SocialPostComposer({
                     <path d="m6 9 6 6 6-6" />
                   </svg>
                 </div>
+              </section>
+
+              {visibility === "group" ? (
+                <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+                  <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">
+                    그룹 선택
+                  </p>
+                  <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
+                    <span className="text-[18px]">🏷️</span>
+                    <select
+                      value={selectedGroupId ?? ""}
+                      disabled={posting}
+                      onChange={(event) => setSelectedGroupId(Number(event.target.value) || null)}
+                      className="w-full appearance-none bg-transparent text-[14px] font-medium text-[#111827] outline-none"
+                    >
+                      <option value="" disabled>
+                        그룹을 선택하세요
+                      </option>
+                      {userGroups.map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name}
+                        </option>
+                      ))}
+                    </select>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 text-[#9ca3af]">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </div>
+                </section>
               ) : null}
-            </section>
+            </div>
           </div>
         </div>
       )}

@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { sanitizeInternalPath } from "@/lib/navigation";
 import type { FeedPage, SocialPost, SocialProfile, SocialProfileHeader } from "@/types/social";
-import { SocialFeedTab } from "@/components/social/SocialFeedTab";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
+import { SocialProfilePostViewer } from "@/components/social/SocialProfilePostViewer";
 
 type Props = {
   handle: string;
 };
 
 type ProfileTab = "posts" | "saved" | "liked";
+type ProfileGridScope = "profile" | "saved" | "liked";
 
 function formatProfileCount(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -20,16 +21,24 @@ function formatProfileCount(value: number) {
 
 function ProfileStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex min-w-0 flex-col items-center justify-center rounded-lg bg-[#faf8ff] px-3 py-2.5 text-center">
-      <span className="text-[18px] font-bold text-gray-900">{formatProfileCount(value)}</span>
-      <span className="mt-0.5 text-[12px] font-medium text-gray-500">{label}</span>
+    <div className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center sm:px-3 sm:py-2.5">
+      <span className="text-[17px] font-bold text-gray-900 sm:text-[18px]">
+        {formatProfileCount(value)}
+      </span>
+      <span className="mt-0.5 text-[11px] font-medium text-gray-500 sm:text-[12px]">{label}</span>
     </div>
   );
 }
 
 function GridTabIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`h-5 w-5 ${active ? "text-gray-900" : "text-gray-400"}`}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className={`h-5 w-5 ${active ? "text-gray-900" : "text-gray-400"}`}
+    >
       <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" />
       <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
       <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" />
@@ -70,10 +79,26 @@ function BookmarkTabIcon({ active }: { active: boolean }) {
   );
 }
 
+function EmptyTabIcon({ scope }: { scope: ProfileGridScope }) {
+  if (scope === "liked") {
+    return <HeartTabIcon active />;
+  }
+  if (scope === "saved") {
+    return <BookmarkTabIcon active />;
+  }
+  return <GridTabIcon active />;
+}
+
 function MultiPhotoBadge() {
   return (
     <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className="h-3.5 w-3.5"
+      >
         <rect x="8" y="5" width="11" height="11" rx="1.5" />
         <path d="M5 8.5V17a2 2 0 0 0 2 2h8.5" />
       </svg>
@@ -81,17 +106,33 @@ function MultiPhotoBadge() {
   );
 }
 
-function ProfilePostTile({ post }: { post: SocialPost }) {
+function ProfilePostTile({
+  post,
+  onClick,
+}: {
+  post: SocialPost;
+  onClick: () => void;
+}) {
   const mediaUrls = post.imageUrls.length > 0 ? post.imageUrls : post.imageUrl ? [post.imageUrl] : [];
   const coverImage = mediaUrls[0] ?? null;
   const caption = post.body.trim();
 
   return (
-    <div className="relative aspect-square overflow-hidden bg-white">
+    <button
+      type="button"
+      onClick={onClick}
+      className="relative aspect-square overflow-hidden bg-white text-left"
+      aria-label={caption || "게시글 보기"}
+    >
       {coverImage ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={coverImage} alt="게시글 미리보기" className="h-full w-full object-cover" loading="lazy" />
+          <img
+            src={coverImage}
+            alt="게시글 미리보기"
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
           {mediaUrls.length > 1 ? <MultiPhotoBadge /> : null}
         </>
       ) : (
@@ -109,16 +150,22 @@ function ProfilePostTile({ post }: { post: SocialPost }) {
           </div>
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
 function ProfilePostsGrid({
+  scope,
   handle,
+  emptyTitle,
   emptyCopy,
+  onPostSelect,
 }: {
-  handle: string;
+  scope: ProfileGridScope;
+  handle?: string | null;
+  emptyTitle: string;
   emptyCopy: string;
+  onPostSelect: (post: SocialPost) => void;
 }) {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -134,8 +181,8 @@ function ProfilePostsGrid({
 
       try {
         const params = new URLSearchParams();
-        params.set("scope", "profile");
-        params.set("handle", handle);
+        params.set("scope", scope);
+        if (scope === "profile" && handle) params.set("handle", handle);
         if (cursor) params.set("cursor", cursor);
 
         const res = await fetch(`/api/social/feed?${params.toString()}`, {
@@ -161,7 +208,7 @@ function ProfilePostsGrid({
         setHasLoaded(true);
       }
     },
-    [handle]
+    [handle, scope]
   );
 
   useEffect(() => {
@@ -170,10 +217,22 @@ function ProfilePostsGrid({
     setLoading(true);
     setLoadingMore(false);
     setHasLoaded(false);
-  }, [handle]);
+  }, [handle, scope]);
 
   useEffect(() => {
-    void loadPosts();
+    let cancelled = false;
+
+    const run = async () => {
+      await loadPosts();
+    };
+
+    if (!cancelled) {
+      void run();
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadPosts]);
 
   if (loading && !hasLoaded) {
@@ -181,7 +240,10 @@ function ProfilePostsGrid({
       <div className="border-y border-gray-200 bg-gray-200">
         <div className="grid grid-cols-3 gap-[1px]">
           {Array.from({ length: 9 }, (_, index) => (
-            <div key={`profile-grid-skeleton-${index}`} className="aspect-square animate-pulse bg-gray-100" />
+            <div
+              key={`${scope}-grid-skeleton-${index}`}
+              className="aspect-square animate-pulse bg-gray-100"
+            />
           ))}
         </div>
       </div>
@@ -192,9 +254,9 @@ function ProfilePostsGrid({
     return (
       <div className="px-4 py-12 text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-gray-200 text-gray-700">
-          <GridTabIcon active />
+          <EmptyTabIcon scope={scope} />
         </div>
-        <p className="mt-4 text-[14px] font-semibold text-gray-900">아직 게시글이 없어요</p>
+        <p className="mt-4 text-[14px] font-semibold text-gray-900">{emptyTitle}</p>
         <p className="mt-1 text-[13px] leading-6 text-gray-500">{emptyCopy}</p>
       </div>
     );
@@ -205,7 +267,7 @@ function ProfilePostsGrid({
       <div className="border-y border-gray-200 bg-gray-200">
         <div className="grid grid-cols-3 gap-[1px]">
           {posts.map((post) => (
-            <ProfilePostTile key={post.id} post={post} />
+            <ProfilePostTile key={post.id} post={post} onClick={() => onPostSelect(post)} />
           ))}
         </div>
       </div>
@@ -228,7 +290,7 @@ function ProfilePostsGrid({
 export function SocialProfilePage({ handle }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { status } = useAuthState();
+  const { status, user } = useAuthState();
   const returnTo = useMemo(
     () => sanitizeInternalPath(searchParams.get("returnTo"), "/social"),
     [searchParams]
@@ -242,21 +304,27 @@ export function SocialProfilePage({ handle }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [openProfileEditor, setOpenProfileEditor] = useState(false);
   const [actionLoading, setActionLoading] = useState<"follow" | "friend" | null>(null);
+  const [showActionMenu, setShowActionMenu] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<SocialPost | null>(null);
+
+  const actionMenuRef = useRef<HTMLDivElement>(null);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [profileRes, ownProfileRes] = await Promise.all([
-        fetch(`/api/social/profiles/${encodeURIComponent(handle)}`, { cache: "no-store" }).then((response) =>
-          response.json()
-        ),
+        fetch(`/api/social/profiles/${encodeURIComponent(handle)}`, {
+          cache: "no-store",
+        }).then((response) => response.json()),
         fetch("/api/social/profile", { cache: "no-store" }).then((response) => response.json()),
       ]);
 
       if (!profileRes.ok) {
         throw new Error(
-          profileRes.error === "not_found" ? "프로필을 찾을 수 없어요." : "프로필을 불러오지 못했어요."
+          profileRes.error === "not_found"
+            ? "프로필을 찾을 수 없어요."
+            : "프로필을 불러오지 못했어요."
         );
       }
 
@@ -274,9 +342,28 @@ export function SocialProfilePage({ handle }: Props) {
     void loadProfile();
   }, [loadProfile, status]);
 
+  useEffect(() => {
+    setSelectedPost(null);
+    setShowActionMenu(false);
+  }, [handle]);
+
+  useEffect(() => {
+    if (!showActionMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!actionMenuRef.current?.contains(event.target as Node)) {
+        setShowActionMenu(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [showActionMenu]);
+
   const isSelf = profile?.relationship.isSelf ?? false;
   const headerLabel = profile?.handle ? `@${profile.handle}` : `@${handle}`;
   const visibleTab: ProfileTab = isSelf ? tab : "posts";
+  const activeProfileHandle = profile?.handle ?? handle;
 
   useEffect(() => {
     if (!isSelf && tab !== "posts") {
@@ -326,13 +413,20 @@ export function SocialProfilePage({ handle }: Props) {
     setActionLoading("friend");
     setNotice(null);
     try {
-      const res = await fetch(`/api/social/profiles/${encodeURIComponent(profile.handle)}/friend-request`, {
-        method: "POST",
-      }).then((response) => response.json());
+      const res = await fetch(
+        `/api/social/profiles/${encodeURIComponent(profile.handle)}/friend-request`,
+        {
+          method: "POST",
+        }
+      ).then((response) => response.json());
       if (!res.ok) {
         if (res.error === "already_connected") throw new Error("이미 친구 연결이 되어 있어요.");
-        if (res.error === "request_already_pending") throw new Error("친구 요청이 이미 진행 중이에요.");
-        if (res.error === "invites_disabled") throw new Error("이 사용자는 친구 요청을 받지 않도록 설정했어요.");
+        if (res.error === "request_already_pending") {
+          throw new Error("친구 요청이 이미 진행 중이에요.");
+        }
+        if (res.error === "invites_disabled") {
+          throw new Error("이 사용자는 친구 요청을 받지 않도록 설정했어요.");
+        }
         throw new Error("친구 요청을 보내지 못했어요.");
       }
       setProfile((prev) =>
@@ -368,6 +462,16 @@ export function SocialProfilePage({ handle }: Props) {
     } catch {}
   }, [profile?.displayName, profile?.handle]);
 
+  const handleActionMenuShare = useCallback(async () => {
+    setShowActionMenu(false);
+    await handleShare();
+  }, [handleShare]);
+
+  const handleActionMenuEdit = useCallback(() => {
+    setShowActionMenu(false);
+    setOpenProfileEditor(true);
+  }, []);
+
   const friendButtonLabel = profile?.relationship.isFriend
     ? "친구"
     : profile?.relationship.hasOutgoingFriendRequest
@@ -386,21 +490,56 @@ export function SocialProfilePage({ handle }: Props) {
     ? [profile.bio.trim(), profile.statusMessage.trim()].filter(Boolean)
     : [];
 
+  const tabConfig = useMemo(() => {
+    if (visibleTab === "liked") {
+      return {
+        scope: "liked" as const,
+        emptyTitle: "좋아요한 게시글이 없어요",
+        emptyCopy: "좋아요를 누른 게시글이 생기면 여기에서 같은 그리드로 모아볼 수 있어요.",
+      };
+    }
+
+    if (visibleTab === "saved") {
+      return {
+        scope: "saved" as const,
+        emptyTitle: "저장한 게시글이 없어요",
+        emptyCopy: "다시 보고 싶은 글을 저장하면 여기에서 바로 모아볼 수 있어요.",
+      };
+    }
+
+    return {
+      scope: "profile" as const,
+      emptyTitle: "아직 게시글이 없어요",
+      emptyCopy: isSelf
+        ? "첫 게시글을 올리면 프로필 그리드가 채워져요."
+        : "이 사용자의 게시글이 올라오면 여기에 표시돼요.",
+    };
+  }, [isSelf, visibleTab]);
+
   if (status !== "authenticated") {
     return (
-      <div className="-mx-4 bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
-        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur">
+      <div className="-mx-4 overflow-x-hidden bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top))] backdrop-blur">
           <button
             type="button"
             onClick={handleBack}
             className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-100 active:opacity-60"
             aria-label="뒤로"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
-          <h1 className="truncate text-[16px] font-bold text-gray-900">{headerLabel}</h1>
+          <h1 className="truncate px-4 text-[16px] font-bold text-gray-900">{headerLabel}</h1>
           <div className="h-9 w-9" />
         </div>
         <div className="px-4 py-6">
@@ -413,116 +552,148 @@ export function SocialProfilePage({ handle }: Props) {
   }
 
   return (
-    <div className="-mx-4 bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
-      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
-          aria-label="뒤로"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-        <h1 className="truncate px-4 text-[16px] font-bold text-gray-900">{headerLabel}</h1>
-        <button
-          type="button"
-          onClick={handleShare}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
-          aria-label="프로필 더보기"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-            <circle cx="12" cy="5" r="1.5" />
-            <circle cx="12" cy="12" r="1.5" />
-            <circle cx="12" cy="19" r="1.5" />
-          </svg>
-        </button>
-      </div>
+    <>
+      <div className="-mx-4 overflow-x-hidden bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top))] backdrop-blur">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
+            aria-label="뒤로"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <h1 className="truncate px-4 text-[16px] font-bold text-gray-900">{headerLabel}</h1>
+          <div ref={actionMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowActionMenu((prev) => !prev)}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
+              aria-label="프로필 더보기"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <circle cx="12" cy="5" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="12" cy="19" r="1.5" />
+              </svg>
+            </button>
 
-      {notice ? (
-        <div className="px-4 pt-4">
-          <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3 text-[13px] text-gray-700">
-            {notice}
+            {showActionMenu ? (
+              <div className="absolute right-0 top-10 z-30 min-w-[172px] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
+                {isSelf ? (
+                  <button
+                    type="button"
+                    onClick={handleActionMenuEdit}
+                    className="w-full px-4 py-3 text-left text-[13px] font-medium text-gray-900 transition hover:bg-gray-50"
+                  >
+                    프로필 수정
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void handleActionMenuShare()}
+                  className="w-full px-4 py-3 text-left text-[13px] font-medium text-gray-900 transition hover:bg-gray-50"
+                >
+                  공유하기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowActionMenu(false)}
+                  className="w-full border-t border-gray-100 px-4 py-3 text-left text-[13px] text-gray-500 transition hover:bg-gray-50"
+                >
+                  닫기
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
-      ) : null}
 
-      {loading ? (
-        <div className="px-4 py-6">
-          <div className="rounded-2xl border border-gray-100 bg-white p-5">
-            <p className="text-[13px] text-gray-500">프로필을 불러오는 중...</p>
+        {notice ? (
+          <div className="px-4 pt-4">
+            <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3 text-[13px] text-gray-700">
+              {notice}
+            </div>
           </div>
-        </div>
-      ) : error || !profile ? (
-        <div className="px-4 py-6">
-          <div className="rounded-2xl border border-gray-100 bg-white p-5">
-            <p className="text-[13px] text-red-500">{error ?? "프로필을 찾을 수 없어요."}</p>
+        ) : null}
+
+        {loading ? (
+          <div className="px-4 py-6">
+            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+              <p className="text-[13px] text-gray-500">프로필을 불러오는 중...</p>
+            </div>
           </div>
-        </div>
-      ) : (
-        <>
-          <section className="px-4 py-5">
-            <div className="flex items-start gap-4">
-              <div className="shrink-0">
-                <div className="rnest-social-avatar-ring rounded-full p-[3px]">
-                  <div className="rnest-social-avatar-shell rounded-full p-[4px]">
-                    <div className="flex h-[92px] w-[92px] items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[34px]">
-                      {profile.profileImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        profile.avatarEmoji
-                      )}
+        ) : error || !profile ? (
+          <div className="px-4 py-6">
+            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+              <p className="text-[13px] text-red-500">{error ?? "프로필을 찾을 수 없어요."}</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <section className="px-4 py-5 sm:py-6">
+              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)] sm:gap-5">
+                <div className="shrink-0">
+                  <div className="rnest-social-avatar-ring rounded-full p-[3px]">
+                    <div className="rnest-social-avatar-shell rounded-full p-[4px]">
+                      <div className="flex h-[84px] w-[84px] items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[30px] sm:h-[104px] sm:w-[104px] sm:text-[36px]">
+                        {profile.profileImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={profile.profileImageUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          profile.avatarEmoji
+                        )}
+                      </div>
                     </div>
+                  </div>
+                </div>
+
+                <div className="min-w-0">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    <ProfileStat label="포스트" value={profile.postCount} />
+                    <ProfileStat label="팔로워" value={profile.followerCount} />
+                    <ProfileStat label="팔로잉" value={profile.followingCount} />
                   </div>
                 </div>
               </div>
 
-              <div className="min-w-0 flex-1 pt-1">
-                <div className="grid grid-cols-3 gap-2">
-                  <ProfileStat label="포스트" value={profile.postCount} />
-                  <ProfileStat label="팔로워" value={profile.followerCount} />
-                  <ProfileStat label="팔로잉" value={profile.followingCount} />
-                </div>
+              <div className="mt-4 min-w-0">
+                <h2 className="break-words text-[clamp(22px,7vw,30px)] font-bold leading-tight text-gray-900">
+                  {profile.displayName}
+                </h2>
+                {profile.handle ? (
+                  <p className="mt-1 break-all text-[13px] font-medium text-[color:var(--rnest-accent)] sm:text-[14px]">
+                    @{profile.handle}
+                  </p>
+                ) : null}
+                <p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-gray-700">
+                  {profileSummaryLines.length > 0
+                    ? profileSummaryLines.join("\n")
+                    : "RNest 소셜 프로필"}
+                </p>
               </div>
-            </div>
 
-            <div className="mt-4">
-              <h2 className="text-[18px] font-bold text-gray-900">{profile.displayName}</h2>
-              {profile.handle ? (
-                <p className="mt-1 text-[13px] font-medium text-[color:var(--rnest-accent)]">@{profile.handle}</p>
-              ) : null}
-              <p className="mt-2 whitespace-pre-wrap text-[14px] leading-6 text-gray-700">
-                {profileSummaryLines.length > 0 ? profileSummaryLines.join("\n") : "RNest 소셜 프로필"}
-              </p>
-            </div>
-
-            <div className="mt-5 flex gap-2">
-              {isSelf ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setOpenProfileEditor(true)}
-                    className="flex-1 rounded-lg border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900"
-                  >
-                    프로필 수정
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    className="flex-1 rounded-lg border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900"
-                  >
-                    공유
-                  </button>
-                </>
-              ) : (
-                <>
+              {!isSelf ? (
+                <div className="mt-5 grid grid-cols-2 gap-2 sm:max-w-[420px]">
                   <button
                     type="button"
                     onClick={handleFollow}
                     disabled={actionLoading === "follow"}
-                    className={`flex-1 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition ${
+                    className={`rounded-xl px-4 py-2.5 text-[13px] font-semibold transition ${
                       profile.relationship.isFollowing
                         ? "border border-gray-200 bg-[#f6f4ff] text-gray-900"
                         : "bg-[color:var(--rnest-accent)] text-white shadow-[0_12px_28px_rgba(123,111,208,0.22)]"
@@ -534,78 +705,78 @@ export function SocialProfilePage({ handle }: Props) {
                     type="button"
                     onClick={handleFriendRequest}
                     disabled={friendButtonDisabled}
-                    className="flex-1 rounded-lg border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900 disabled:opacity-50"
+                    className="rounded-xl border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900 disabled:opacity-50"
                   >
                     {friendButtonLabel}
                   </button>
-                </>
-              )}
+                </div>
+              ) : null}
+            </section>
+
+            <div className="flex border-y border-gray-200">
+              {(
+                [
+                  { id: "posts", icon: GridTabIcon },
+                  { id: "liked", icon: HeartTabIcon },
+                  { id: "saved", icon: BookmarkTabIcon },
+                ] as const
+              )
+                .filter((item) => isSelf || item.id === "posts")
+                .map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setTab(item.id)}
+                      className={`relative flex flex-1 items-center justify-center py-3 transition ${
+                        visibleTab === item.id ? "text-gray-900" : "text-gray-400"
+                      }`}
+                      aria-label={item.id}
+                    >
+                      <Icon active={visibleTab === item.id} />
+                      {visibleTab === item.id ? (
+                        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-gray-900" />
+                      ) : null}
+                    </button>
+                  );
+                })}
             </div>
-          </section>
 
-          <div className="flex border-y border-gray-200">
-            {(
-              [
-                { id: "posts", icon: GridTabIcon },
-                { id: "liked", icon: HeartTabIcon },
-                { id: "saved", icon: BookmarkTabIcon },
-              ] as const
-            )
-              .filter((item) => isSelf || item.id === "posts")
-              .map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setTab(item.id)}
-                    className={`relative flex flex-1 items-center justify-center py-3 transition ${
-                      visibleTab === item.id ? "text-gray-900" : "text-gray-400"
-                    }`}
-                    aria-label={item.id}
-                  >
-                    <Icon active={visibleTab === item.id} />
-                    {visibleTab === item.id ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-gray-900" /> : null}
-                  </button>
-                );
-              })}
-          </div>
-
-          {visibleTab === "posts" ? (
             <ProfilePostsGrid
-              handle={profile.handle ?? handle}
-              emptyCopy={
-                isSelf
-                  ? "첫 게시글을 올리면 프로필 그리드가 채워져요."
-                  : "이 사용자의 게시글이 올라오면 여기에 표시돼요."
-              }
+              key={`${activeProfileHandle}:${visibleTab}`}
+              scope={tabConfig.scope}
+              handle={tabConfig.scope === "profile" ? activeProfileHandle : null}
+              emptyTitle={tabConfig.emptyTitle}
+              emptyCopy={tabConfig.emptyCopy}
+              onPostSelect={setSelectedPost}
             />
-          ) : (
-            <SocialFeedTab
-              key={`${profile.handle ?? handle}:${visibleTab}`}
-              scope={visibleTab === "saved" ? "saved" : "liked"}
-              handle={profile.handle ?? handle}
-              showComposer={false}
-              defaultVisibility={ownProfile?.defaultPostVisibility ?? "friends"}
-            />
-          )}
-        </>
-      )}
+          </>
+        )}
 
-      <SocialProfileSheet
-        open={openProfileEditor}
-        onClose={() => setOpenProfileEditor(false)}
-        profile={ownProfile}
-        onSaved={(nextProfile) => {
-          setOwnProfile(nextProfile);
-          setOpenProfileEditor(false);
-          if (nextProfile.handle && nextProfile.handle !== handle) {
-            router.replace(`/social/profile/${nextProfile.handle}`);
-            return;
-          }
-          void loadProfile();
-        }}
+        <SocialProfileSheet
+          open={openProfileEditor}
+          onClose={() => setOpenProfileEditor(false)}
+          profile={ownProfile}
+          onSaved={(nextProfile) => {
+            setOwnProfile(nextProfile);
+            setOpenProfileEditor(false);
+            if (nextProfile.handle && nextProfile.handle !== handle) {
+              router.replace(`/social/profile/${nextProfile.handle}`);
+              return;
+            }
+            void loadProfile();
+          }}
+        />
+      </div>
+
+      <SocialProfilePostViewer
+        open={Boolean(selectedPost)}
+        post={selectedPost}
+        fallbackHandle={visibleTab === "posts" ? activeProfileHandle : null}
+        currentUserId={user?.userId}
+        onClose={() => setSelectedPost(null)}
       />
-    </div>
+    </>
   );
 }
