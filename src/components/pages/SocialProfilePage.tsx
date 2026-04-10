@@ -642,7 +642,7 @@ export function SocialProfilePage({ handle }: Props) {
         ) : (
           <>
             <section className="px-4 py-5 sm:py-6">
-              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)] sm:gap-5">
+              <div className="grid grid-cols-[98px_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[118px_minmax(0,1fr)] sm:gap-5">
                 <div className="shrink-0">
                   <div className="rnest-social-avatar-ring rounded-full p-[3px]">
                     <div className="rnest-social-avatar-shell rounded-full p-[4px]">
