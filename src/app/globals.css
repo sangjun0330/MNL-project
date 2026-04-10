@@ -96,6 +96,28 @@ body.rnest-sheet-open {
 /* ✅ iOS-like tap behaviour */
 * { -webkit-tap-highlight-color: transparent; }
 
+/* ✅ 터치 더블탭 확대 방지 — 모든 인터랙티브 요소 */
+button, a, [role="button"], input, textarea, select, label {
+  touch-action: manipulation;
+}
+
+/* ✅ iOS Safari 인풋 확대 방지 — 소셜 검색바 포함 */
+.social-search-input {
+  font-size: 16px !important;
+}
+
+/* ===================================
+   Social — 더블탭 하트 애니메이션
+   =================================== */
+
+@keyframes heartPop {
+  0%   { opacity: 0; transform: scale(0.2); }
+  15%  { opacity: 1; transform: scale(1.25); }
+  30%  { transform: scale(1.0); }
+  70%  { opacity: 1; transform: scale(1.0); }
+  100% { opacity: 0; transform: scale(1.15); }
+}
+
 /* ===================================
    Page Transitions (route changes)
    =================================== */
