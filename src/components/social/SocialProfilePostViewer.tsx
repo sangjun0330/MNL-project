@@ -174,17 +174,17 @@ export function SocialProfilePostViewer({
   }, [open, post, viewerHandle]);
 
   useEffect(() => {
-    if (!open || !post || didScrollToSelectedRef.current) return;
+    if (!open || !post || loading || didScrollToSelectedRef.current) return;
     if (!selectedItemRef.current) return;
     if (lastRequestedPostIdRef.current !== post.id) return;
 
-    const frameId = window.requestAnimationFrame(() => {
+    const timeoutId = window.setTimeout(() => {
       selectedItemRef.current?.scrollIntoView({ block: "start" });
       didScrollToSelectedRef.current = true;
-    });
+    }, 0);
 
-    return () => window.cancelAnimationFrame(frameId);
-  }, [open, post, posts]);
+    return () => window.clearTimeout(timeoutId);
+  }, [loading, open, post, posts]);
 
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {

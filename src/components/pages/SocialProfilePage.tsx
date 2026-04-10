@@ -518,7 +518,7 @@ export function SocialProfilePage({ handle }: Props) {
 
   if (status !== "authenticated") {
     return (
-      <div className="-mx-4 overflow-x-hidden bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
+      <div className="w-full overflow-x-hidden bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top))] backdrop-blur">
           <button
             type="button"
@@ -553,7 +553,7 @@ export function SocialProfilePage({ handle }: Props) {
 
   return (
     <>
-      <div className="-mx-4 overflow-x-hidden bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
+      <div className="w-full overflow-x-hidden bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top))] backdrop-blur">
           <button
             type="button"
