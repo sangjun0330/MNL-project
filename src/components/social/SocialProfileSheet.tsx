@@ -3,15 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
+import {
+  DEFAULT_SOCIAL_AVATAR,
+  SOCIAL_AVATAR_OPTIONS,
+  SocialAvatarBadge,
+} from "@/components/social/SocialAvatar";
 import type {
-  SocialProfile,
-  ScheduleVisibility,
   HealthVisibility,
+  ScheduleVisibility,
   SocialPostVisibility,
+  SocialProfile,
 } from "@/types/social";
+import { cn } from "@/lib/cn";
 import { useAppStoreSelector } from "@/lib/store";
-
-const AVATAR_OPTIONS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
 
 function toISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -22,11 +26,11 @@ function generateAutoStatus(schedule: Record<string, string>): string | null {
   const tomorrowISO = toISODate(new Date(Date.now() + 86400000));
   const today = schedule[todayISO];
   const tomorrow = schedule[tomorrowISO];
-  if (today === "OFF" || today === "VAC") return "오늘 오프 🎉";
-  if (tomorrow === "OFF" || tomorrow === "VAC") return "내일 오프입니다 😊";
-  if (today === "N") return "오늘 야간 근무 중 🌙";
-  if (today === "D") return "오늘 낮 근무 중 ☀️";
-  if (today === "E") return "오늘 저녁 근무 중 🌆";
+  if (today === "OFF" || today === "VAC") return "오늘 오프";
+  if (tomorrow === "OFF" || tomorrow === "VAC") return "내일 오프입니다";
+  if (today === "N") return "오늘 야간 근무 중";
+  if (today === "D") return "오늘 낮 근무 중";
+  if (today === "E") return "오늘 저녁 근무 중";
   return null;
 }
 
@@ -38,10 +42,138 @@ type Props = {
 };
 
 type ShareState = "idle" | "link-copied" | "shared";
+type EditorView = "main" | "displayName" | "handle" | "nickname" | "bio" | "statusMessage";
+type AvailabilityField = "displayName" | "handle" | "nickname";
+type AvailabilityState = {
+  status: "idle" | "checking" | "available" | "unavailable" | "invalid";
+  message: string | null;
+  normalizedValue: string;
+};
+
+const HANDLE_REGEX = /^[a-z0-9](?:[a-z0-9._-]{1,28}[a-z0-9])?$/;
+const INVISIBLE_UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069]/g;
 
 function formatCode(code: string | null) {
   if (!code) return "------";
   return `${code.slice(0, 3)} · ${code.slice(3)}`;
+}
+
+function buildProfileState(profile: SocialProfile | null): SocialProfile {
+  return {
+    nickname: profile?.nickname ?? "",
+    avatarEmoji: profile?.avatarEmoji ?? DEFAULT_SOCIAL_AVATAR,
+    statusMessage: profile?.statusMessage ?? "",
+    handle: profile?.handle ?? null,
+    displayName: profile?.displayName ?? "",
+    bio: profile?.bio ?? "",
+    profileImagePath: profile?.profileImagePath ?? null,
+    profileImageUrl: profile?.profileImageUrl ?? null,
+    discoverability: profile?.discoverability ?? "off",
+    defaultPostVisibility: profile?.defaultPostVisibility ?? "friends",
+  };
+}
+
+function limitCharacters(value: string, maxLength: number) {
+  return Array.from(value).slice(0, maxLength).join("");
+}
+
+function cleanNameLikeValue(value: string, maxLength: number) {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(INVISIBLE_UNSAFE_CHARS, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(normalized).slice(0, maxLength).join("");
+}
+
+function cleanHandleValue(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 30);
+}
+
+function cleanBioDraft(value: string) {
+  return limitCharacters(value, 160);
+}
+
+function normalizeBioForSave(value: string) {
+  return cleanBioDraft(value).trim();
+}
+
+function cleanStatusDraft(value: string) {
+  const cleaned = value.replace(/[\r\n\t]+/g, " ");
+  return Array.from(cleaned).slice(0, 30).join("");
+}
+
+function normalizeStatusForSave(value: string) {
+  return cleanStatusDraft(value).trim();
+}
+
+function getAvailabilityMeta(field: AvailabilityField) {
+  if (field === "displayName") {
+    return {
+      label: "표시 이름",
+      requiredMessage: "표시 이름을 입력해 주세요.",
+      takenMessage: "이미 사용 중인 표시 이름이에요.",
+      availableMessage: "사용 가능한 표시 이름이에요.",
+      sameMessage: "현재 표시 이름이에요.",
+    };
+  }
+
+  if (field === "nickname") {
+    return {
+      label: "닉네임",
+      requiredMessage: "닉네임을 입력해 주세요.",
+      takenMessage: "이미 사용 중인 닉네임이에요.",
+      availableMessage: "사용 가능한 닉네임이에요.",
+      sameMessage: "현재 닉네임이에요.",
+    };
+  }
+
+  return {
+    label: "핸들",
+    requiredMessage: "핸들은 영문 소문자, 숫자, 점, 밑줄, 하이픈으로 3~30자여야 해요.",
+    takenMessage: "이미 사용 중인 핸들이에요.",
+    availableMessage: "사용 가능한 핸들이에요.",
+    sameMessage: "현재 핸들이에요.",
+  };
+}
+
+function normalizeAvailabilityInput(field: AvailabilityField, rawValue: string) {
+  if (field === "displayName") {
+    const normalizedValue = cleanNameLikeValue(rawValue, 24);
+    return {
+      normalizedValue,
+      errorMessage: normalizedValue ? null : getAvailabilityMeta(field).requiredMessage,
+    };
+  }
+
+  if (field === "nickname") {
+    const normalizedValue = cleanNameLikeValue(rawValue, 12);
+    return {
+      normalizedValue,
+      errorMessage: normalizedValue ? null : getAvailabilityMeta(field).requiredMessage,
+    };
+  }
+
+  const normalizedValue = cleanHandleValue(rawValue);
+  if (!HANDLE_REGEX.test(normalizedValue)) {
+    return {
+      normalizedValue,
+      errorMessage: getAvailabilityMeta(field).requiredMessage,
+    };
+  }
+
+  return { normalizedValue, errorMessage: null };
+}
+
+function mapProfileSaveError(errorCode: string | null | undefined) {
+  if (errorCode === "nickname_required") return "닉네임을 입력해 주세요.";
+  if (errorCode === "display_name_required") return "표시 이름을 입력해 주세요.";
+  if (errorCode === "display_name_taken") return "이미 사용 중인 표시 이름이에요.";
+  if (errorCode === "nickname_taken") return "이미 사용 중인 닉네임이에요.";
+  if (errorCode === "invalid_avatar") return "아바타를 다시 선택해 주세요.";
+  if (errorCode === "invalid_handle") return "핸들 형식을 다시 확인해 주세요.";
+  if (errorCode === "handle_taken") return "이미 사용 중인 핸들이에요.";
+  return "프로필 저장에 실패했어요.";
 }
 
 type ToggleSwitchProps = {
@@ -73,22 +205,127 @@ function ToggleSwitch({ checked, disabled = false, onToggle, label }: ToggleSwit
   );
 }
 
+function ChevronRightIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+function InputStatusIcon({ status }: { status: AvailabilityState["status"] }) {
+  if (status === "available") {
+    return (
+      <span className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-500 text-emerald-600">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (status === "unavailable" || status === "invalid") {
+    return (
+      <span className="flex h-7 w-7 items-center justify-center rounded-full border border-red-400 text-red-500">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 8v5" />
+          <path d="M12 16h.01" />
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      </span>
+    );
+  }
+
+  return <span className="h-7 w-7" />;
+}
+
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+      <p className="text-[14px] font-semibold text-ios-text">{title}</p>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function SettingRow({
+  label,
+  value,
+  muted = false,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center justify-between gap-3 py-3 text-left first:pt-0 last:pb-0"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold text-ios-text">{label}</p>
+        <p className={cn("mt-1 truncate text-[14px]", muted ? "text-ios-muted" : "text-ios-text")}>{value}</p>
+      </div>
+      <span className="shrink-0 text-ios-muted">
+        <ChevronRightIcon />
+      </span>
+    </button>
+  );
+}
+
+function SegmentedOptionButton({
+  active,
+  disabled,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition ${
+        active ? "bg-[color:var(--rnest-accent)] text-white" : "bg-ios-bg text-ios-muted"
+      } disabled:opacity-50`}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const autoStatus = useMemo(() => generateAutoStatus(mySchedule), [mySchedule]);
 
-  const [nickname, setNickname] = useState(profile?.nickname ?? "");
-  const [displayName, setDisplayName] = useState(profile?.displayName ?? "");
-  const [handle, setHandle] = useState(profile?.handle ?? "");
-  const [bio, setBio] = useState(profile?.bio ?? "");
-  const [avatar, setAvatar] = useState(profile?.avatarEmoji ?? "🐧");
-  const [statusMessage, setStatusMessage] = useState(profile?.statusMessage ?? "");
-  const [discoverability, setDiscoverability] = useState(profile?.discoverability ?? "off");
-  const [defaultPostVisibility, setDefaultPostVisibility] = useState<SocialPostVisibility>(
-    profile?.defaultPostVisibility ?? "friends"
-  );
-  const [profileImageUrl, setProfileImageUrl] = useState(profile?.profileImageUrl ?? null);
-  const [saving, setSaving] = useState(false);
+  const [savedProfile, setSavedProfile] = useState<SocialProfile>(() => buildProfileState(profile));
+  const [activeView, setActiveView] = useState<EditorView>("main");
+  const [displayNameDraft, setDisplayNameDraft] = useState(profile?.displayName ?? "");
+  const [handleDraft, setHandleDraft] = useState(profile?.handle ?? "");
+  const [nicknameDraft, setNicknameDraft] = useState(profile?.nickname ?? "");
+  const [bioDraft, setBioDraft] = useState(profile?.bio ?? "");
+  const [statusMessageDraft, setStatusMessageDraft] = useState(profile?.statusMessage ?? "");
+  const [availability, setAvailability] = useState<AvailabilityState>({
+    status: "idle",
+    message: null,
+    normalizedValue: "",
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -101,71 +338,135 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [sharing, setSharing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
-  // 프라이버시 설정 상태
   const [scheduleVisibility, setScheduleVisibility] = useState<ScheduleVisibility>("full");
   const [statusMsgVisible, setStatusMsgVisible] = useState(true);
   const [acceptInvites, setAcceptInvites] = useState(true);
   const [healthVisibility, setHealthVisibility] = useState<HealthVisibility>("hidden");
   const [prefsSaving, setPrefsSaving] = useState(false);
 
-  const trimmedNickname = nickname.trim();
-  const trimmedDisplayName = displayName.trim();
-  const trimmedHandle = handle.trim().toLowerCase();
-  const trimmedBio = bio.trim();
-  const trimmedStatusMessage = statusMessage.trim().slice(0, 30);
-  const dirty =
-    trimmedNickname !== (profile?.nickname ?? "") ||
-    trimmedDisplayName !== (profile?.displayName ?? "") ||
-    trimmedHandle !== (profile?.handle ?? "") ||
-    trimmedBio !== (profile?.bio ?? "") ||
-    avatar !== (profile?.avatarEmoji ?? "🐧") ||
-    trimmedStatusMessage !== (profile?.statusMessage ?? "") ||
-    discoverability !== (profile?.discoverability ?? "off") ||
-    defaultPostVisibility !== (profile?.defaultPostVisibility ?? "friends");
+  const formattedCode = useMemo(() => formatCode(code), [code]);
+  const activeIdentityField =
+    activeView === "displayName" || activeView === "handle" || activeView === "nickname" ? activeView : null;
+
+  const applySavedProfile = useCallback(
+    (nextProfile: SocialProfile) => {
+      setSavedProfile(nextProfile);
+      setDisplayNameDraft(nextProfile.displayName);
+      setHandleDraft(nextProfile.handle ?? "");
+      setNicknameDraft(nextProfile.nickname);
+      setBioDraft(nextProfile.bio);
+      setStatusMessageDraft(nextProfile.statusMessage);
+      onSaved(nextProfile);
+    },
+    [onSaved]
+  );
 
   useEffect(() => {
     if (!open) return;
-    setNickname(profile?.nickname ?? "");
-    setDisplayName(profile?.displayName ?? "");
-    setHandle(profile?.handle ?? "");
-    setBio(profile?.bio ?? "");
-    setAvatar(profile?.avatarEmoji ?? "🐧");
-    setStatusMessage(profile?.statusMessage ?? "");
-    setDiscoverability(profile?.discoverability ?? "off");
-    setDefaultPostVisibility(profile?.defaultPostVisibility ?? "friends");
-    setProfileImageUrl(profile?.profileImageUrl ?? null);
+    const nextProfile = buildProfileState(profile);
+    setSavedProfile(nextProfile);
+    setActiveView("main");
+    setDisplayNameDraft(nextProfile.displayName);
+    setHandleDraft(nextProfile.handle ?? "");
+    setNicknameDraft(nextProfile.nickname);
+    setBioDraft(nextProfile.bio);
+    setStatusMessageDraft(nextProfile.statusMessage);
+    setAvailability({ status: "idle", message: null, normalizedValue: "" });
     setError(null);
     setCodeCopied(false);
-  }, [open, profile]);
+    setShareState("idle");
+  }, [open]);
 
-  const handleProfileImageSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploadingImage(true);
-    setError(null);
-    try {
-      const formData = new FormData();
-      formData.set("file", file);
-      const res = await fetch("/api/social/profile/image", {
-        method: "POST",
-        body: formData,
-      }).then((response) => response.json());
-
-      if (!res.ok) {
-        if (res.error === "invalid_file_type") throw new Error("JPG, PNG, WEBP 이미지만 첨부할 수 있어요.");
-        if (res.error === "file_too_large") throw new Error("이미지는 5MB 이하만 첨부할 수 있어요.");
-        throw new Error("프로필 사진 업로드에 실패했어요.");
+  const commitProfilePatch = useCallback(
+    async (
+      patch: Partial<{
+        nickname: string;
+        avatarEmoji: string;
+        statusMessage: string;
+        displayName: string;
+        bio: string;
+        handle: string;
+        discoverability: SocialProfile["discoverability"];
+        defaultPostVisibility: SocialPostVisibility;
+      }>
+    ) => {
+      if (profileSaving) return null;
+      setProfileSaving(true);
+      setError(null);
+      try {
+        const response = await fetch("/api/social/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const res = await response.json().catch(() => null);
+        if (!response.ok || !res?.ok) {
+          throw new Error(mapProfileSaveError(res?.error));
+        }
+        const nextProfile = buildProfileState((res?.data as SocialProfile) ?? null);
+        applySavedProfile(nextProfile);
+        return nextProfile;
+      } catch (saveError: any) {
+        setError(String(saveError?.message ?? "프로필 저장에 실패했어요."));
+        return null;
+      } finally {
+        setProfileSaving(false);
       }
+    },
+    [applySavedProfile, profileSaving]
+  );
 
-      setProfileImageUrl(res.data?.profile?.profileImageUrl ?? null);
-      onSaved(res.data?.profile as SocialProfile);
-    } catch (uploadError: any) {
-      setError(String(uploadError?.message ?? "프로필 사진 업로드에 실패했어요."));
-    } finally {
-      setUploadingImage(false);
-      if (imageInputRef.current) imageInputRef.current.value = "";
-    }
-  }, [onSaved]);
+  const saveInstantProfilePatch = useCallback(
+    async (
+      patch: Partial<{
+        avatarEmoji: string;
+        discoverability: SocialProfile["discoverability"];
+        defaultPostVisibility: SocialPostVisibility;
+      }>,
+      optimisticPatch: Partial<SocialProfile>
+    ) => {
+      if (profileSaving || uploadingImage) return;
+      const previousProfile = savedProfile;
+      setSavedProfile({ ...savedProfile, ...optimisticPatch });
+      const nextProfile = await commitProfilePatch(patch);
+      if (!nextProfile) {
+        setSavedProfile(previousProfile);
+      }
+    },
+    [commitProfilePatch, profileSaving, savedProfile, uploadingImage]
+  );
+
+  const handleProfileImageSelect = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      setUploadingImage(true);
+      setError(null);
+      try {
+        const formData = new FormData();
+        formData.set("file", file);
+        const res = await fetch("/api/social/profile/image", {
+          method: "POST",
+          body: formData,
+        }).then((response) => response.json());
+
+        if (!res.ok) {
+          if (res.error === "invalid_file_type") throw new Error("JPG, PNG, WEBP 이미지만 첨부할 수 있어요.");
+          if (res.error === "file_too_large") throw new Error("이미지는 5MB 이하만 첨부할 수 있어요.");
+          throw new Error("프로필 사진 업로드에 실패했어요.");
+        }
+
+        const nextProfile = buildProfileState((res.data?.profile as SocialProfile) ?? null);
+        applySavedProfile(nextProfile);
+      } catch (uploadError: any) {
+        setError(String(uploadError?.message ?? "프로필 사진 업로드에 실패했어요."));
+      } finally {
+        setUploadingImage(false);
+        if (imageInputRef.current) imageInputRef.current.value = "";
+      }
+    },
+    [applySavedProfile]
+  );
 
   const loadCode = useCallback(async () => {
     setCodeLoading(true);
@@ -176,9 +477,9 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
         throw new Error("내 코드를 불러오지 못했어요. 다시 시도해 주세요.");
       }
       setCode(res.data?.code ?? null);
-    } catch (err: any) {
+    } catch (loadError: any) {
       setCode(null);
-      setCodeError(String(err?.message ?? "내 코드를 불러오지 못했어요. 다시 시도해 주세요."));
+      setCodeError(String(loadError?.message ?? "내 코드를 불러오지 못했어요. 다시 시도해 주세요."));
     } finally {
       setCodeLoading(false);
     }
@@ -187,7 +488,6 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   useEffect(() => {
     if (!open) return;
     void loadCode();
-    // 프라이버시 설정 로드
     fetch("/api/social/preferences", { cache: "no-store" })
       .then((r) => r.json())
       .then((res) => {
@@ -199,9 +499,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
         }
       })
       .catch(() => {});
-  }, [open, loadCode]);
-
-  const formattedCode = useMemo(() => formatCode(code), [code]);
+  }, [loadCode, open]);
 
   const applyPreferenceState = useCallback((value: {
     scheduleVisibility: ScheduleVisibility;
@@ -215,52 +513,44 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     setHealthVisibility(value.healthVisibility);
   }, []);
 
-  const handleSave = async () => {
-    if (!trimmedNickname || !trimmedDisplayName || saving) return;
-    if (trimmedNickname.length > 12) {
-      setError("닉네임은 12자 이하로 입력해 주세요.");
-      return;
-    }
-    if (trimmedDisplayName.length > 24) {
-      setError("표시 이름은 24자 이하로 입력해 주세요.");
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9._-]{1,28}[a-z0-9]$/.test(trimmedHandle)) {
-      setError("핸들은 영문 소문자, 숫자, 점, 밑줄, 하이픈으로 3~30자여야 해요.");
-      return;
-    }
-
-    setSaving(true);
+  const handleSavePrefs = async (
+    patch: Partial<{
+      scheduleVisibility: ScheduleVisibility;
+      statusMessageVisible: boolean;
+      acceptInvites: boolean;
+      healthVisibility: HealthVisibility;
+    }>
+  ) => {
+    if (prefsSaving) return;
+    const previousPrefs = {
+      scheduleVisibility,
+      statusMessageVisible: statusMsgVisible,
+      acceptInvites,
+      healthVisibility,
+    };
+    setPrefsSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/social/profile", {
+      const response = await fetch("/api/social/preferences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nickname: trimmedNickname,
-          displayName: trimmedDisplayName,
-          handle: trimmedHandle,
-          bio: trimmedBio,
-          avatarEmoji: avatar,
-          statusMessage: trimmedStatusMessage,
-          discoverability,
-          defaultPostVisibility,
-        }),
-      }).then((r) => r.json());
-
-      if (!res.ok) {
-        if (res.error === "nickname_required") throw new Error("닉네임을 입력해 주세요.");
-        if (res.error === "invalid_avatar") throw new Error("아바타를 다시 선택해 주세요.");
-        if (res.error === "invalid_handle") throw new Error("핸들 형식을 다시 확인해 주세요.");
-        if (res.error === "handle_taken") throw new Error("이미 사용 중인 핸들이에요.");
-        throw new Error("프로필 저장에 실패했어요.");
+        body: JSON.stringify(patch),
+      });
+      const res = await response.json().catch(() => null);
+      if (!response.ok || !res?.ok) {
+        throw new Error("failed_to_save_preferences");
       }
-
-      onSaved(res.data);
-    } catch (err: any) {
-      setError(String(err?.message ?? "프로필 저장에 실패했어요."));
+      applyPreferenceState({
+        scheduleVisibility: res.data?.scheduleVisibility ?? previousPrefs.scheduleVisibility,
+        statusMessageVisible: res.data?.statusMessageVisible !== false,
+        acceptInvites: res.data?.acceptInvites !== false,
+        healthVisibility: res.data?.healthVisibility === "full" ? "full" : "hidden",
+      });
+    } catch {
+      applyPreferenceState(previousPrefs);
+      setError("프라이버시 설정 저장에 실패했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
-      setSaving(false);
+      setPrefsSaving(false);
     }
   };
 
@@ -292,7 +582,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
       }
 
       const inviteUrl = String(res.data?.url ?? "");
-      const text = `RNest 소셜에서 친구 추가해줘.\n링크를 열면 친구 코드 입력칸이 바로 열려요.`;
+      const text = "RNest 소셜에서 친구 추가해줘.\n링크를 열면 친구 코드 입력칸이 바로 열려요.";
       const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
 
       if (typeof nav.share === "function") {
@@ -304,51 +594,12 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
       }
 
       setTimeout(() => setShareState("idle"), 2400);
-    } catch (err: any) {
-      if (String(err?.name ?? "") !== "AbortError") {
-        setError(String(err?.message ?? "공유 링크를 만들지 못했어요."));
+    } catch (shareError: any) {
+      if (String(shareError?.name ?? "") !== "AbortError") {
+        setError(String(shareError?.message ?? "공유 링크를 만들지 못했어요."));
       }
     } finally {
       setSharing(false);
-    }
-  };
-
-  const handleSavePrefs = async (patch: Partial<{
-    scheduleVisibility: ScheduleVisibility;
-    statusMessageVisible: boolean;
-    acceptInvites: boolean;
-    healthVisibility: HealthVisibility;
-  }>) => {
-    if (prefsSaving) return;
-    const previousPrefs = {
-      scheduleVisibility,
-      statusMessageVisible: statusMsgVisible,
-      acceptInvites,
-      healthVisibility,
-    };
-    setPrefsSaving(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/social/preferences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      const res = await response.json().catch(() => null);
-      if (!response.ok || !res?.ok) {
-        throw new Error(String(res?.error ?? "failed_to_save_preferences"));
-      }
-      applyPreferenceState({
-        scheduleVisibility: res.data?.scheduleVisibility ?? previousPrefs.scheduleVisibility,
-        statusMessageVisible: res.data?.statusMessageVisible !== false,
-        acceptInvites: res.data?.acceptInvites !== false,
-        healthVisibility: res.data?.healthVisibility === "full" ? "full" : "hidden",
-      });
-    } catch {
-      applyPreferenceState(previousPrefs);
-      setError("프라이버시 설정 저장에 실패했어요. 잠시 후 다시 시도해 주세요.");
-    } finally {
-      setPrefsSaving(false);
     }
   };
 
@@ -370,35 +621,358 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
 
       setCode(res.data?.code ?? null);
       setCodeError(null);
-    } catch (err: any) {
-      setCodeError(String(err?.message ?? "코드를 재생성하지 못했어요."));
+    } catch (regenError: any) {
+      setCodeError(String(regenError?.message ?? "코드를 재생성하지 못했어요."));
     } finally {
       setRegenerating(false);
     }
   };
 
-  return (
-    <BottomSheet
-      open={open}
-      onClose={onClose}
-      title="내 소셜 프로필"
-      subtitle="닉네임을 바꾸고, 내 코드를 확인하고, 공유 링크를 만들 수 있어요"
-      variant="appstore"
-      maxHeightClassName="max-h-[78dvh]"
-    >
-      <div className="space-y-5 pb-6">
+  useEffect(() => {
+    if (!open || !activeIdentityField) return;
+
+    const meta = getAvailabilityMeta(activeIdentityField);
+    const currentValue =
+      activeIdentityField === "displayName"
+        ? savedProfile.displayName
+        : activeIdentityField === "handle"
+          ? savedProfile.handle ?? ""
+          : savedProfile.nickname;
+    const rawValue =
+      activeIdentityField === "displayName"
+        ? displayNameDraft
+        : activeIdentityField === "handle"
+          ? handleDraft
+          : nicknameDraft;
+    const normalized = normalizeAvailabilityInput(activeIdentityField, rawValue);
+
+    if (normalized.errorMessage) {
+      setAvailability({
+        status: "invalid",
+        message: normalized.errorMessage,
+        normalizedValue: normalized.normalizedValue,
+      });
+      return;
+    }
+
+    if (normalized.normalizedValue === currentValue) {
+      setAvailability({
+        status: "available",
+        message: meta.sameMessage,
+        normalizedValue: normalized.normalizedValue,
+      });
+      return;
+    }
+
+    setAvailability((prev) => ({
+      status: "checking",
+      message: null,
+      normalizedValue: normalized.normalizedValue,
+    }));
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const url = new URL("/api/social/profile/availability", window.location.origin);
+        url.searchParams.set("field", activeIdentityField);
+        url.searchParams.set("value", rawValue);
+        const response = await fetch(url.toString(), {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const res = await response.json().catch(() => null);
+        if (!response.ok || !res?.ok) {
+          throw new Error("failed_to_check_availability");
+        }
+
+        const reason = String(res.data?.reason ?? "");
+        const available = Boolean(res.data?.available);
+        setAvailability({
+          status: available ? "available" : "unavailable",
+          message:
+            reason === "same"
+              ? meta.sameMessage
+              : available
+                ? meta.availableMessage
+                : meta.takenMessage,
+          normalizedValue: String(res.data?.normalizedValue ?? normalized.normalizedValue),
+        });
+      } catch (availabilityError: any) {
+        if (availabilityError?.name === "AbortError") return;
+        setAvailability({
+          status: "invalid",
+          message: `${meta.label} 중복 여부를 확인하지 못했어요.`,
+          normalizedValue: normalized.normalizedValue,
+        });
+      }
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    activeIdentityField,
+    displayNameDraft,
+    handleDraft,
+    nicknameDraft,
+    open,
+    savedProfile.displayName,
+    savedProfile.handle,
+    savedProfile.nickname,
+  ]);
+
+  const identityEditorChanged =
+    activeIdentityField === "displayName"
+      ? normalizeAvailabilityInput("displayName", displayNameDraft).normalizedValue !== savedProfile.displayName
+      : activeIdentityField === "handle"
+        ? normalizeAvailabilityInput("handle", handleDraft).normalizedValue !== (savedProfile.handle ?? "")
+        : activeIdentityField === "nickname"
+          ? normalizeAvailabilityInput("nickname", nicknameDraft).normalizedValue !== savedProfile.nickname
+          : false;
+
+  const handleIdentitySave = useCallback(async () => {
+    if (!activeIdentityField || !identityEditorChanged) return;
+    if (availability.status !== "available") return;
+
+    if (activeIdentityField === "displayName") {
+      const nextProfile = await commitProfilePatch({ displayName: availability.normalizedValue });
+      if (nextProfile) setActiveView("main");
+      return;
+    }
+
+    if (activeIdentityField === "handle") {
+      const nextProfile = await commitProfilePatch({ handle: availability.normalizedValue });
+      if (nextProfile) setActiveView("main");
+      return;
+    }
+
+    const nextProfile = await commitProfilePatch({ nickname: availability.normalizedValue });
+    if (nextProfile) setActiveView("main");
+  }, [activeIdentityField, availability, commitProfilePatch, identityEditorChanged]);
+
+  const sheetFooter = useMemo(() => {
+    if (!activeIdentityField || !identityEditorChanged) return null;
+    return (
+      <Button
+        variant="primary"
+        disabled={profileSaving || availability.status !== "available"}
+        onClick={handleIdentitySave}
+        className="h-12 w-full rounded-2xl text-[15px]"
+      >
+        저장하기
+      </Button>
+    );
+  }, [activeIdentityField, availability.status, handleIdentitySave, identityEditorChanged, profileSaving]);
+
+  const handleBackFromSubview = useCallback(() => {
+    setError(null);
+    if (activeView === "displayName") {
+      setDisplayNameDraft(savedProfile.displayName);
+      setAvailability({ status: "idle", message: null, normalizedValue: "" });
+    }
+    if (activeView === "handle") {
+      setHandleDraft(savedProfile.handle ?? "");
+      setAvailability({ status: "idle", message: null, normalizedValue: "" });
+    }
+    if (activeView === "nickname") {
+      setNicknameDraft(savedProfile.nickname);
+      setAvailability({ status: "idle", message: null, normalizedValue: "" });
+    }
+    setActiveView("main");
+  }, [activeView, savedProfile.displayName, savedProfile.handle, savedProfile.nickname]);
+
+  const handleBioBlur = useCallback(() => {
+    const nextBio = normalizeBioForSave(bioDraft);
+    if (nextBio === savedProfile.bio) return;
+    void commitProfilePatch({ bio: nextBio });
+  }, [bioDraft, commitProfilePatch, savedProfile.bio]);
+
+  const handleStatusBlur = useCallback(() => {
+    const nextStatus = normalizeStatusForSave(statusMessageDraft);
+    if (nextStatus === savedProfile.statusMessage) return;
+    void commitProfilePatch({ statusMessage: nextStatus });
+  }, [commitProfilePatch, savedProfile.statusMessage, statusMessageDraft]);
+
+  const renderSubviewHeader = (title: string, description?: string) => (
+    <div className="px-1 pb-2">
+      <button
+        type="button"
+        onClick={handleBackFromSubview}
+        disabled={profileSaving}
+        className="mb-5 flex h-10 w-10 items-center justify-center rounded-full text-ios-text transition active:opacity-60 disabled:opacity-40"
+        aria-label="뒤로"
+      >
+        <BackIcon />
+      </button>
+      <h2 className="text-[28px] font-bold tracking-[-0.03em] text-ios-text">{title}</h2>
+      {description ? <p className="mt-3 text-[15px] leading-7 text-ios-muted">{description}</p> : null}
+    </div>
+  );
+
+  const renderIdentityEditor = () => {
+    if (!activeIdentityField) return null;
+    const field = activeIdentityField;
+    const meta = getAvailabilityMeta(field);
+    const title =
+      field === "displayName" ? "표시 이름" : field === "handle" ? "핸들" : "닉네임";
+    const description =
+      field === "handle"
+        ? "핸들을 바꾸면 프로필 주소도 바뀌어요."
+        : field === "nickname"
+          ? "친구와 그룹에서 표시되는 이름이에요."
+          : undefined;
+    const rawValue =
+      field === "displayName" ? displayNameDraft : field === "handle" ? handleDraft : nicknameDraft;
+    const inputLabel =
+      field === "displayName"
+        ? "표시 이름 (최대 24자)"
+        : field === "handle"
+          ? "핸들 (3~30자, 영문·숫자·._-)"
+          : "닉네임 (최대 12자)";
+
+    return (
+      <div className="space-y-5 pb-2">
+        {renderSubviewHeader(title, description)}
+
         <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+          <label className="mb-2 block text-[13px] font-semibold text-ios-text">{inputLabel}</label>
+          <div
+            className={cn(
+              "flex items-center rounded-[26px] border bg-white px-5 py-3.5 transition",
+              availability.status === "available"
+                ? "border-emerald-300"
+                : availability.status === "unavailable" || availability.status === "invalid"
+                  ? "border-red-200"
+                  : "border-ios-sep"
+            )}
+          >
+            {field === "handle" ? <span className="mr-1 text-[16px] text-ios-muted">@</span> : null}
+            <input
+              value={rawValue}
+              onChange={(event) => {
+                setError(null);
+                if (field === "displayName") {
+                  setDisplayNameDraft(limitCharacters(event.target.value, 24));
+                } else if (field === "handle") {
+                  setHandleDraft(cleanHandleValue(event.target.value));
+                } else {
+                  setNicknameDraft(limitCharacters(event.target.value, 12));
+                }
+              }}
+              placeholder={field === "handle" ? "my-handle" : ""}
+              autoFocus
+              spellCheck={false}
+              autoCapitalize={field === "handle" ? "none" : "sentences"}
+              autoCorrect="off"
+              disabled={profileSaving}
+              className="min-w-0 flex-1 bg-transparent text-[17px] font-semibold text-ios-text outline-none placeholder:text-ios-muted/55"
+            />
+            <InputStatusIcon status={availability.status} />
+          </div>
+
+          {availability.message ? (
+            <p
+              className={cn(
+                "mt-3 text-[12.5px]",
+                availability.status === "available" ? "text-emerald-600" : "text-red-500"
+              )}
+            >
+              {availability.status === "available" ? "✓ " : ""}
+              {availability.message}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const renderBioEditor = () => {
+    const count = Array.from(cleanBioDraft(bioDraft)).length;
+    return (
+      <div className="space-y-5 pb-2">
+        {renderSubviewHeader("소개")}
+        <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+          <label className="mb-2 block text-[13px] font-semibold text-ios-text">소개 (최대 160자)</label>
+          <textarea
+            value={bioDraft}
+            onChange={(event) => {
+              setError(null);
+              setBioDraft(cleanBioDraft(event.target.value));
+            }}
+            onBlur={handleBioBlur}
+            rows={5}
+            autoFocus
+            disabled={profileSaving}
+            className="w-full resize-none rounded-[26px] border border-ios-sep bg-white px-4 py-4 text-[15px] leading-6 text-ios-text outline-none transition placeholder:text-ios-muted/55"
+            placeholder="내 소개를 적어보세요"
+          />
+          <div className="mt-2 flex items-center justify-between text-[12px] text-ios-muted">
+            <span>{count} / 160</span>
+            <span>포커스가 이동하면 자동 저장돼요</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderStatusEditor = () => {
+    const count = Array.from(cleanStatusDraft(statusMessageDraft)).length;
+    return (
+      <div className="space-y-5 pb-2">
+        {renderSubviewHeader("상태 메시지")}
+        <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (!autoStatus) return;
+                setError(null);
+                setStatusMessageDraft(autoStatus);
+              }}
+              disabled={!autoStatus || profileSaving}
+              className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline underline-offset-2 disabled:opacity-30"
+            >
+              자동 제안
+            </button>
+            <span className="text-[12px] text-ios-muted">{count} / 30</span>
+          </div>
+          <input
+            value={statusMessageDraft}
+            onChange={(event) => {
+              setError(null);
+              setStatusMessageDraft(cleanStatusDraft(event.target.value));
+            }}
+            onBlur={handleStatusBlur}
+            autoFocus
+            disabled={profileSaving}
+            className="w-full rounded-[26px] border border-ios-sep bg-white px-4 py-4 text-[15px] text-ios-text outline-none transition placeholder:text-ios-muted/55"
+            placeholder="한 줄 메시지를 입력해 주세요"
+          />
+          <div className="mt-2 flex justify-end text-[12px] text-ios-muted">
+            <span>포커스가 이동하면 자동 저장돼요</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMainView = () => (
+    <div className="space-y-5 pb-2">
+      <SectionCard title="피드 / 검색 프로필">
+        <div className="rounded-[28px] bg-ios-bg px-4 py-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => imageInputRef.current?.click()}
-              className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[30px]"
+              disabled={uploadingImage || profileSaving}
+              className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[color:var(--rnest-accent-soft)] text-[30px] disabled:opacity-50"
             >
-              {profileImageUrl ? (
+              {savedProfile.profileImageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={profileImageUrl} alt="" className="h-full w-full object-cover" />
+                <img src={savedProfile.profileImageUrl} alt="" className="h-full w-full object-cover" />
               ) : (
-                avatar
+                savedProfile.avatarEmoji
               )}
             </button>
             <input
@@ -409,202 +983,162 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               onChange={handleProfileImageSelect}
             />
             <div className="min-w-0 flex-1">
-              <p className="text-[16px] font-semibold text-ios-text">
-                {trimmedDisplayName || trimmedNickname || "프로필을 완성해 주세요"}
+              <p className="truncate text-[18px] font-semibold text-ios-text">
+                {savedProfile.displayName || savedProfile.nickname || "프로필을 완성해 주세요"}
               </p>
-              <p className="mt-0.5 text-[12.5px] text-ios-muted">
-                {trimmedHandle ? `@${trimmedHandle}` : "SNS 프로필에 표시됩니다."}
+              <p className="mt-0.5 text-[13px] text-ios-muted">
+                {savedProfile.handle ? `@${savedProfile.handle}` : "피드와 검색에서 보여져요"}
               </p>
             </div>
             <button
               type="button"
               onClick={() => imageInputRef.current?.click()}
-              className="shrink-0 rounded-full bg-ios-bg px-3 py-2 text-[12px] font-semibold text-ios-text"
+              disabled={uploadingImage || profileSaving}
+              className="shrink-0 rounded-full bg-white px-3 py-2 text-[12px] font-semibold text-ios-text disabled:opacity-50"
             >
-              {uploadingImage ? "업로드 중…" : "사진 변경"}
+              사진 변경
             </button>
           </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-4">
-            <div>
-              <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-                표시 이름 <span className="font-normal text-ios-muted">(최대 24자)</span>
-              </label>
-              <input
-                value={displayName}
-                onChange={(e) => {
-                  setDisplayName(e.target.value.slice(0, 24));
-                  setError(null);
-                }}
-                placeholder="프로필에 표시할 이름"
-                maxLength={24}
-                className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-                핸들 <span className="font-normal text-ios-muted">(3~30자)</span>
-              </label>
-              <div className="flex items-center rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3">
-                <span className="text-[15px] text-ios-muted">@</span>
-                <input
-                  value={handle}
-                  onChange={(e) => {
-                    setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ""));
-                    setError(null);
-                  }}
-                  placeholder="my-handle"
-                  maxLength={30}
-                  className="ml-1 w-full bg-transparent text-[15px] text-ios-text outline-none placeholder:text-ios-muted/60"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-              닉네임 <span className="font-normal text-ios-muted">(친구/그룹 fallback, 최대 12자)</span>
-            </label>
-            <input
-              value={nickname}
-              onChange={(e) => {
-                setNickname(e.target.value.slice(0, 12));
-                setError(null);
-              }}
-              placeholder="닉네임 입력"
-              maxLength={12}
-              className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-            />
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-1.5 block text-[13px] font-semibold text-ios-text">
-              소개 <span className="font-normal text-ios-muted">(최대 160자)</span>
-            </label>
-            <textarea
-              value={bio}
-              onChange={(e) => {
-                setBio(e.target.value.slice(0, 160));
-                setError(null);
-              }}
-              rows={3}
-              className="w-full resize-none rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[14px] leading-6 text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-              placeholder="내 소개를 적어보세요"
-            />
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-2 block text-[13px] font-semibold text-ios-text">탐색 노출</label>
-            <div className="flex gap-2">
-              {([
-                { id: "off", label: "비공개" },
-                { id: "internal", label: "허브 공개" },
-              ] as const).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setDiscoverability(item.id)}
-                  className={`flex-1 rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition ${
-                    discoverability === item.id ? "bg-[color:var(--rnest-accent)] text-white" : "bg-ios-bg text-ios-muted"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-2 block text-[13px] font-semibold text-ios-text">기본 게시글 공개 범위</label>
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { id: "public_internal", label: "허브 공개" },
-                { id: "followers", label: "팔로워" },
-                { id: "friends", label: "친구" },
-                { id: "group", label: "그룹" },
-              ] as const).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setDefaultPostVisibility(item.id)}
-                  className={`rounded-2xl px-3 py-2.5 text-[12px] font-semibold transition ${
-                    defaultPostVisibility === item.id ? "bg-[color:var(--rnest-accent)] text-white" : "bg-ios-bg text-ios-muted"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[13px] font-semibold text-ios-text">
-                상태 메시지 <span className="font-normal text-ios-muted">(선택)</span>
-              </label>
-              <div className="flex items-center gap-2">
-                {autoStatus && (
-                  <button
-                    type="button"
-                    onClick={() => { setStatusMessage(autoStatus); setError(null); }}
-                    className="text-[11px] font-semibold text-[color:var(--rnest-accent)] underline underline-offset-2 transition active:opacity-60"
-                  >
-                    자동 제안
-                  </button>
-                )}
-                <span className="text-[12px] text-ios-muted">{Array.from(trimmedStatusMessage).length}/30</span>
-              </div>
-            </div>
-            <input
-              value={statusMessage}
-              onChange={(e) => {
-                // 줄바꿈·탭 → 공백 (붙여넣기 방지), 30자 제한 (grapheme 단위)
-                const cleaned = e.target.value.replace(/[\r\n\t]+/g, " ");
-                const chars = Array.from(cleaned);
-                if (chars.length <= 30) setStatusMessage(cleaned);
-                setError(null);
-              }}
-              placeholder="한 줄 메시지를 입력해 주세요"
-              maxLength={60}
-              className="w-full rounded-2xl border border-ios-sep bg-ios-bg px-4 py-3 text-[15px] text-ios-text outline-none transition focus:border-[color:var(--rnest-accent)] placeholder:text-ios-muted/60"
-            />
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-2 block text-[13px] font-semibold text-ios-text">아바타</label>
-            <div className="flex flex-wrap gap-3">
-              {AVATAR_OPTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => {
-                    setAvatar(emoji);
-                    setError(null);
-                  }}
-                  className={`flex h-12 w-12 items-center justify-center rounded-2xl text-[24px] transition active:scale-95 ${
-                    avatar === emoji
-                      ? "bg-[color:var(--rnest-accent-soft)] ring-2 ring-[color:var(--rnest-accent)]"
-                      : "bg-ios-bg"
-                  }`}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Button
-            variant="primary"
-            disabled={!trimmedNickname || saving || !dirty}
-            onClick={handleSave}
-            className="mt-4 w-full rounded-2xl py-3.5 text-[15px]"
-          >
-            {saving ? "저장 중…" : dirty ? "프로필 저장" : "프로필 저장됨"}
-          </Button>
         </div>
 
-        <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
+        <div className="mt-4 divide-y divide-ios-sep">
+          <SettingRow
+            label="표시 이름"
+            value={savedProfile.displayName || "표시 이름을 설정해 주세요"}
+            muted={!savedProfile.displayName}
+            onClick={() => {
+              setError(null);
+              setDisplayNameDraft(savedProfile.displayName);
+              setAvailability({ status: "idle", message: null, normalizedValue: "" });
+              setActiveView("displayName");
+            }}
+          />
+          <SettingRow
+            label="핸들"
+            value={savedProfile.handle ? `@${savedProfile.handle}` : "핸들을 설정해 주세요"}
+            muted={!savedProfile.handle}
+            onClick={() => {
+              setError(null);
+              setHandleDraft(savedProfile.handle ?? "");
+              setAvailability({ status: "idle", message: null, normalizedValue: "" });
+              setActiveView("handle");
+            }}
+          />
+          <SettingRow
+            label="소개"
+            value={savedProfile.bio || "소개를 추가해 보세요"}
+            muted={!savedProfile.bio}
+            onClick={() => {
+              setError(null);
+              setActiveView("bio");
+            }}
+          />
+        </div>
+
+        <div className="mt-5">
+          <label className="mb-2 block text-[13px] font-semibold text-ios-text">탐색 노출</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: "off", label: "비공개" },
+              { id: "internal", label: "허브 공개" },
+            ] as const).map((item) => (
+              <SegmentedOptionButton
+                key={item.id}
+                active={savedProfile.discoverability === item.id}
+                disabled={profileSaving || uploadingImage}
+                label={item.label}
+                onClick={() => {
+                  if (savedProfile.discoverability === item.id) return;
+                  void saveInstantProfilePatch(
+                    { discoverability: item.id },
+                    { discoverability: item.id }
+                  );
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <label className="mb-2 block text-[13px] font-semibold text-ios-text">기본 게시글 공개 범위</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: "public_internal", label: "허브 공개" },
+              { id: "followers", label: "팔로워" },
+              { id: "friends", label: "친구" },
+              { id: "group", label: "그룹" },
+            ] as const).map((item) => (
+              <SegmentedOptionButton
+                key={item.id}
+                active={savedProfile.defaultPostVisibility === item.id}
+                disabled={profileSaving || uploadingImage}
+                label={item.label}
+                onClick={() => {
+                  if (savedProfile.defaultPostVisibility === item.id) return;
+                  void saveInstantProfilePatch(
+                    { defaultPostVisibility: item.id },
+                    { defaultPostVisibility: item.id }
+                  );
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <label className="mb-2 block text-[13px] font-semibold text-ios-text">아바타</label>
+          <div className="flex flex-wrap gap-3">
+            {SOCIAL_AVATAR_OPTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                disabled={profileSaving || uploadingImage}
+                onClick={() => {
+                  if (savedProfile.avatarEmoji === emoji) return;
+                  void saveInstantProfilePatch({ avatarEmoji: emoji }, { avatarEmoji: emoji });
+                }}
+                className={`flex h-12 w-12 items-center justify-center rounded-2xl transition active:scale-95 disabled:opacity-50 ${
+                  savedProfile.avatarEmoji === emoji
+                    ? "bg-[color:var(--rnest-accent-soft)] ring-2 ring-[color:var(--rnest-accent)]"
+                    : "bg-ios-bg"
+                }`}
+              >
+                <SocialAvatarBadge
+                  emoji={emoji}
+                  className="h-9 w-9 bg-transparent"
+                  iconClassName="h-8 w-8"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="친구 / 그룹 프로필">
+        <div className="divide-y divide-ios-sep">
+          <SettingRow
+            label="닉네임"
+            value={savedProfile.nickname || "닉네임을 설정해 주세요"}
+            muted={!savedProfile.nickname}
+            onClick={() => {
+              setError(null);
+              setNicknameDraft(savedProfile.nickname);
+              setAvailability({ status: "idle", message: null, normalizedValue: "" });
+              setActiveView("nickname");
+            }}
+          />
+          <SettingRow
+            label="상태 메시지"
+            value={savedProfile.statusMessage || "(없음)"}
+            muted={!savedProfile.statusMessage}
+            onClick={() => {
+              setError(null);
+              setActiveView("statusMessage");
+            }}
+          />
+        </div>
+
+        <div className="mt-5 border-t border-ios-sep pt-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[14px] font-semibold text-ios-text">내 친구 코드</p>
@@ -614,9 +1148,9 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               type="button"
               onClick={handleRegenerate}
               disabled={regenerating || codeLoading}
-              className="shrink-0 text-[12px] font-semibold text-ios-muted underline underline-offset-2 transition active:opacity-60 disabled:opacity-40"
+              className="shrink-0 text-[12px] font-semibold text-ios-muted underline underline-offset-2 disabled:opacity-40"
             >
-              {regenerating ? "재생성 중…" : "재생성"}
+              재생성
             </button>
           </div>
 
@@ -654,30 +1188,22 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               onClick={handleShareLink}
               className="h-12 rounded-2xl text-[14px]"
             >
-              {sharing
-                ? "링크 준비 중…"
-                : shareState === "link-copied"
-                  ? "링크 복사됨"
-                  : shareState === "shared"
-                    ? "공유 완료"
-                    : "공유 링크 보내기"}
+              {shareState === "link-copied"
+                ? "링크 복사됨"
+                : shareState === "shared"
+                  ? "공유 완료"
+                  : "공유 링크 보내기"}
             </Button>
           </div>
-
-          <p className="mt-3 text-[11.5px] leading-5 text-ios-muted">
-            공유 링크는 만료 시간이 있고, 코드 재생성 시 이전 공유 링크는 자동으로 만료됩니다.
-          </p>
         </div>
 
-        {/* 프라이버시 설정 */}
-        <div className="rounded-3xl bg-white px-4 py-4 shadow-apple">
-          <p className="text-[14px] font-semibold text-ios-text mb-3">프라이버시</p>
+        <div className="mt-5 border-t border-ios-sep pt-4">
+          <p className="text-[14px] font-semibold text-ios-text">프라이버시</p>
 
-          {/* 근무 공개 범위 */}
-          <div className="mb-3">
-            <p className="text-[12.5px] font-medium text-ios-text mb-1.5">근무 공개 범위</p>
+          <div className="mt-3">
+            <p className="mb-1.5 text-[12.5px] font-medium text-ios-text">근무 공개 범위</p>
             <div className="flex rounded-2xl bg-ios-bg p-1 gap-1">
-              {(["full", "off_only", "hidden"] as ScheduleVisibility[]).map((v) => {
+              {(["full", "off_only", "hidden"] as ScheduleVisibility[]).map((value) => {
                 const labels: Record<ScheduleVisibility, string> = {
                   full: "전체 공개",
                   off_only: "오프만",
@@ -685,28 +1211,26 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
                 };
                 return (
                   <button
-                    key={v}
+                    key={value}
                     type="button"
                     disabled={prefsSaving}
                     onClick={() => {
-                      setScheduleVisibility(v);
-                      void handleSavePrefs({ scheduleVisibility: v });
+                      if (scheduleVisibility === value) return;
+                      setScheduleVisibility(value);
+                      void handleSavePrefs({ scheduleVisibility: value });
                     }}
                     className={`flex-1 rounded-xl py-2 text-[11.5px] font-semibold transition ${
-                      scheduleVisibility === v
-                        ? "bg-white text-ios-text shadow-sm"
-                        : "text-ios-muted"
+                      scheduleVisibility === value ? "bg-white text-ios-text shadow-sm" : "text-ios-muted"
                     }`}
                   >
-                    {labels[v]}
+                    {labels[value]}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* 상태 메시지 공개 */}
-          <div className="flex items-center justify-between py-2 border-t border-ios-sep">
+          <div className="flex items-center justify-between py-3 border-t border-ios-sep mt-3">
             <div>
               <p className="text-[12.5px] font-medium text-ios-text">상태 메시지 공개</p>
               <p className="text-[11px] text-ios-muted mt-0.5">친구에게 내 상태 메시지 표시</p>
@@ -723,8 +1247,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             />
           </div>
 
-          {/* 초대 링크 수신 */}
-          <div className="flex items-center justify-between py-2 border-t border-ios-sep">
+          <div className="flex items-center justify-between py-3 border-t border-ios-sep">
             <div>
               <p className="text-[12.5px] font-medium text-ios-text">친구 요청 수신</p>
               <p className="text-[11px] text-ios-muted mt-0.5">코드/링크로 연결 요청 받기</p>
@@ -741,8 +1264,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             />
           </div>
 
-          {/* 건강 데이터 그룹 공유 */}
-          <div className="flex items-center justify-between py-2 border-t border-ios-sep">
+          <div className="flex items-center justify-between py-3 border-t border-ios-sep">
             <div>
               <p className="text-[12.5px] font-medium text-ios-text">건강 데이터 그룹 공유</p>
               <p className="text-[11px] text-ios-muted mt-0.5">그룹 랭킹에 배터리·수면 점수 참여</p>
@@ -759,11 +1281,33 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             />
           </div>
         </div>
+      </SectionCard>
 
-        {error ? (
-          <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p>
-        ) : null}
-      </div>
+      {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p> : null}
+    </div>
+  );
+
+  const content =
+    activeView === "main"
+      ? renderMainView()
+      : activeView === "bio"
+        ? renderBioEditor()
+        : activeView === "statusMessage"
+          ? renderStatusEditor()
+          : renderIdentityEditor();
+
+  return (
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      title={activeView === "main" ? "내 소셜 프로필" : undefined}
+      subtitle={activeView === "main" ? "프로필을 설정하고, 내 코드를 확인하고, 공유 링크를 만들 수 있어요" : undefined}
+      variant="appstore"
+      maxHeightClassName="max-h-[84dvh]"
+      footer={sheetFooter}
+      footerClassName="bg-white"
+    >
+      {content}
     </BottomSheet>
   );
 }

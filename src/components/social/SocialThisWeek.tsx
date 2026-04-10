@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FriendSchedule } from "@/types/social";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { SocialCalendarIcon } from "@/components/social/SocialIcons";
 
 type Props = {
@@ -80,7 +81,7 @@ export function SocialThisWeek({ friends, mySchedule }: Props) {
         {/* 친구들 */}
         {visibleFriends.map((f) => (
           <div key={f.userId} className="flex flex-col items-center">
-            <span className="text-[18px] leading-none">{f.avatarEmoji || "🐧"}</span>
+            <SocialAvatarBadge emoji={f.avatarEmoji} className="h-7 w-7" iconClassName="h-5 w-5" />
             <span className="mt-0.5 max-w-[40px] truncate text-center text-[9px] leading-tight text-gray-500">
               {f.nickname || "친구"}
             </span>

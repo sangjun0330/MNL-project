@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { sanitizeInternalPath } from "@/lib/navigation";
 import type { FeedPage, SocialPost, SocialProfile, SocialProfileHeader } from "@/types/social";
+import { SocialAvatarBadge, SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import { SocialProfilePostViewer } from "@/components/social/SocialProfilePostViewer";
 
@@ -14,6 +15,13 @@ type Props = {
 
 type ProfileTab = "posts" | "saved" | "liked";
 type ProfileGridScope = "profile" | "saved" | "liked";
+type ProfileGridSelection = {
+  post: SocialPost;
+  posts: SocialPost[];
+  nextCursor: string | null;
+  handle?: string | null;
+  scope: ProfileGridScope;
+};
 
 function formatProfileCount(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -141,7 +149,11 @@ function ProfilePostTile({
             {caption || "사진 없이 작성한 게시글"}
           </p>
           <div className="flex items-center justify-between text-gray-400">
-            <span className="text-[18px] leading-none">{post.authorProfile.avatarEmoji || "📝"}</span>
+            <SocialAvatarBadge
+              emoji={post.authorProfile.avatarEmoji || "📝"}
+              className="h-7 w-7 bg-transparent"
+              iconClassName="h-5 w-5"
+            />
             {post.tags.length > 0 ? (
               <span className="text-[10px] font-semibold text-[color:var(--rnest-accent)]">
                 #{post.tags[0]}
@@ -165,7 +177,7 @@ function ProfilePostsGrid({
   handle?: string | null;
   emptyTitle: string;
   emptyCopy: string;
-  onPostSelect: (post: SocialPost) => void;
+  onPostSelect: (selection: ProfileGridSelection) => void;
 }) {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -267,7 +279,19 @@ function ProfilePostsGrid({
       <div className="border-y border-gray-200 bg-gray-200">
         <div className="grid grid-cols-3 gap-[1px]">
           {posts.map((post) => (
-            <ProfilePostTile key={post.id} post={post} onClick={() => onPostSelect(post)} />
+            <ProfilePostTile
+              key={post.id}
+              post={post}
+              onClick={() =>
+                onPostSelect({
+                  post,
+                  posts: [...posts],
+                  nextCursor,
+                  handle,
+                  scope,
+                })
+              }
+            />
           ))}
         </div>
       </div>
@@ -305,7 +329,12 @@ export function SocialProfilePage({ handle }: Props) {
   const [openProfileEditor, setOpenProfileEditor] = useState(false);
   const [actionLoading, setActionLoading] = useState<"follow" | "friend" | null>(null);
   const [showActionMenu, setShowActionMenu] = useState(false);
-  const [selectedPost, setSelectedPost] = useState<SocialPost | null>(null);
+  const [selectedPost, setSelectedPost] = useState<{
+    post: SocialPost;
+    initialPosts?: SocialPost[];
+    initialNextCursor?: string | null;
+    fallbackHandle?: string | null;
+  } | null>(null);
 
   const actionMenuRef = useRef<HTMLDivElement>(null);
 
@@ -346,6 +375,16 @@ export function SocialProfilePage({ handle }: Props) {
     setSelectedPost(null);
     setShowActionMenu(false);
   }, [handle]);
+
+  const handlePostSelect = useCallback((selection: ProfileGridSelection) => {
+    const isProfileScope = selection.scope === "profile";
+    setSelectedPost({
+      post: selection.post,
+      initialPosts: isProfileScope ? selection.posts : undefined,
+      initialNextCursor: isProfileScope ? selection.nextCursor : undefined,
+      fallbackHandle: isProfileScope ? selection.handle ?? selection.post.authorProfile.handle : null,
+    });
+  }, []);
 
   useEffect(() => {
     if (!showActionMenu) return;
@@ -655,7 +694,7 @@ export function SocialProfilePage({ handle }: Props) {
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          profile.avatarEmoji
+                          <SocialAvatarGlyph emoji={profile.avatarEmoji} className="h-14 w-14 sm:h-[68px] sm:w-[68px]" />
                         )}
                       </div>
                     </div>
@@ -749,7 +788,7 @@ export function SocialProfilePage({ handle }: Props) {
               handle={tabConfig.scope === "profile" ? activeProfileHandle : null}
               emptyTitle={tabConfig.emptyTitle}
               emptyCopy={tabConfig.emptyCopy}
-              onPostSelect={setSelectedPost}
+              onPostSelect={handlePostSelect}
             />
           </>
         )}
@@ -760,7 +799,6 @@ export function SocialProfilePage({ handle }: Props) {
           profile={ownProfile}
           onSaved={(nextProfile) => {
             setOwnProfile(nextProfile);
-            setOpenProfileEditor(false);
             if (nextProfile.handle && nextProfile.handle !== handle) {
               router.replace(`/social/profile/${nextProfile.handle}`);
               return;
@@ -772,8 +810,10 @@ export function SocialProfilePage({ handle }: Props) {
 
       <SocialProfilePostViewer
         open={Boolean(selectedPost)}
-        post={selectedPost}
-        fallbackHandle={visibleTab === "posts" ? activeProfileHandle : null}
+        post={selectedPost?.post ?? null}
+        initialPosts={selectedPost?.initialPosts}
+        initialNextCursor={selectedPost?.initialNextCursor}
+        fallbackHandle={selectedPost?.fallbackHandle ?? (visibleTab === "posts" ? activeProfileHandle : null)}
         currentUserId={user?.userId}
         onClose={() => setSelectedPost(null)}
       />

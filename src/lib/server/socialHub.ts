@@ -39,6 +39,16 @@ type AuthSeed = {
   handleCandidate: string;
 };
 
+export type SocialProfileAvailabilityField = "displayName" | "handle" | "nickname";
+export type SocialProfileAvailabilityReason = "available" | "same" | "taken" | "invalid" | "required";
+
+export type SocialProfileAvailabilityResult = {
+  field: SocialProfileAvailabilityField;
+  normalizedValue: string;
+  available: boolean;
+  reason: SocialProfileAvailabilityReason;
+};
+
 function fallbackDisplayNameFromUserId(userId: string) {
   const trimmed = String(userId ?? "").trim();
   return trimmed ? `RNest ${trimmed.slice(0, 6)}` : "RNest 사용자";
@@ -235,6 +245,36 @@ async function reserveAvailableHandle(
   return `${base}-${crypto.randomUUID().slice(0, 6)}`;
 }
 
+async function isProfileFieldTaken(
+  admin: any,
+  column: "display_name" | "handle" | "nickname",
+  value: string,
+  userId: string
+) {
+  const { data, error } = await (admin as any)
+    .from("rnest_social_profiles")
+    .select("user_id")
+    .eq(column, value)
+    .neq("user_id", userId)
+    .limit(1);
+
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+}
+
+async function assertProfileFieldAvailable(
+  admin: any,
+  column: "display_name" | "nickname",
+  value: string,
+  userId: string,
+  errorCode: "display_name_taken" | "nickname_taken"
+) {
+  if (await isProfileFieldTaken(admin, column, value, userId)) {
+    throw Object.assign(new Error(errorCode), { code: errorCode });
+  }
+  return value;
+}
+
 async function assertHandleAvailable(
   admin: any,
   requestedHandle: string,
@@ -245,17 +285,74 @@ async function assertHandleAvailable(
     throw Object.assign(new Error("invalid_handle"), { code: "invalid_handle" });
   }
 
-  const { data } = await (admin as any)
-    .from("rnest_social_profiles")
-    .select("user_id")
-    .eq("handle", normalizedHandle)
-    .maybeSingle();
-
-  if (data && String(data.user_id) !== userId) {
+  if (await isProfileFieldTaken(admin, "handle", normalizedHandle, userId)) {
     throw Object.assign(new Error("handle_taken"), { code: "handle_taken" });
   }
 
   return normalizedHandle;
+}
+
+export async function checkSocialProfileAvailability(
+  admin: any,
+  userId: string,
+  input: {
+    field?: unknown;
+    value?: unknown;
+  }
+): Promise<SocialProfileAvailabilityResult> {
+  const field =
+    input.field === "displayName" || input.field === "handle" || input.field === "nickname"
+      ? input.field
+      : null;
+
+  if (!field) {
+    throw Object.assign(new Error("invalid_field"), { code: "invalid_field" });
+  }
+
+  const existing = await loadProfileRow(admin, userId);
+  const current = existing ? normalizeSocialProfileRow(existing, userId) : await ensureSocialProfile(admin, userId);
+
+  if (field === "handle") {
+    const normalizedValue = cleanSocialHandle(input.value);
+    if (!normalizedValue) {
+      return { field, normalizedValue: "", available: false, reason: "invalid" };
+    }
+    if (normalizedValue === (current.handle ?? "")) {
+      return { field, normalizedValue, available: true, reason: "same" };
+    }
+    const taken = await isProfileFieldTaken(admin, "handle", normalizedValue, userId);
+    return {
+      field,
+      normalizedValue,
+      available: !taken,
+      reason: taken ? "taken" : "available",
+    };
+  }
+
+  const maxLength = field === "displayName" ? 24 : 12;
+  const normalizedValue = cleanSocialNickname(input.value, maxLength);
+  if (!normalizedValue) {
+    return { field, normalizedValue: "", available: false, reason: "required" };
+  }
+
+  const currentValue = field === "displayName" ? current.displayName : current.nickname;
+  if (normalizedValue === currentValue) {
+    return { field, normalizedValue, available: true, reason: "same" };
+  }
+
+  const taken = await isProfileFieldTaken(
+    admin,
+    field === "displayName" ? "display_name" : "nickname",
+    normalizedValue,
+    userId
+  );
+
+  return {
+    field,
+    normalizedValue,
+    available: !taken,
+    reason: taken ? "taken" : "available",
+  };
 }
 
 export async function ensureSocialProfile(admin: any, userId: string): Promise<SocialProfile> {
@@ -346,7 +443,16 @@ export async function saveSocialProfile(
     throw Object.assign(new Error("invalid_handle"), { code: "invalid_handle" });
   }
 
-  const handle = await assertHandleAvailable(admin, requestedHandle, userId);
+  if (nickname !== current.nickname) {
+    await assertProfileFieldAvailable(admin, "nickname", nickname, userId, "nickname_taken");
+  }
+
+  if (displayName !== current.displayName) {
+    await assertProfileFieldAvailable(admin, "display_name", displayName, userId, "display_name_taken");
+  }
+
+  const handle =
+    requestedHandle === current.handle ? requestedHandle : await assertHandleAvailable(admin, requestedHandle, userId);
   const bio = cleanSocialBio(input.bio ?? current.bio);
   const statusMessage = cleanStatusMessage(input.statusMessage ?? current.statusMessage);
   const discoverability = normalizeSocialDiscoverability(input.discoverability ?? current.discoverability);
@@ -374,6 +480,12 @@ export async function saveSocialProfile(
 
   if (error) {
     const message = String(error.message ?? error).toLowerCase();
+    if (message.includes("display_name") && (message.includes("duplicate") || message.includes("unique"))) {
+      throw Object.assign(new Error("display_name_taken"), { code: "display_name_taken" });
+    }
+    if (message.includes("nickname") && (message.includes("duplicate") || message.includes("unique"))) {
+      throw Object.assign(new Error("nickname_taken"), { code: "nickname_taken" });
+    }
     if (message.includes("duplicate") || message.includes("unique")) {
       throw Object.assign(new Error("handle_taken"), { code: "handle_taken" });
     }

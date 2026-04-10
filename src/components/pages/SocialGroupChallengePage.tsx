@@ -22,6 +22,7 @@ import {
   SocialStressIcon,
   SocialTrophyIcon,
 } from "@/components/social/SocialIcons";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import type {
   ChallengeEntry,
   ChallengeLeaderboardEntry,
@@ -387,9 +388,11 @@ function PodiumCard({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <RankBadge rank={entry.rank} large={prominent} />
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/75 text-[24px] shadow-sm">
-              {entry.avatarEmoji || "🐧"}
-            </div>
+            <SocialAvatarBadge
+              emoji={entry.avatarEmoji}
+              className="h-11 w-11 rounded-2xl bg-white/75 shadow-sm"
+              iconClassName="h-8 w-8"
+            />
           </div>
           {entry.rank === 1 ? (
             <span className="rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-bold tracking-[0.08em] text-[#A36A00]">
@@ -453,9 +456,11 @@ function LeaderboardRow({
     >
       <div className="flex items-center gap-3">
         <RankBadge rank={entry.rank} />
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-[22px] shadow-sm">
-          {entry.avatarEmoji || "🐧"}
-        </div>
+        <SocialAvatarBadge
+          emoji={entry.avatarEmoji}
+          className="h-10 w-10 shrink-0 rounded-2xl bg-white shadow-sm"
+          iconClassName="h-7 w-7"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-[14px] font-semibold text-ios-text">

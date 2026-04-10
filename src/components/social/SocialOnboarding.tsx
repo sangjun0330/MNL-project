@@ -3,8 +3,11 @@
 import { useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
-
-const AVATAR_OPTIONS = ["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"];
+import {
+  DEFAULT_SOCIAL_AVATAR,
+  SOCIAL_AVATAR_OPTIONS,
+  SocialAvatarBadge,
+} from "@/components/social/SocialAvatar";
 
 type Props = {
   open: boolean;
@@ -14,7 +17,7 @@ type Props = {
 
 export function SocialOnboarding({ open, onComplete, onSkip }: Props) {
   const [nickname, setNickname] = useState("");
-  const [avatar, setAvatar] = useState("🐧");
+  const [avatar, setAvatar] = useState(DEFAULT_SOCIAL_AVATAR);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,18 +82,22 @@ export function SocialOnboarding({ open, onComplete, onSkip }: Props) {
         <div>
           <label className="mb-2 block text-[13px] font-semibold text-ios-text">아바타</label>
           <div className="flex flex-wrap gap-3">
-            {AVATAR_OPTIONS.map((emoji) => (
+            {SOCIAL_AVATAR_OPTIONS.map((emoji) => (
               <button
                 key={emoji}
                 type="button"
                 onClick={() => setAvatar(emoji)}
-                className={`flex h-12 w-12 items-center justify-center rounded-2xl text-[24px] transition active:scale-95 ${
+                className={`flex h-12 w-12 items-center justify-center rounded-2xl transition active:scale-95 ${
                   avatar === emoji
                     ? "bg-[color:var(--rnest-accent-soft)] ring-2 ring-[color:var(--rnest-accent)]"
                     : "bg-ios-bg"
                 }`}
               >
-                {emoji}
+                <SocialAvatarBadge
+                  emoji={emoji}
+                  className="h-9 w-9 bg-transparent"
+                  iconClassName="h-8 w-8"
+                />
               </button>
             ))}
           </div>

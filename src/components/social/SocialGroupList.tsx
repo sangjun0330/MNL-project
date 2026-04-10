@@ -1,6 +1,7 @@
 "use client";
 
 import type { SocialGroupSummary } from "@/types/social";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 import { SocialGroupRoleBadge } from "@/components/social/SocialGroupRoleBadge";
 
@@ -81,17 +82,17 @@ export function SocialGroupList({
                   ) : (
                     <p className="mt-0.5 text-[11.5px] text-gray-500">멤버 {group.memberCount}명</p>
                   )}
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <div className="flex -space-x-1.5">
-                      {group.memberPreview.map((member) => (
-                        <span
-                          key={member.userId}
-                          className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-gray-100 text-[13px]"
-                        >
-                          {member.avatarEmoji || "🐧"}
-                        </span>
-                      ))}
-                    </div>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="flex -space-x-1.5">
+                        {group.memberPreview.map((member) => (
+                          <SocialAvatarBadge
+                            key={member.userId}
+                            emoji={member.avatarEmoji}
+                            className="h-6 w-6 border border-white bg-gray-100"
+                            iconClassName="h-4 w-4"
+                          />
+                        ))}
+                      </div>
                     <span className="text-[10.5px] text-gray-500">
                       멤버 {group.memberCount}/{group.maxMembers}명
                     </span>

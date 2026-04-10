@@ -1,6 +1,7 @@
 "use client";
 
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { cn } from "@/lib/cn";
 import type { SocialMemberPreview } from "@/types/social";
 
@@ -44,7 +45,7 @@ export function SocialAvatarStackButton({
           style={{ zIndex: visibleMembers.length - index }}
           title={member.nickname || "익명"}
         >
-          {member.avatarEmoji || "🐧"}
+          <SocialAvatarBadge emoji={member.avatarEmoji} className="h-full w-full bg-transparent" iconClassName="h-[70%] w-[70%]" />
         </span>
       ))}
       {extraCount > 0 ? (
@@ -110,7 +111,7 @@ export function SocialMemberPreviewSheet({
         {members.map((member) => (
           <div key={member.userId} className="rounded-2xl bg-ios-bg px-4 py-3">
             <div className="flex items-center gap-3">
-              <span className="text-[24px]">{member.avatarEmoji || "🐧"}</span>
+              <SocialAvatarBadge emoji={member.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
               <div className="min-w-0">
                 <p className="truncate text-[13.5px] font-semibold text-ios-text">
                   {member.nickname || "익명"}

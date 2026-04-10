@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { MessageCircle } from "lucide-react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import type { SocialPost, SocialPostComment } from "@/types/social";
 
 function formatRelativeTime(iso: string): string {
@@ -248,7 +250,7 @@ export function SocialPostCommentSheet({
             <div className="flex items-center gap-2 mb-1">
               <span className="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0"
                 style={{ backgroundColor: "var(--rnest-lavender-soft)" }}>
-                {post.authorProfile.avatarEmoji}
+                <SocialAvatarGlyph emoji={post.authorProfile.avatarEmoji} className="h-5 w-5" />
               </span>
               <span className="text-[12px] font-semibold text-[var(--rnest-text)]">
                 {post.authorProfile.nickname}
@@ -267,7 +269,12 @@ export function SocialPostCommentSheet({
           </div>
         ) : comments.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="text-[13px] text-[var(--rnest-muted)]">첫 댓글을 남겨보세요 💬</p>
+            <div className="flex flex-col items-center gap-2 text-[var(--rnest-muted)]">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--rnest-lavender-soft)]">
+                <MessageCircle className="h-4 w-4" strokeWidth={2} />
+              </span>
+              <p className="text-[13px]">첫 댓글을 남겨보세요</p>
+            </div>
           </div>
         ) : (
           <div className="py-2 space-y-1">
@@ -283,7 +290,7 @@ export function SocialPostCommentSheet({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={comment.authorProfile.profileImageUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      comment.authorProfile.avatarEmoji
+                      <SocialAvatarGlyph emoji={comment.authorProfile.avatarEmoji} className="h-5 w-5" />
                     )}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -331,7 +338,7 @@ export function SocialPostCommentSheet({
                                   // eslint-disable-next-line @next/next/no-img-element
                                   <img src={reply.authorProfile.profileImageUrl} alt="" className="w-full h-full object-cover" />
                                 ) : (
-                                  reply.authorProfile.avatarEmoji
+                                  <SocialAvatarGlyph emoji={reply.authorProfile.avatarEmoji} className="h-4 w-4" />
                                 )}
                               </span>
                               <div className="flex-1 min-w-0">

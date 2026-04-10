@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import type { SocialGroupInvitePreview, SocialGroupSummary } from "@/types/social";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { SocialGroupBadge } from "@/components/social/SocialGroupBadge";
 
 type Props = {
@@ -85,12 +86,12 @@ export function SocialGroupJoinSheet({ open, preview, onClose, onJoined }: Props
 
             <div className="mt-4 flex -space-x-1.5">
               {group.memberPreview.map((member) => (
-                <span
+                <SocialAvatarBadge
                   key={member.userId}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white bg-ios-bg text-[15px]"
-                >
-                  {member.avatarEmoji || "🐧"}
-                </span>
+                  emoji={member.avatarEmoji}
+                  className="h-8 w-8 border border-white bg-ios-bg"
+                  iconClassName="h-5 w-5"
+                />
               ))}
             </div>
 

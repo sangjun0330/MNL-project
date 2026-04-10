@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import type { SocialConnection } from "@/types/social";
 
 type Props = {
@@ -41,7 +42,7 @@ export function SocialPendingCard({ incoming, sent, onRefresh }: Props) {
           <div className="divide-y divide-gray-100">
             {incoming.map((c) => (
               <div key={c.id} className="flex items-center gap-3 px-4 py-3">
-                <span className="text-[24px]">{c.avatarEmoji}</span>
+                <SocialAvatarBadge emoji={c.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[13.5px] font-semibold text-gray-900 truncate">
                     {c.nickname || "익명"}
@@ -81,7 +82,7 @@ export function SocialPendingCard({ incoming, sent, onRefresh }: Props) {
           <div className="divide-y divide-gray-100">
             {sent.map((c) => (
               <div key={c.id} className="flex items-center gap-3 px-4 py-3">
-                <span className="text-[24px]">{c.avatarEmoji}</span>
+                <SocialAvatarBadge emoji={c.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[13.5px] font-semibold text-gray-900 truncate">
                     {c.nickname || "익명"}

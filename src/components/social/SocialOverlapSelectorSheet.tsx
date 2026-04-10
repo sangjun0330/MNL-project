@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 
 export type SocialOverlapSelectorItem = {
   id: string;
@@ -128,9 +129,11 @@ export function SocialOverlapSelectorSheet({
                     selected ? "ring-2 ring-[color:var(--rnest-accent)]/30" : ""
                   }`}
                 >
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-ios-bg text-[24px]">
-                    {item.emoji || "👤"}
-                  </span>
+                  <SocialAvatarBadge
+                    emoji={item.emoji || "👤"}
+                    className="h-12 w-12 shrink-0 rounded-2xl bg-ios-bg"
+                    iconClassName="h-8 w-8"
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[14px] font-semibold text-ios-text">{item.label}</p>
                     <p className="mt-1 truncate text-[11.5px] text-ios-muted">

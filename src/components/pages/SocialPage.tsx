@@ -30,6 +30,7 @@ import {
   SocialOverlapSelectorSheet,
   type SocialOverlapSelectorItem,
 } from "@/components/social/SocialOverlapSelectorSheet";
+import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialBellIcon } from "@/components/social/SocialIcons";
 import {
   useSocialConnectionsRealtimeRefresh,
@@ -816,14 +817,12 @@ export function SocialPage() {
 
         const relationState = res.data?.relationState as string | undefined;
         const inviterNickname = String(res.data?.inviterNickname ?? "").trim() || "친구";
-        const inviterAvatarEmoji = String(res.data?.inviterAvatarEmoji ?? "🐧").trim() || "🐧";
-
         if (relationState === "accepted") {
-          setNotice({ tone: "info", text: `${inviterAvatarEmoji} ${inviterNickname}님과 이미 연결되어 있어요.` });
+          setNotice({ tone: "info", text: `${inviterNickname}님과 이미 연결되어 있어요.` });
           return;
         }
         if (relationState === "pending") {
-          setNotice({ tone: "info", text: `${inviterAvatarEmoji} ${inviterNickname}님과 연결 요청이 이미 진행 중이에요.` });
+          setNotice({ tone: "info", text: `${inviterNickname}님과 연결 요청이 이미 진행 중이에요.` });
           return;
         }
         if (relationState === "blocked") {
@@ -832,7 +831,7 @@ export function SocialPage() {
         }
 
         setConnectPrefillCode(String(res.data?.code ?? ""));
-        setConnectPrefillMessage(`${inviterAvatarEmoji} ${inviterNickname}님의 코드가 자동 입력되었어요.`);
+        setConnectPrefillMessage(`${inviterNickname}님의 코드가 자동 입력되었어요.`);
         setOpenConnect(true);
         setNotice({ tone: "success", text: `${inviterNickname}님의 초대 링크를 확인했어요.` });
       })
@@ -1021,7 +1020,7 @@ export function SocialPage() {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <span>{profile?.avatarEmoji ?? "👤"}</span>
+                  <SocialAvatarGlyph emoji={profile?.avatarEmoji ?? "👤"} className="h-5 w-5" />
                 )}
               </span>
             </button>
@@ -1225,7 +1224,6 @@ export function SocialPage() {
             setSocialClientCache(profileCacheKey, nextProfile);
           }
           void fetchGroups();
-          setNotice({ tone: "success", text: "소셜 프로필이 저장되었어요." });
         }}
       />
 

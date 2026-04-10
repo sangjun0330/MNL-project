@@ -8,6 +8,7 @@ import type {
   SocialPost,
   SocialPostVisibility,
 } from "@/types/social";
+import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
 import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentSheet";
 import { SocialPostComposer } from "@/components/social/SocialPostComposer";
@@ -34,7 +35,7 @@ function ExploreProfileCard({ profile }: { profile: SocialFollowSummary }) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={profile.profileImageUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            profile.avatarEmoji
+            <SocialAvatarGlyph emoji={profile.avatarEmoji} className="h-6 w-6" />
           )}
         </div>
         <div className="min-w-0 flex-1">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import type { FeedPage, SocialPost } from "@/types/social";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
@@ -9,10 +9,14 @@ import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentShe
 type Props = {
   open: boolean;
   post: SocialPost | null;
+  initialPosts?: SocialPost[];
+  initialNextCursor?: string | null;
   fallbackHandle?: string | null;
   currentUserId?: string;
   onClose: () => void;
 };
+
+const useSafeLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function mergeUniquePosts(base: SocialPost[], incoming: SocialPost[]) {
   if (incoming.length === 0) return base;
@@ -53,6 +57,8 @@ async function fetchProfileFeedPage(handle: string, cursor?: string | null) {
 export function SocialProfilePostViewer({
   open,
   post,
+  initialPosts,
+  initialNextCursor,
   fallbackHandle = null,
   currentUserId,
   onClose,
@@ -119,12 +125,26 @@ export function SocialProfilePostViewer({
     if (!open || !post) return;
 
     let cancelled = false;
+    const seededPosts = initialPosts?.length ? mergeUniquePosts([], initialPosts) : [];
+    const canUseSeed = seededPosts.some((item) => item.id === post.id);
+
     didScrollToSelectedRef.current = false;
     lastRequestedPostIdRef.current = post.id;
     setCommentPost(null);
+    setError(null);
+
+    if (canUseSeed) {
+      setPosts(mergeUniquePosts(seededPosts, [post]));
+      setNextCursor(initialNextCursor ?? null);
+      setLoading(false);
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     setPosts([post]);
     setNextCursor(null);
-    setError(null);
 
     const loadInitialPosts = async () => {
       if (!viewerHandle) {
@@ -171,19 +191,21 @@ export function SocialProfilePostViewer({
     return () => {
       cancelled = true;
     };
-  }, [open, post, viewerHandle]);
+  }, [initialNextCursor, initialPosts, open, post, viewerHandle]);
 
-  useEffect(() => {
+  useSafeLayoutEffect(() => {
     if (!open || !post || loading || didScrollToSelectedRef.current) return;
-    if (!selectedItemRef.current) return;
+    if (!scrollContainerRef.current || !selectedItemRef.current) return;
     if (lastRequestedPostIdRef.current !== post.id) return;
 
-    const timeoutId = window.setTimeout(() => {
-      selectedItemRef.current?.scrollIntoView({ block: "start" });
-      didScrollToSelectedRef.current = true;
-    }, 0);
+    const scrollContainer = scrollContainerRef.current;
+    const selectedItem = selectedItemRef.current;
+    const containerTop = scrollContainer.getBoundingClientRect().top;
+    const itemTop = selectedItem.getBoundingClientRect().top;
+    const offset = 16;
 
-    return () => window.clearTimeout(timeoutId);
+    scrollContainer.scrollTop += itemTop - containerTop - offset;
+    didScrollToSelectedRef.current = true;
   }, [loading, open, post, posts]);
 
   const handleScroll = useCallback(

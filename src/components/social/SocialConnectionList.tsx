@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { PencilLine, Pin } from "lucide-react";
 import type { SocialConnection, FriendSchedule, FriendMeta } from "@/types/social";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { SocialFriendMiniCalendar } from "./SocialFriendMiniCalendar";
 
 type Props = {
@@ -122,9 +124,11 @@ export function SocialConnectionList({
                   onClick={() => setExpandedId(isExpanded ? null : c.userId)}
                 >
                   <div className="relative shrink-0">
-                    <span className="text-[26px]">{c.avatarEmoji || "🐧"}</span>
+                    <SocialAvatarBadge emoji={c.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                     {meta.pinned && (
-                      <span className="absolute -top-1 -right-1 text-[10px]">📌</span>
+                      <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-amber-500 shadow-sm">
+                        <Pin className="h-2.5 w-2.5 fill-current" strokeWidth={2.2} />
+                      </span>
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -186,7 +190,8 @@ export function SocialConnectionList({
                             : "bg-gray-100 text-gray-500"
                         }`}
                       >
-                        📌 {meta.pinned ? "핀 해제" : "핀"}
+                        <Pin className="h-3 w-3" strokeWidth={2.1} />
+                        {meta.pinned ? "핀 해제" : "핀"}
                       </button>
 
                       {/* 별칭 편집 */}
@@ -228,7 +233,8 @@ export function SocialConnectionList({
                           }}
                           className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-500 transition active:opacity-70"
                         >
-                          ✏️ {meta.alias ? "별칭 수정" : "별칭"}
+                          <PencilLine className="h-3 w-3" strokeWidth={2.1} />
+                          {meta.alias ? "별칭 수정" : "별칭"}
                         </button>
                       )}
                     </div>

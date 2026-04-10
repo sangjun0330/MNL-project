@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Eye, Globe2, House, Tags, Users } from "lucide-react";
 import { BOTTOM_SHEET_DURATION_MS, BottomSheet } from "@/components/ui/BottomSheet";
 import type { SocialGroupSummary, SocialPost, SocialPostVisibility } from "@/types/social";
 
@@ -17,7 +19,7 @@ type ComposerStep = "media" | "details";
 type VisibilityOption = {
   value: SocialPostVisibility;
   label: string;
-  icon: string;
+  icon: LucideIcon;
 };
 
 type SelectedImage = {
@@ -31,10 +33,10 @@ const MAX_SOCIAL_POST_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const VISIBILITY_OPTIONS: VisibilityOption[] = [
-  { value: "public_internal", label: "허브 공개", icon: "🌍" },
-  { value: "followers", label: "팔로워", icon: "👀" },
-  { value: "friends", label: "친구", icon: "👥" },
-  { value: "group", label: "그룹", icon: "🏠" },
+  { value: "public_internal", label: "허브 공개", icon: Globe2 },
+  { value: "followers", label: "팔로워", icon: Eye },
+  { value: "friends", label: "친구", icon: Users },
+  { value: "group", label: "그룹", icon: House },
 ];
 
 function normalizeTag(value: string) {
@@ -181,6 +183,7 @@ export function SocialPostComposer({
 
   const selectedVisibility =
     VISIBILITY_OPTIONS.find((option) => option.value === visibility) ?? VISIBILITY_OPTIONS[2];
+  const SelectedVisibilityIcon = selectedVisibility.icon;
   const charCount = Array.from(body).length;
   const outgoingTags = useMemo(() => mergeTags(selectedTags, tagInput), [selectedTags, tagInput]);
   const canSubmit =
@@ -773,7 +776,7 @@ export function SocialPostComposer({
               <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
                 <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">공개 범위</p>
                 <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
-                  <span className="text-[18px]">{selectedVisibility.icon}</span>
+                  <SelectedVisibilityIcon className="h-[18px] w-[18px] text-[color:var(--rnest-accent)]" strokeWidth={1.9} />
                   <select
                     value={visibility}
                     disabled={posting}
@@ -804,7 +807,7 @@ export function SocialPostComposer({
                     그룹 선택
                   </p>
                   <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
-                    <span className="text-[18px]">🏷️</span>
+                    <Tags className="h-[18px] w-[18px] text-[color:var(--rnest-accent)]" strokeWidth={1.9} />
                     <select
                       value={selectedGroupId ?? ""}
                       disabled={posting}

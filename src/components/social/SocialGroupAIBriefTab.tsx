@@ -18,6 +18,7 @@ import {
   SocialAvatarStackButton,
   SocialMemberPreviewSheet,
 } from "@/components/social/SocialMemberPreviewSheet";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { useSocialGroupAIBriefRealtimeRefresh } from "@/components/social/useSocialGroupAIBriefRealtimeRefresh";
 import type {
   SocialGroupAIBriefAction,
@@ -372,7 +373,7 @@ function PersonalBandCard({
                 className="w-[252px] shrink-0 snap-start rounded-[26px] bg-white px-4 py-4 shadow-[0_16px_36px_rgba(123,111,208,0.10)]"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-[22px]">{item.avatarEmoji || "🐧"}</span>
+                  <SocialAvatarBadge emoji={item.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="truncate text-[13px] font-semibold text-ios-text">{item.nickname || "익명"}</p>

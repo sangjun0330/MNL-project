@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FileText } from "lucide-react";
 import type {
   FeedPage,
   SocialGroupSummary,
@@ -200,10 +201,10 @@ export function SocialFeedTab({
         ) : hasLoaded && posts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
             <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 text-3xl"
+              className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
               style={{ backgroundColor: "var(--rnest-lavender-soft)" }}
             >
-              📝
+              <FileText className="h-7 w-7 text-[color:var(--rnest-accent)]" strokeWidth={1.9} />
             </div>
             <h3 className="text-[15px] font-semibold text-[var(--rnest-text)] mb-1.5">
               {emptyCopy.title}

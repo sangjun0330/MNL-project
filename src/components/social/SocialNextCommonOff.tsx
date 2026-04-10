@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SocialConnection } from "@/types/social";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { SocialCalendarIcon } from "@/components/social/SocialIcons";
 
 type Props = {
@@ -65,7 +66,7 @@ export function SocialNextCommonOff({ connections, pairCommonOffByUserId }: Prop
         {visibleItems.map(({ connection, date, daysUntil }) => (
           <div key={connection.userId} className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-[18px] leading-none">{connection.avatarEmoji || "🐧"}</span>
+              <SocialAvatarBadge emoji={connection.avatarEmoji} className="h-7 w-7" iconClassName="h-5 w-5" />
               <span className="max-w-[120px] truncate text-[13px] font-medium text-gray-900">
                 {connection.nickname || "친구"}
               </span>

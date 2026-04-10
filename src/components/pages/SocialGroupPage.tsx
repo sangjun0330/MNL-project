@@ -23,6 +23,7 @@ import {
   SocialAvatarStackButton,
   SocialMemberPreviewSheet,
 } from "@/components/social/SocialMemberPreviewSheet";
+import { SocialAvatarBadge } from "@/components/social/SocialAvatar";
 import { SocialSelectableCommonOffCard } from "@/components/social/SocialSelectableCommonOffCard";
 import {
   SocialOverlapSelectorSheet,
@@ -1325,7 +1326,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                         key={request.id}
                         className="flex items-center gap-3 rounded-2xl bg-ios-bg px-3 py-2.5"
                       >
-                        <span className="text-[22px]">{request.avatarEmoji || "🐧"}</span>
+                        <SocialAvatarBadge emoji={request.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[13px] font-semibold text-ios-text">
                             {request.nickname || "익명"}
@@ -1522,7 +1523,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                       {board.joinRequests.map((request) => (
                         <div key={request.id} className="rounded-2xl bg-ios-bg px-4 py-3">
                           <div className="flex items-center gap-3">
-                            <span className="text-[24px]">{request.avatarEmoji || "🐧"}</span>
+                            <SocialAvatarBadge emoji={request.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-[13px] font-semibold text-ios-text">
                                 {request.nickname || "익명"}
@@ -1598,7 +1599,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 <div className="space-y-3">
                   {board.activities.map((activity) => (
                     <div key={activity.id} className="flex gap-3 rounded-2xl bg-ios-bg px-4 py-3">
-                      <span className="text-[22px]">{activity.actorAvatarEmoji || "🐧"}</span>
+                      <SocialAvatarBadge emoji={activity.actorAvatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                       <div className="min-w-0 flex-1">
                         <p className="text-[13px] leading-6 text-ios-text">
                           {buildActivityText(activity)}
@@ -1672,7 +1673,7 @@ export function SocialGroupPage({ groupId: rawGroupId }: Props) {
                 return (
                   <div key={member.userId} className="rounded-2xl bg-ios-bg px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <span className="text-[24px]">{member.avatarEmoji || "🐧"}</span>
+                      <SocialAvatarBadge emoji={member.avatarEmoji} className="h-10 w-10" iconClassName="h-7 w-7" />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <p className="truncate text-[13.5px] font-semibold text-ios-text">

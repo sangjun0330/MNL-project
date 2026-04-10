@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialBellIcon, SocialGroupIcon } from "@/components/social/SocialIcons";
 import type { SocialEvent } from "@/types/social";
 
@@ -234,7 +235,7 @@ export function SocialEventCenter({ open, onClose, onUnreadCountChange, refreshT
                   {event.type.startsWith("group_") ? (
                     <SocialGroupIcon className="h-5 w-5 text-[color:var(--rnest-accent)]" />
                   ) : (
-                    avatarEmoji
+                    <SocialAvatarGlyph emoji={avatarEmoji} className="h-6 w-6" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">

@@ -62,6 +62,12 @@ export async function POST(req: Request) {
     if (err?.code === "display_name_required") {
       return jsonNoStore({ ok: false, error: "display_name_required" }, { status: 400 });
     }
+    if (err?.code === "display_name_taken") {
+      return jsonNoStore({ ok: false, error: "display_name_taken" }, { status: 409 });
+    }
+    if (err?.code === "nickname_taken") {
+      return jsonNoStore({ ok: false, error: "nickname_taken" }, { status: 409 });
+    }
     if (err?.code === "invalid_handle") {
       return jsonNoStore({ ok: false, error: "invalid_handle" }, { status: 400 });
     }

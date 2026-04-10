@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SocialPost } from "@/types/social";
+import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { cn } from "@/lib/cn";
 
 function formatRelativeTime(iso: string): string {
@@ -57,6 +58,8 @@ export function SocialPostCard({
   const [showHeartAnim, setShowHeartAnim] = useState(false);
   const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<number>(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchDeltaRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     setLiked(post.isLiked);
@@ -69,6 +72,9 @@ export function SocialPostCard({
     setExpanded(false);
     setShowMenu(false);
     setActiveImageIndex(0);
+    lastTapRef.current = 0;
+    touchStartRef.current = null;
+    touchDeltaRef.current = { x: 0, y: 0 };
   }, [post.id]);
 
   // 컴포넌트 언마운트 시 타이머 정리
@@ -84,7 +90,6 @@ export function SocialPostCard({
     () => (post.imageUrls.length > 0 ? post.imageUrls : post.imageUrl ? [post.imageUrl] : []),
     [post.imageUrl, post.imageUrls]
   );
-  const activeMediaUrl = mediaUrls[activeImageIndex] ?? mediaUrls[0] ?? null;
   const caption = post.body.trim();
   const isLongCaption = caption.split("\n").length > 2 || caption.length > 140;
   const profileLabel = post.authorProfile.displayName || post.authorProfile.nickname || "익명";
@@ -133,23 +138,130 @@ export function SocialPostCard({
 
   const handleLike = triggerLike;
 
-  // 이미지 더블탭 좋아요
-  const handleImageTap = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+  const triggerHeartAnimation = useCallback(() => {
+    if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
+    setShowHeartAnim(true);
+    heartTimerRef.current = setTimeout(() => setShowHeartAnim(false), 900);
+  }, []);
+
+  const handleImageDoubleLike = useCallback(
+    (event?: { preventDefault?: () => void }) => {
+      event?.preventDefault?.();
+      if (!liked) {
+        void triggerLike();
+      }
+      triggerHeartAnimation();
+    },
+    [liked, triggerHeartAnimation, triggerLike]
+  );
+
+  const goToImage = useCallback(
+    (index: number) => {
+      if (mediaUrls.length === 0) return;
+      const nextIndex = ((index % mediaUrls.length) + mediaUrls.length) % mediaUrls.length;
+      setActiveImageIndex(nextIndex);
+    },
+    [mediaUrls.length]
+  );
+
+  const showPreviousImage = useCallback(() => {
+    if (mediaUrls.length <= 1) return;
+    setActiveImageIndex((prev) => (prev === 0 ? mediaUrls.length - 1 : prev - 1));
+  }, [mediaUrls.length]);
+
+  const showNextImage = useCallback(() => {
+    if (mediaUrls.length <= 1) return;
+    setActiveImageIndex((prev) => (prev + 1) % mediaUrls.length);
+  }, [mediaUrls.length]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || mediaUrls.length <= 1) return;
+
+    const indexes = new Set([
+      activeImageIndex,
+      (activeImageIndex + 1) % mediaUrls.length,
+      (activeImageIndex - 1 + mediaUrls.length) % mediaUrls.length,
+    ]);
+
+    indexes.forEach((index) => {
+      const imageUrl = mediaUrls[index];
+      if (!imageUrl) return;
+
+      const image = new Image();
+      image.src = imageUrl;
+    });
+  }, [activeImageIndex, mediaUrls]);
+
+  const handleImageTouchTap = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
     const now = Date.now();
     const delta = now - lastTapRef.current;
     lastTapRef.current = now;
 
     if (delta < 300 && delta > 0) {
-      // 더블탭
-      e.preventDefault();
-      if (!liked) {
-        void triggerLike();
-      }
-      if (heartTimerRef.current) clearTimeout(heartTimerRef.current);
-      setShowHeartAnim(true);
-      heartTimerRef.current = setTimeout(() => setShowHeartAnim(false), 900);
+      handleImageDoubleLike(event);
     }
-  }, [liked, triggerLike]);
+  }, [handleImageDoubleLike]);
+
+  const handleImageDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      handleImageDoubleLike(event);
+    },
+    [handleImageDoubleLike]
+  );
+
+  const handleMediaTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (mediaUrls.length <= 1) return;
+
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    touchDeltaRef.current = { x: 0, y: 0 };
+  }, [mediaUrls.length]);
+
+  const handleMediaTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    const touch = event.touches[0];
+
+    if (!start || !touch) return;
+
+    const nextDelta = {
+      x: touch.clientX - start.x,
+      y: touch.clientY - start.y,
+    };
+    touchDeltaRef.current = nextDelta;
+
+    if (Math.abs(nextDelta.x) > 12 && Math.abs(nextDelta.x) > Math.abs(nextDelta.y)) {
+      event.preventDefault();
+    }
+  }, []);
+
+  const resetTouchGesture = useCallback(() => {
+    touchStartRef.current = null;
+    touchDeltaRef.current = { x: 0, y: 0 };
+  }, []);
+
+  const handleMediaTouchEnd = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      const delta = touchDeltaRef.current;
+      const isHorizontalSwipe =
+        mediaUrls.length > 1 &&
+        Math.abs(delta.x) > 44 &&
+        Math.abs(delta.x) > Math.abs(delta.y) * 1.2;
+
+      resetTouchGesture();
+
+      if (isHorizontalSwipe) {
+        event.preventDefault();
+        if (delta.x < 0) showNextImage();
+        else showPreviousImage();
+        return;
+      }
+
+      handleImageTouchTap(event);
+    },
+    [handleImageTouchTap, mediaUrls.length, resetTouchGesture, showNextImage, showPreviousImage]
+  );
 
   const handleSave = useCallback(async () => {
     if (saveLoading) return;
@@ -229,7 +341,7 @@ export function SocialPostCard({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={post.authorProfile.profileImageUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              post.authorProfile.avatarEmoji
+              <SocialAvatarGlyph emoji={post.authorProfile.avatarEmoji} className="h-5 w-5" />
             )}
           </div>
         </button>
@@ -304,23 +416,39 @@ export function SocialPostCard({
       </div>
 
       {/* ── 이미지 영역 (full-bleed) ──────────────────────── */}
-      {activeMediaUrl ? (
-        <div className="relative bg-black w-full">
+      {mediaUrls.length > 0 ? (
+        <div className="relative w-full bg-black">
           {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
           <div
-            className="block w-full relative select-none"
-            onClick={handleImageTap}
-            onTouchEnd={handleImageTap}
+            className="relative block w-full select-none"
+            style={{ touchAction: mediaUrls.length > 1 ? "pan-y" : "auto" }}
+            onDoubleClick={handleImageDoubleClick}
+            onTouchStart={handleMediaTouchStart}
+            onTouchMove={handleMediaTouchMove}
+            onTouchEnd={handleMediaTouchEnd}
+            onTouchCancel={resetTouchGesture}
           >
             <div className="relative aspect-[4/5] w-full overflow-hidden bg-[#111]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={activeMediaUrl}
-                alt="게시글 사진"
-                className="h-full w-full object-cover"
-                loading="lazy"
-                draggable={false}
-              />
+              <div
+                className="flex h-full w-full transition-transform duration-200 ease-out will-change-transform"
+                style={{
+                  transform: `translate3d(-${activeImageIndex * 100}%, 0, 0)`,
+                }}
+              >
+                {mediaUrls.map((mediaUrl, index) => (
+                  <div key={`${post.id}-media-${index}`} className="relative h-full w-full shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={mediaUrl}
+                      alt="게시글 사진"
+                      className="h-full w-full object-cover"
+                      loading={index === activeImageIndex ? "eager" : "lazy"}
+                      decoding="async"
+                      draggable={false}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* 더블탭 하트 애니메이션 */}
@@ -343,40 +471,19 @@ export function SocialPostCard({
           {/* 멀티이미지 UI */}
           {mediaUrls.length > 1 ? (
             <>
-              {/* 이미지 카운터 */}
               <div className="absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold text-white">
                 {activeImageIndex + 1}/{mediaUrls.length}
               </div>
 
-              {/* 이전/다음 버튼 */}
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setActiveImageIndex((prev) => (prev === 0 ? mediaUrls.length - 1 : prev - 1)); }}
-                className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition active:bg-black/60"
-                aria-label="이전 사진"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4 w-4">
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setActiveImageIndex((prev) => (prev + 1) % mediaUrls.length); }}
-                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition active:bg-black/60"
-                aria-label="다음 사진"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4 w-4">
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
-              </button>
-
-              {/* 하단 도트 인디케이터 */}
               <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1">
                 {mediaUrls.map((_, index) => (
                   <button
                     key={`dot-${post.id}-${index}`}
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); setActiveImageIndex(index); }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      goToImage(index);
+                    }}
                     className={cn(
                       "h-[5px] rounded-full transition-all duration-200",
                       index === activeImageIndex
