@@ -14,6 +14,19 @@ type Props = {
 
 type ProfileTab = "posts" | "saved" | "liked";
 
+function formatProfileCount(value: number) {
+  return new Intl.NumberFormat("ko-KR").format(value);
+}
+
+function ProfileStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex min-w-0 flex-col items-center justify-center rounded-lg bg-[#faf8ff] px-3 py-2.5 text-center">
+      <span className="text-[18px] font-bold text-gray-900">{formatProfileCount(value)}</span>
+      <span className="mt-0.5 text-[12px] font-medium text-gray-500">{label}</span>
+    </div>
+  );
+}
+
 function GridTabIcon({ active }: { active: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`h-5 w-5 ${active ? "text-gray-900" : "text-gray-400"}`}>
@@ -369,10 +382,13 @@ export function SocialProfilePage({ handle }: Props) {
         profile?.relationship.hasOutgoingFriendRequest ||
         profile?.relationship.hasIncomingFriendRequest
     );
+  const profileSummaryLines = profile
+    ? [profile.bio.trim(), profile.statusMessage.trim()].filter(Boolean)
+    : [];
 
   if (status !== "authenticated") {
     return (
-      <div className="-mx-4 pb-8">
+      <div className="-mx-4 bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur">
           <button
             type="button"
@@ -397,7 +413,7 @@ export function SocialProfilePage({ handle }: Props) {
   }
 
   return (
-    <div className="-mx-4 pb-8">
+    <div className="-mx-4 bg-white pb-[calc(104px+env(safe-area-inset-bottom))]">
       <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur">
         <button
           type="button"
@@ -446,85 +462,88 @@ export function SocialProfilePage({ handle }: Props) {
         </div>
       ) : (
         <>
-          <section className="px-4 py-6">
-            <div className="flex flex-col items-center text-center">
-              <div className="rounded-full bg-gradient-to-tr from-[#FEDA75] via-[#FA7E1E] to-[#D62976] p-[3px]">
-                <div className="rounded-full bg-white p-[3px]">
-                  <div className="flex h-[88px] w-[88px] items-center justify-center overflow-hidden rounded-full bg-gray-100 text-[34px]">
-                    {profile.profileImageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      profile.avatarEmoji
-                    )}
+          <section className="px-4 py-5">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0">
+                <div className="rnest-social-avatar-ring rounded-full p-[3px]">
+                  <div className="rnest-social-avatar-shell rounded-full p-[4px]">
+                    <div className="flex h-[92px] w-[92px] items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[34px]">
+                      {profile.profileImageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        profile.avatarEmoji
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
-              <h2 className="mt-4 text-[18px] font-bold text-gray-900">{profile.displayName}</h2>
-              <p className="mt-2 max-w-[360px] whitespace-pre-wrap text-[14px] leading-6 text-gray-700">
-                {profile.bio || profile.statusMessage || "RNest 소셜 프로필"}
+
+              <div className="min-w-0 flex-1 pt-1">
+                <div className="grid grid-cols-3 gap-2">
+                  <ProfileStat label="포스트" value={profile.postCount} />
+                  <ProfileStat label="팔로워" value={profile.followerCount} />
+                  <ProfileStat label="팔로잉" value={profile.followingCount} />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <h2 className="text-[18px] font-bold text-gray-900">{profile.displayName}</h2>
+              {profile.handle ? (
+                <p className="mt-1 text-[13px] font-medium text-[color:var(--rnest-accent)]">@{profile.handle}</p>
+              ) : null}
+              <p className="mt-2 whitespace-pre-wrap text-[14px] leading-6 text-gray-700">
+                {profileSummaryLines.length > 0 ? profileSummaryLines.join("\n") : "RNest 소셜 프로필"}
               </p>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              {isSelf ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setOpenProfileEditor(true)}
+                    className="flex-1 rounded-lg border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900"
+                  >
+                    프로필 수정
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className="flex-1 rounded-lg border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900"
+                  >
+                    공유
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleFollow}
+                    disabled={actionLoading === "follow"}
+                    className={`flex-1 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition ${
+                      profile.relationship.isFollowing
+                        ? "border border-gray-200 bg-[#f6f4ff] text-gray-900"
+                        : "bg-[color:var(--rnest-accent)] text-white shadow-[0_12px_28px_rgba(123,111,208,0.22)]"
+                    }`}
+                  >
+                    {profile.relationship.isFollowing ? "팔로잉" : "팔로우"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFriendRequest}
+                    disabled={friendButtonDisabled}
+                    className="flex-1 rounded-lg border border-gray-200 bg-[#f6f4ff] px-4 py-2.5 text-[13px] font-semibold text-gray-900 disabled:opacity-50"
+                  >
+                    {friendButtonLabel}
+                  </button>
+                </>
+              )}
             </div>
           </section>
 
-          <div className="flex justify-around border-y border-gray-100 py-3">
-            {[
-              { label: "게시글", value: profile.postCount },
-              { label: "팔로워", value: profile.followerCount },
-              { label: "팔로잉", value: profile.followingCount },
-            ].map((item) => (
-              <div key={item.label} className="flex flex-col items-center gap-0.5">
-                <span className="text-[17px] font-bold text-gray-900">{item.value}</span>
-                <span className="text-[12px] text-gray-500">{item.label}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-2 px-4 py-3">
-            {isSelf ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setOpenProfileEditor(true)}
-                  className="flex-1 rounded-lg bg-[color:var(--rnest-accent)] px-4 py-2.5 text-[13px] font-semibold text-white"
-                >
-                  프로필 수정
-                </button>
-                <button
-                  type="button"
-                  onClick={handleShare}
-                  className="flex-1 rounded-lg bg-gray-100 px-4 py-2.5 text-[13px] font-semibold text-gray-900"
-                >
-                  공유
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={handleFollow}
-                  disabled={actionLoading === "follow"}
-                  className={`flex-1 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition ${
-                    profile.relationship.isFollowing
-                      ? "bg-gray-100 text-gray-900"
-                      : "bg-[color:var(--rnest-accent)] text-white"
-                  }`}
-                >
-                  {profile.relationship.isFollowing ? "팔로잉" : "팔로우"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleFriendRequest}
-                  disabled={friendButtonDisabled}
-                  className="flex-1 rounded-lg bg-gray-100 px-4 py-2.5 text-[13px] font-semibold text-gray-900 disabled:opacity-50"
-                >
-                  {friendButtonLabel}
-                </button>
-              </>
-            )}
-          </div>
-
-          <div className="flex border-b border-gray-200">
+          <div className="flex border-y border-gray-200">
             {(
               [
                 { id: "posts", icon: GridTabIcon },

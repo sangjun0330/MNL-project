@@ -26,7 +26,6 @@ import { SocialGroupCreateSheet } from "@/components/social/SocialGroupCreateShe
 import { SocialGroupJoinSheet } from "@/components/social/SocialGroupJoinSheet";
 import { SocialFeedTab } from "@/components/social/SocialFeedTab";
 import { SocialExploreTab } from "@/components/social/SocialExploreTab";
-import { SocialStoriesBar } from "@/components/social/SocialStoriesBar";
 import {
   SocialOverlapSelectorSheet,
   type SocialOverlapSelectorItem,
@@ -52,6 +51,13 @@ import { withReturnTo } from "@/lib/navigation";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 type SocialViewTab = "following" | "explore" | "friends" | "groups";
+
+const SOCIAL_PAGE_TABS: Array<{ id: SocialViewTab; label: string }> = [
+  { id: "following", label: "피드" },
+  { id: "explore", label: "검색" },
+  { id: "friends", label: "친구" },
+  { id: "groups", label: "그룹" },
+];
 
 function resolveSocialViewTab(value: string | null | undefined, fallback: SocialViewTab): SocialViewTab {
   if (value === "feed" || value === "following") return "following";
@@ -81,13 +87,6 @@ function buildFetchMonths(): string {
 export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const handleBack = useCallback(() => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-    } else {
-      router.push("/");
-    }
-  }, [router]);
   const { status, user } = useAuthState();
   const { loading: billingLoading, hasEntitlement, reload: reloadBillingAccess } = useBillingAccess();
   const currentUserId = user?.userId ?? null;
@@ -113,7 +112,6 @@ export function SocialPage() {
   const [groups, setGroups] = useState<SocialGroupSummary[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState(false);
-  const [feedComposerOpen, setFeedComposerOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SocialViewTab>(
     resolveSocialViewTab(requestedTab, groupInviteToken ? "groups" : "following")
@@ -1015,79 +1013,35 @@ export function SocialPage() {
                 }
                 setShowOnboarding(true);
               }}
-              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-[18px] transition active:opacity-60"
+              className="rnest-social-avatar-ring flex items-center justify-center rounded-full p-[2px] transition active:opacity-60"
               aria-label="내 소셜 프로필"
             >
-              {profile?.profileImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <span>{profile?.avatarEmoji ?? "👤"}</span>
-              )}
+              <span className="rnest-social-avatar-shell flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[18px]">
+                {profile?.profileImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={profile.profileImageUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <span>{profile?.avatarEmoji ?? "👤"}</span>
+                )}
+              </span>
             </button>
           </div>
         </div>
 
-        {/* ── 아이콘 탭 내비게이션 ─────────────────────────── */}
-        <div className="flex">
-          {([
-            {
-              id: "following" as const,
-              label: "피드",
-              icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
-                  <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-              ),
-            },
-            {
-              id: "explore" as const,
-              label: "탐색",
-              icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-              ),
-            },
-            {
-              id: "friends" as const,
-              label: "친구",
-              icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-              ),
-            },
-            {
-              id: "groups" as const,
-              label: "그룹",
-              icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
-                  <rect x="3" y="3" width="7" height="7" rx="1" />
-                  <rect x="14" y="3" width="7" height="7" rx="1" />
-                  <rect x="3" y="14" width="7" height="7" rx="1" />
-                  <rect x="14" y="14" width="7" height="7" rx="1" />
-                </svg>
-              ),
-            },
-          ]).map((tab) => (
+        <div className="flex border-t border-gray-50 px-2">
+          {SOCIAL_PAGE_TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => updateActiveTab(tab.id)}
-              className={`flex flex-1 flex-col items-center justify-center py-2.5 gap-0.5 border-b-2 transition-colors ${
+              className={`flex min-w-0 flex-1 items-center justify-center border-b-2 px-1 py-3 text-[13.5px] font-semibold transition-colors ${
                 activeTab === tab.id
-                  ? "border-gray-900 text-gray-900"
+                  ? "border-[color:var(--rnest-accent)] text-[color:var(--rnest-accent)]"
                   : "border-transparent text-gray-400"
               }`}
-              aria-label={tab.label}
+              aria-current={activeTab === tab.id ? "page" : undefined}
             >
-              {tab.icon}
+              <span className="truncate">{tab.label}</span>
             </button>
           ))}
         </div>
@@ -1110,23 +1064,12 @@ export function SocialPage() {
 
       {/* ── 피드 탭 ────────────────────────────────────────── */}
       {activeTab === "following" && (
-        <div>
-          {/* 스토리 바 */}
-          <SocialStoriesBar
-            connections={connections?.accepted ?? []}
-            currentProfile={profile}
-            onComposePost={() => setFeedComposerOpen(true)}
-            onFriendTap={() => updateActiveTab("friends")}
-          />
-          <SocialFeedTab
-            scope="following"
-            userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
-            isAdmin={false}
-            defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
-            externalComposerOpen={feedComposerOpen}
-            onExternalComposerOpenChange={setFeedComposerOpen}
-          />
-        </div>
+        <SocialFeedTab
+          scope="following"
+          userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
+          isAdmin={false}
+          defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+        />
       )}
 
       {activeTab === "explore" && (

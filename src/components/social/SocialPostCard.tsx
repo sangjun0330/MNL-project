@@ -217,14 +217,14 @@ export function SocialPostCard({
     <article className="bg-white">
       {/* ── 헤더 ───────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-3 py-3">
-        {/* 아바타 — 인스타 스토리 링 스타일 */}
+        {/* 아바타 */}
         <button
           type="button"
           onClick={goToProfile}
-          className="shrink-0 rounded-full p-[2px] bg-gradient-to-tr from-[#FEDA75] via-[#FA7E1E] to-[#D62976]"
+          className="rnest-social-avatar-ring shrink-0 rounded-full p-[2px]"
           aria-label={`${profileLabel} 프로필`}
         >
-          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-gray-100 text-[16px]">
+          <div className="rnest-social-avatar-shell flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[16px]">
             {post.authorProfile.profileImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={post.authorProfile.profileImageUrl} alt="" className="h-full w-full object-cover" />
