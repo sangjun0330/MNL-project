@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
+import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
   FeedPage,
   SocialGroupSummary,
@@ -87,7 +88,7 @@ export function SocialFeedTab({
   scope = "following",
   handle = null,
   showComposer = true,
-  defaultVisibility = "friends",
+  defaultVisibility = DEFAULT_SOCIAL_POST_VISIBILITY,
   externalComposerOpen = false,
   onExternalComposerOpenChange,
 }: Props) {

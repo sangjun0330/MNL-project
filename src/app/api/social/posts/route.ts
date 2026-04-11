@@ -13,7 +13,10 @@ import {
   getFeedPage,
   createPost,
 } from "@/lib/server/socialPosts";
-import type { SocialPostVisibility } from "@/types/social";
+import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
+import type {
+  SocialPostVisibility,
+} from "@/types/social";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -64,9 +67,10 @@ export async function POST(req: Request) {
   const visibility: SocialPostVisibility =
     body?.visibility === "public_internal" ||
     body?.visibility === "followers" ||
+    body?.visibility === "friends" ||
     body?.visibility === "group"
       ? body.visibility
-      : "friends";
+      : DEFAULT_SOCIAL_POST_VISIBILITY;
   const groupId =
     visibility === "group" && Number.isFinite(Number(body?.groupId))
       ? Number(body.groupId)

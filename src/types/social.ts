@@ -9,6 +9,7 @@ export type SocialProfile = {
   bio: string;
   profileImagePath: string | null;
   profileImageUrl: string | null;
+  accountVisibility: SocialAccountVisibility;
   discoverability: SocialProfileDiscoverability;
   defaultPostVisibility: SocialPostVisibility;
 };
@@ -49,6 +50,7 @@ export type FriendMeta = {
 
 export type ScheduleVisibility = "full" | "off_only" | "hidden";
 export type HealthVisibility = "full" | "hidden";
+export type SocialAccountVisibility = "public" | "private";
 export type SocialProfileDiscoverability = "off" | "internal";
 
 export type SocialPreferences = {
@@ -459,6 +461,7 @@ export type CreateChallengePayload = {
 
 export type SocialPostVisibility = "public_internal" | "followers" | "friends" | "group";
 export type PostVisibility = SocialPostVisibility;
+export const DEFAULT_SOCIAL_POST_VISIBILITY: SocialPostVisibility = "public_internal";
 
 export type SocialAuthorProfile = {
   userId: string;
@@ -500,6 +503,8 @@ export type SocialProfileHeader = {
   bio: string;
   statusMessage: string;
   profileImageUrl: string | null;
+  accountVisibility: SocialAccountVisibility;
+  isProfileLocked: boolean;
   discoverability: SocialProfileDiscoverability;
   defaultPostVisibility: SocialPostVisibility;
   followerCount: number;

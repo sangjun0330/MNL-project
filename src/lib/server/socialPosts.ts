@@ -1,3 +1,4 @@
+import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
   FeedPage,
   SocialPost,
@@ -441,17 +442,7 @@ export async function getFeedPage(
     rawRows = (data as PostRow[] | null) ?? [];
   }
 
-  const authorIds = Array.from(new Set(rawRows.map((row) => String(row.author_user_id))));
-  const profileMap = await loadSocialHubProfileMap(admin, authorIds);
-
-  const filteredRows = rawRows.filter((row) => {
-    if (!canUserAccessPostWithContext(row, context)) return false;
-    if (scope === "explore") {
-      const profile = profileMap.get(String(row.author_user_id));
-      return profile?.discoverability === "internal" || String(row.author_user_id) === userId;
-    }
-    return true;
-  });
+  const filteredRows = rawRows.filter((row) => canUserAccessPostWithContext(row, context));
 
   const pageRows = filteredRows.slice(0, limit);
   const hasMore = filteredRows.length > limit;
@@ -491,16 +482,7 @@ export async function searchSocialPosts(
   if (error) throw error;
 
   const rows = (data as PostRow[] | null) ?? [];
-  const profileMap = await loadSocialHubProfileMap(
-    admin,
-    Array.from(new Set(rows.map((row) => String(row.author_user_id))))
-  );
-  const filtered = rows
-    .filter((row) => {
-      const profile = profileMap.get(String(row.author_user_id));
-      return profile?.discoverability === "internal" || String(row.author_user_id) === userId;
-    })
-    .slice(0, limit);
+  const filtered = rows.slice(0, limit);
 
   return hydratePosts(admin, userId, filtered);
 }
@@ -572,7 +554,7 @@ export async function createPost(
     visibility?: SocialPostVisibility;
   } = {}
 ): Promise<SocialPost> {
-  const visibility = normalizeVisibility(opts.visibility ?? "friends");
+  const visibility = normalizeVisibility(opts.visibility ?? DEFAULT_SOCIAL_POST_VISIBILITY);
   const groupId = visibility === "group" ? (opts.groupId ?? null) : null;
   const imagePaths = cleanPostImagePaths(
     opts.imagePaths && opts.imagePaths.length > 0

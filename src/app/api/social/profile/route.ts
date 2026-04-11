@@ -48,6 +48,7 @@ export async function POST(req: Request) {
       displayName: body?.displayName,
       bio: body?.bio,
       handle: body?.handle,
+      accountVisibility: body?.accountVisibility,
       discoverability: body?.discoverability,
       defaultPostVisibility: body?.defaultPostVisibility,
     });

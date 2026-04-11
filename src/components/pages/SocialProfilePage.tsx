@@ -400,6 +400,7 @@ export function SocialProfilePage({ handle }: Props) {
   }, [showActionMenu]);
 
   const isSelf = profile?.relationship.isSelf ?? false;
+  const isLocked = profile?.isProfileLocked ?? false;
   const headerLabel = profile?.handle ? `@${profile.handle}` : `@${handle}`;
   const visibleTab: ProfileTab = isSelf ? tab : "posts";
   const activeProfileHandle = profile?.handle ?? handle;
@@ -549,12 +550,14 @@ export function SocialProfilePage({ handle }: Props) {
 
     return {
       scope: "profile" as const,
-      emptyTitle: "아직 게시글이 없어요",
+      emptyTitle: isLocked ? "볼 수 있는 게시글이 아직 없어요" : "아직 게시글이 없어요",
       emptyCopy: isSelf
         ? "첫 게시글을 올리면 프로필 그리드가 채워져요."
-        : "이 사용자의 게시글이 올라오면 여기에 표시돼요.",
+        : isLocked
+          ? "비공개 계정이에요. 허브 공개 게시글이나 권한이 있는 게시글만 여기에 표시돼요."
+          : "이 사용자의 게시글이 올라오면 여기에 표시돼요.",
     };
-  }, [isSelf, visibleTab]);
+  }, [isLocked, isSelf, visibleTab]);
 
   if (status !== "authenticated") {
     return (
@@ -704,9 +707,16 @@ export function SocialProfilePage({ handle }: Props) {
 
                 <div className="min-w-0 pl-1 sm:pl-2">
                   {profileDisplayLabel ? (
-                    <p className="mb-2 truncate pl-1 text-[15px] font-semibold leading-tight text-gray-900 sm:mb-3 sm:pl-2 sm:text-[16px]">
-                      {profileDisplayLabel}
-                    </p>
+                    <div className="mb-2 flex items-center gap-2 pl-1 sm:mb-3 sm:pl-2">
+                      <p className="truncate text-[15px] font-semibold leading-tight text-gray-900 sm:text-[16px]">
+                        {profileDisplayLabel}
+                      </p>
+                      {profile.accountVisibility === "private" ? (
+                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-semibold text-gray-600">
+                          비공개
+                        </span>
+                      ) : null}
+                    </div>
                   ) : null}
                   <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     <ProfileStat label="포스트" value={profile.postCount} />
@@ -715,6 +725,15 @@ export function SocialProfilePage({ handle }: Props) {
                   </div>
                 </div>
               </div>
+
+              {isLocked ? (
+                <div className="mt-4 rounded-2xl border border-gray-100 bg-[#faf8ff] px-4 py-3">
+                  <p className="text-[13px] font-semibold text-gray-900">비공개 계정</p>
+                  <p className="mt-1 text-[12.5px] leading-5 text-gray-500">
+                    친구나 같은 그룹 멤버가 아니면 프로필 정보는 제한돼요. 허브 공개 게시글이나 접근 권한이 있는 게시글만 볼 수 있어요.
+                  </p>
+                </div>
+              ) : null}
 
               {profileBio ? (
                 <div className="mt-4 min-w-0">

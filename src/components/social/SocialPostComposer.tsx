@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Eye, Globe2, House, Tags, Users } from "lucide-react";
 import { BOTTOM_SHEET_DURATION_MS, BottomSheet } from "@/components/ui/BottomSheet";
-import type { SocialGroupSummary, SocialPost, SocialPostVisibility } from "@/types/social";
+import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
+import type {
+  SocialGroupSummary,
+  SocialPost,
+  SocialPostVisibility,
+} from "@/types/social";
 
 type Props = {
   open: boolean;
@@ -85,7 +90,7 @@ export function SocialPostComposer({
   onClose,
   onPosted,
   userGroups = [],
-  defaultVisibility = "friends",
+  defaultVisibility = DEFAULT_SOCIAL_POST_VISIBILITY,
 }: Props) {
   const [step, setStep] = useState<ComposerStep>("media");
   const [body, setBody] = useState("");

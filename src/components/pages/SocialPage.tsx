@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
+import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
   SocialConnectionsData,
   FriendsScheduleData,
@@ -1143,14 +1144,14 @@ export function SocialPage() {
           scope="following"
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
           isAdmin={false}
-          defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+          defaultVisibility={profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY}
         />
       )}
 
       {activeTab === "explore" && (
         <SocialExploreTab
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
-          defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+          defaultVisibility={profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY}
           query={exploreQuery}
         />
       )}

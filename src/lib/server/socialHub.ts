@@ -1,4 +1,6 @@
+import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
+  SocialAccountVisibility,
   SocialAuthorProfile,
   SocialFollowSummary,
   SocialPostVisibility,
@@ -18,7 +20,7 @@ const DEFAULT_AVATAR = "🐧";
 const ALLOWED_AVATARS = new Set(["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"]);
 const HANDLE_REGEX = /^[a-z0-9](?:[a-z0-9._-]{1,28}[a-z0-9])?$/;
 const PROFILE_SELECT =
-  "user_id, nickname, avatar_emoji, status_message, handle, display_name, bio, profile_image_path, discoverability, default_post_visibility, updated_at";
+  "user_id, nickname, avatar_emoji, status_message, handle, display_name, bio, profile_image_path, account_visibility, discoverability, default_post_visibility, updated_at";
 
 type SocialHubProfileRow = {
   user_id: string;
@@ -29,6 +31,7 @@ type SocialHubProfileRow = {
   display_name: string | null;
   bio: string | null;
   profile_image_path: string | null;
+  account_visibility: string | null;
   discoverability: string | null;
   default_post_visibility: string | null;
 };
@@ -73,6 +76,18 @@ function normalizePostVisibility(value: unknown): SocialPostVisibility {
   if (value === "followers") return "followers";
   if (value === "group") return "group";
   return "friends";
+}
+
+function normalizeProfileDefaultPostVisibility(value: unknown): SocialPostVisibility {
+  if (value === "public_internal") return "public_internal";
+  if (value === "followers") return "followers";
+  if (value === "friends") return "friends";
+  if (value === "group") return "group";
+  return DEFAULT_SOCIAL_POST_VISIBILITY;
+}
+
+export function normalizeAccountVisibility(value: unknown): SocialAccountVisibility {
+  return value === "private" ? "private" : "public";
 }
 
 export function normalizeSocialDiscoverability(value: unknown): SocialProfileDiscoverability {
@@ -122,8 +137,9 @@ function normalizeSocialProfileRow(row: SocialHubProfileRow | null | undefined, 
     bio,
     profileImagePath,
     profileImageUrl,
+    accountVisibility: normalizeAccountVisibility(row?.account_visibility),
     discoverability: normalizeSocialDiscoverability(row?.discoverability),
-    defaultPostVisibility: normalizePostVisibility(row?.default_post_visibility),
+    defaultPostVisibility: normalizeProfileDefaultPostVisibility(row?.default_post_visibility),
   };
 }
 
@@ -142,6 +158,7 @@ export function buildSocialAuthorProfile(
           display_name: profile.displayName,
           bio: profile.bio,
           profile_image_path: profile.profileImagePath,
+          account_visibility: profile.accountVisibility,
           discoverability: profile.discoverability,
           default_post_visibility: profile.defaultPostVisibility,
         }
@@ -367,8 +384,9 @@ export async function ensureSocialProfile(admin: any, userId: string): Promise<S
   if (!existing?.handle) {
     updates.handle = await reserveAvailableHandle(admin, seed.handleCandidate, userId);
   }
+  if (!existing?.account_visibility) updates.account_visibility = "public";
   if (!existing?.discoverability) updates.discoverability = "off";
-  if (!existing?.default_post_visibility) updates.default_post_visibility = "friends";
+  if (!existing?.default_post_visibility) updates.default_post_visibility = DEFAULT_SOCIAL_POST_VISIBILITY;
 
   if (existing && Object.keys(updates).length === 0) {
     return normalizeSocialProfileRow(existing, userId);
@@ -385,8 +403,9 @@ export async function ensureSocialProfile(admin: any, userId: string): Promise<S
       String(updates.handle ?? (await reserveAvailableHandle(admin, seed.handleCandidate, userId))),
     bio: existing?.bio ?? "",
     profile_image_path: existing?.profile_image_path ?? null,
+    account_visibility: existing?.account_visibility ?? "public",
     discoverability: existing?.discoverability ?? "off",
-    default_post_visibility: existing?.default_post_visibility ?? "friends",
+    default_post_visibility: existing?.default_post_visibility ?? DEFAULT_SOCIAL_POST_VISIBILITY,
     updated_at: new Date().toISOString(),
   };
 
@@ -414,6 +433,7 @@ export async function saveSocialProfile(
     displayName?: unknown;
     bio?: unknown;
     handle?: unknown;
+    accountVisibility?: unknown;
     discoverability?: unknown;
     defaultPostVisibility?: unknown;
   }
@@ -455,8 +475,11 @@ export async function saveSocialProfile(
     requestedHandle === current.handle ? requestedHandle : await assertHandleAvailable(admin, requestedHandle, userId);
   const bio = cleanSocialBio(input.bio ?? current.bio);
   const statusMessage = cleanStatusMessage(input.statusMessage ?? current.statusMessage);
+  const accountVisibility = normalizeAccountVisibility(
+    input.accountVisibility ?? current.accountVisibility
+  );
   const discoverability = normalizeSocialDiscoverability(input.discoverability ?? current.discoverability);
-  const defaultPostVisibility = normalizePostVisibility(
+  const defaultPostVisibility = normalizeProfileDefaultPostVisibility(
     input.defaultPostVisibility ?? current.defaultPostVisibility
   );
 
@@ -471,6 +494,7 @@ export async function saveSocialProfile(
       display_name: displayName,
       bio,
       profile_image_path: current.profileImagePath,
+      account_visibility: accountVisibility,
       discoverability,
       default_post_visibility: defaultPostVisibility,
       updated_at: new Date().toISOString(),
@@ -508,6 +532,7 @@ export async function setSocialProfileImage(admin: any, userId: string, imagePat
       display_name: current.displayName,
       bio: current.bio,
       profile_image_path: imagePath,
+      account_visibility: current.accountVisibility,
       discoverability: current.discoverability,
       default_post_visibility: current.defaultPostVisibility,
       updated_at: new Date().toISOString(),
@@ -603,6 +628,29 @@ export async function getSocialRelationshipState(
   };
 }
 
+async function viewerSharesGroupWithTarget(admin: any, viewerId: string, targetUserId: string) {
+  if (!viewerId || !targetUserId || viewerId === targetUserId) return false;
+
+  const [viewerMemberships, targetMemberships] = await Promise.all([
+    (admin as any)
+      .from("rnest_social_group_members")
+      .select("group_id")
+      .eq("user_id", viewerId),
+    (admin as any)
+      .from("rnest_social_group_members")
+      .select("group_id")
+      .eq("user_id", targetUserId),
+  ]);
+
+  const viewerGroupIds = new Set<number>(
+    (viewerMemberships.data ?? []).map((row: any) => Number(row.group_id))
+  );
+
+  return (targetMemberships.data ?? []).some((row: any) =>
+    viewerGroupIds.has(Number(row.group_id))
+  );
+}
+
 async function countAccessibleProfilePosts(admin: any, viewerId: string, targetUserId: string) {
   const relationship = await getSocialRelationshipState(admin, viewerId, targetUserId);
   const { data: membershipRows } = await (admin as any)
@@ -647,8 +695,9 @@ async function loadProfileHeaderByUserId(admin: any, targetUserId: string, viewe
   const row = await loadProfileRow(admin, targetUserId);
   if (!row) return null;
 
-  const [relationship, followerCountResult, followingCountResult, postCount] = await Promise.all([
+  const [relationship, sharesGroup, followerCountResult, followingCountResult, postCount] = await Promise.all([
     getSocialRelationshipState(admin, viewerId, targetUserId),
+    viewerSharesGroupWithTarget(admin, viewerId, targetUserId),
     (admin as any)
       .from("rnest_social_follows")
       .select("followee_user_id", { count: "exact", head: true })
@@ -661,15 +710,23 @@ async function loadProfileHeaderByUserId(admin: any, targetUserId: string, viewe
   ]);
 
   const profile = normalizeSocialProfileRow(row, targetUserId);
+  const isProfileLocked =
+    profile.accountVisibility === "private" &&
+    viewerId !== targetUserId &&
+    !relationship.isFriend &&
+    !sharesGroup;
+
   return {
     userId: targetUserId,
     nickname: profile.nickname,
     avatarEmoji: profile.avatarEmoji,
     handle: profile.handle,
     displayName: profile.displayName,
-    bio: profile.bio,
+    bio: isProfileLocked ? "" : profile.bio,
     statusMessage: "",
     profileImageUrl: profile.profileImageUrl,
+    accountVisibility: profile.accountVisibility,
+    isProfileLocked,
     discoverability: profile.discoverability,
     defaultPostVisibility: profile.defaultPostVisibility,
     followerCount: Number(followerCountResult.count ?? 0),
