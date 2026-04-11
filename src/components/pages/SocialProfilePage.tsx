@@ -525,9 +525,10 @@ export function SocialProfilePage({ handle }: Props) {
         profile?.relationship.hasOutgoingFriendRequest ||
         profile?.relationship.hasIncomingFriendRequest
     );
-  const profileSummaryLines = profile
-    ? [profile.bio.trim(), profile.statusMessage.trim()].filter(Boolean)
-    : [];
+  const profileBio = profile?.bio.trim() ?? "";
+  const profileDisplayLabel = profile
+    ? (profile.displayName || profile.nickname).trim()
+    : "";
 
   const tabConfig = useMemo(() => {
     if (visibleTab === "liked") {
@@ -683,8 +684,8 @@ export function SocialProfilePage({ handle }: Props) {
             <section className="px-4 py-5 sm:py-6">
               <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)] sm:gap-5">
                 <div className="shrink-0">
-                  <div className="rnest-social-avatar-ring rounded-full p-[3px]">
-                    <div className="rnest-social-avatar-shell rounded-full p-[4px]">
+                  <div className="rnest-social-avatar-ring inline-flex rounded-full p-[3px]">
+                    <div className="rnest-social-avatar-shell inline-flex rounded-full p-[4px]">
                       <div className="flex h-[84px] w-[84px] items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[30px] sm:h-[104px] sm:w-[104px] sm:text-[36px]">
                         {profile.profileImageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
@@ -702,6 +703,11 @@ export function SocialProfilePage({ handle }: Props) {
                 </div>
 
                 <div className="min-w-0">
+                  {profileDisplayLabel ? (
+                    <p className="mb-2 truncate text-[15px] font-semibold leading-tight text-gray-900 sm:mb-3 sm:text-[16px]">
+                      {profileDisplayLabel}
+                    </p>
+                  ) : null}
                   <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     <ProfileStat label="포스트" value={profile.postCount} />
                     <ProfileStat label="팔로워" value={profile.followerCount} />
@@ -710,21 +716,13 @@ export function SocialProfilePage({ handle }: Props) {
                 </div>
               </div>
 
-              <div className="mt-4 min-w-0">
-                <h2 className="break-words text-[clamp(22px,7vw,30px)] font-bold leading-tight text-gray-900">
-                  {profile.displayName}
-                </h2>
-                {profile.handle ? (
-                  <p className="mt-1 break-all text-[13px] font-medium text-[color:var(--rnest-accent)] sm:text-[14px]">
-                    @{profile.handle}
+              {profileBio ? (
+                <div className="mt-4 min-w-0">
+                  <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-gray-700">
+                    {profileBio}
                   </p>
-                ) : null}
-                <p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-gray-700">
-                  {profileSummaryLines.length > 0
-                    ? profileSummaryLines.join("\n")
-                    : "RNest 소셜 프로필"}
-                </p>
-              </div>
+                </div>
+              ) : null}
 
               {!isSelf ? (
                 <div className="mt-5 grid grid-cols-2 gap-2 sm:max-w-[420px]">

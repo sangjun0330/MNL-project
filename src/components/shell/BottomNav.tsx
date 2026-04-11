@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import type { ReactElement, SVGProps } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
@@ -107,6 +107,23 @@ function resolveSocialActiveHref(tab: string | null) {
   return "/social";
 }
 
+function resolveSocialActiveHrefFromContext(pathname: string | null | undefined, searchParams: ReadonlyURLSearchParams | null) {
+  const returnTo = searchParams?.get("returnTo") ?? "";
+
+  if (returnTo.startsWith("/social")) {
+    try {
+      const url = new URL(returnTo, "http://localhost");
+      return resolveSocialActiveHref(url.searchParams.get("tab"));
+    } catch {
+      return "/social";
+    }
+  }
+
+  if (pathname?.startsWith("/social/groups")) return "/social?tab=groups";
+  if (pathname?.startsWith("/social")) return resolveSocialActiveHref(searchParams?.get("tab") ?? null);
+  return "/social";
+}
+
 export function BottomNav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -114,9 +131,9 @@ export function BottomNav() {
   const [hide, setHide] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const { t } = useI18n();
-  const isSocialRoot = pathname === "/social";
+  const isSocialPath = pathname?.startsWith("/social") ?? false;
   const searchKey = searchParams?.toString() ?? "";
-  const items = isSocialRoot ? SOCIAL_ROOT_ITEMS : DEFAULT_ITEMS;
+  const items = isSocialPath ? SOCIAL_ROOT_ITEMS : DEFAULT_ITEMS;
 
   useEffect(() => {
     if (typeof document !== "undefined") {
@@ -142,8 +159,8 @@ export function BottomNav() {
   }, [pathname, searchKey]);
 
   const activeHref = useMemo(() => {
-    if (isSocialRoot) {
-      return resolveSocialActiveHref(searchParams?.get("tab"));
+    if (isSocialPath) {
+      return resolveSocialActiveHrefFromContext(pathname, searchParams);
     }
 
     const hit = DEFAULT_ITEMS.find((it) =>
@@ -152,7 +169,7 @@ export function BottomNav() {
     if (hit) return hit.href;
     if (pathname?.startsWith("/settings")) return null;
     return "/";
-  }, [isSocialRoot, pathname, searchParams]);
+  }, [isSocialPath, pathname, searchParams]);
   const selectedHref = pendingHref ?? activeHref;
 
   if (hide || pathname === "/tools/med-safety") return null;
@@ -167,7 +184,7 @@ export function BottomNav() {
               "rnest-nav-bar"
             )}
           >
-            <div className={cn("grid gap-1 p-1.5", isSocialRoot ? "grid-cols-4" : "grid-cols-5")}>
+            <div className={cn("grid gap-1 p-1.5", isSocialPath ? "grid-cols-4" : "grid-cols-5")}>
               {items.map((it) => {
                 const active = selectedHref === it.href;
                 const Icon = it.Icon;
@@ -178,7 +195,7 @@ export function BottomNav() {
                     scroll={false}
                     className={cn(
                       "touch-manipulation rnest-nav-item",
-                      isSocialRoot ? "min-h-[50px] gap-0 py-3" : null,
+                      isSocialPath ? "min-h-[50px] gap-0 py-3" : null,
                       active ? "rnest-nav-active" : "rnest-nav-inactive"
                     )}
                     onPointerDown={() => {
@@ -196,11 +213,11 @@ export function BottomNav() {
                     title={t(it.label)}
                   >
                     <Icon
-                      className={cn("rnest-nav-icon", isSocialRoot ? "h-6 w-6" : null)}
+                      className={cn("rnest-nav-icon", isSocialPath ? "h-6 w-6" : null)}
                       aria-hidden="true"
                       focusable="false"
                     />
-                    <span className={isSocialRoot ? "sr-only" : "rnest-nav-label"}>{t(it.label)}</span>
+                    <span className={isSocialPath ? "sr-only" : "rnest-nav-label"}>{t(it.label)}</span>
                   </Link>
                 );
               })}

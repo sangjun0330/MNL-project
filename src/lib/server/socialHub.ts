@@ -169,7 +169,7 @@ function buildFollowSummary(userId: string, profile: SocialProfile | null | unde
     displayName: author.displayName,
     bio: author.bio,
     profileImageUrl: author.profileImageUrl,
-    statusMessage: profile?.statusMessage ?? "",
+    statusMessage: "",
   };
 }
 
@@ -668,7 +668,7 @@ async function loadProfileHeaderByUserId(admin: any, targetUserId: string, viewe
     handle: profile.handle,
     displayName: profile.displayName,
     bio: profile.bio,
-    statusMessage: profile.statusMessage,
+    statusMessage: "",
     profileImageUrl: profile.profileImageUrl,
     discoverability: profile.discoverability,
     defaultPostVisibility: profile.defaultPostVisibility,

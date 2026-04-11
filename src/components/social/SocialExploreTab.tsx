@@ -11,17 +11,18 @@ import type {
 import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
 import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentSheet";
-import { SocialPostComposer } from "@/components/social/SocialPostComposer";
 import { useAuthState } from "@/lib/auth";
 
 type Props = {
   userGroups?: Pick<SocialGroupSummary, "id" | "name">[];
   defaultVisibility?: SocialPostVisibility;
+  query?: string;
 };
 
 // ── 프로필 카드 (검색 결과) ──────────────────────────────────
 function ExploreProfileCard({ profile }: { profile: SocialFollowSummary }) {
   const router = useRouter();
+  const bio = profile.bio.trim();
 
   return (
     <button
@@ -47,15 +48,11 @@ function ExploreProfileCard({ profile }: { profile: SocialFollowSummary }) {
               <span className="shrink-0 text-[12px] text-gray-400">@{profile.handle}</span>
             ) : null}
           </div>
-          {profile.bio ? (
+          {bio ? (
             <p className="mt-0.5 line-clamp-1 text-[12.5px] text-gray-400">
-              {profile.bio}
+              {bio}
             </p>
-          ) : (
-            <p className="mt-0.5 text-[12.5px] text-gray-400">
-              {profile.statusMessage || "RNest 소셜 프로필"}
-            </p>
-          )}
+          ) : null}
         </div>
       </div>
     </button>
@@ -113,31 +110,18 @@ function GridThumbnail({ post, onClick }: { post: SocialPost; onClick: () => voi
   );
 }
 
-export function SocialExploreTab({ userGroups = [], defaultVisibility = "friends" }: Props) {
+export function SocialExploreTab({ query = "" }: Props) {
   const router = useRouter();
   const { user } = useAuthState();
   const currentUserId = user?.userId;
 
-  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [profiles, setProfiles] = useState<SocialFollowSummary[]>([]);
   const [posts, setPosts] = useState<SocialPost[]>([]);
-  const [composerOpen, setComposerOpen] = useState(false);
   const [commentPost, setCommentPost] = useState<SocialPost | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
   const isSearching = trimmedQuery.length > 0;
-
-  const handlePosted = useCallback(
-    (post: SocialPost) => {
-      if (!isSearching && post.visibility === "public_internal") {
-        setPosts((prev) => [post, ...prev]);
-      }
-      setComposerOpen(false);
-    },
-    [isSearching]
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -165,51 +149,6 @@ export function SocialExploreTab({ userGroups = [], defaultVisibility = "friends
 
   return (
     <div className="relative pb-[calc(96px+env(safe-area-inset-bottom))]">
-      {/* ── sticky 검색바 ─────────────────────────────────── */}
-      <div className="sticky top-[104px] z-20 bg-white border-b border-gray-100 px-3 py-2.5">
-        <div className="flex items-center gap-2.5 rounded-xl bg-gray-100 px-3 py-2">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-4 h-4 text-gray-400 shrink-0"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            ref={searchInputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="사용자나 게시글 검색"
-            className="social-search-input w-full bg-transparent text-gray-900 outline-none placeholder:text-gray-400 leading-none"
-            style={{ fontSize: "16px" }}
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          {query ? (
-            <button
-              type="button"
-              onClick={() => {
-                setQuery("");
-                searchInputRef.current?.focus();
-              }}
-              className="text-gray-400 transition active:opacity-60"
-              aria-label="검색어 지우기"
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
-              </svg>
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {/* ── 검색 결과 뷰 ─────────────────────────────────── */}
       {isSearching ? (
         <div>
           {/* 프로필 결과 */}
@@ -303,31 +242,6 @@ export function SocialExploreTab({ userGroups = [], defaultVisibility = "friends
           )}
         </div>
       )}
-
-      {/* ── FAB: 게시글 작성 ─────────────────────────────── */}
-      <button
-        className="fixed z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white transition-all active:scale-95 hover:brightness-110"
-        style={{
-          backgroundColor: "var(--rnest-accent)",
-          bottom: "calc(80px + env(safe-area-inset-bottom))",
-          right: "16px",
-        }}
-        onClick={() => setComposerOpen(true)}
-        aria-label="새 게시글 작성"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-6 h-6">
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-      </button>
-
-      <SocialPostComposer
-        open={composerOpen}
-        onClose={() => setComposerOpen(false)}
-        onPosted={handlePosted}
-        userGroups={userGroups}
-        defaultVisibility={defaultVisibility}
-      />
 
       <SocialPostCommentSheet
         open={Boolean(commentPost)}

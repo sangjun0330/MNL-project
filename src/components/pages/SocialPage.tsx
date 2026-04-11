@@ -136,6 +136,7 @@ export function SocialPage() {
   const [connectPrefillMessage, setConnectPrefillMessage] = useState<string | null>(null);
   const [groupInvitePreview, setGroupInvitePreview] = useState<SocialGroupInvitePreview | null>(null);
   const [selectedCommonOffFriendIds, setSelectedCommonOffFriendIds] = useState<string[]>([]);
+  const [exploreQuery, setExploreQuery] = useState("");
   const handledInviteRef = useRef<string | null>(null);
   const handledGroupInviteRef = useRef<string | null>(null);
   const appliedTabKeyRef = useRef<string | null>(null);
@@ -157,6 +158,7 @@ export function SocialPage() {
   const groupsRef = useRef<SocialGroupSummary[]>([]);
   const groupsLoadedRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
+  const exploreSearchInputRef = useRef<HTMLInputElement>(null);
   const canCreateGroup = hasEntitlement("socialGroupCreate");
   const handleBackToHome = useCallback(() => {
     router.push("/");
@@ -1073,6 +1075,51 @@ export function SocialPage() {
             </button>
           </div>
         </div>
+
+        {activeTab === "explore" ? (
+          <div className="px-4 pb-3">
+            <div className="flex items-center gap-2.5 rounded-[22px] bg-gray-100 px-4 py-3">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4 shrink-0 text-gray-400"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                ref={exploreSearchInputRef}
+                value={exploreQuery}
+                onChange={(event) => setExploreQuery(event.target.value)}
+                placeholder="사용자나 게시글 검색"
+                className="social-search-input w-full bg-transparent text-gray-900 outline-none placeholder:text-gray-400 leading-none"
+                style={{ fontSize: "16px" }}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              {exploreQuery ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExploreQuery("");
+                    exploreSearchInputRef.current?.focus();
+                  }}
+                  className="text-gray-400 transition active:opacity-60"
+                  aria-label="검색어 지우기"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </header>
 
       {/* ── 알림 배너 ─────────────────────────────────────── */}
@@ -1104,6 +1151,7 @@ export function SocialPage() {
         <SocialExploreTab
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
           defaultVisibility={profile?.defaultPostVisibility ?? "friends"}
+          query={exploreQuery}
         />
       )}
 
