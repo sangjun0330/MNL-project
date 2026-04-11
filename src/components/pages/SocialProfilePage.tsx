@@ -8,6 +8,7 @@ import type { FeedPage, SocialPost, SocialProfile, SocialProfileHeader } from "@
 import { SocialAvatarBadge, SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import { SocialProfilePostViewer } from "@/components/social/SocialProfilePostViewer";
+import { SocialFollowListSheet } from "@/components/social/SocialFollowListSheet";
 
 type Props = {
   handle: string;
@@ -27,13 +28,37 @@ function formatProfileCount(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
-function ProfileStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center sm:px-3 sm:py-2.5">
+function ProfileStat({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
       <span className="text-[17px] font-bold text-gray-900 sm:text-[18px]">
         {formatProfileCount(value)}
       </span>
       <span className="mt-0.5 text-[11px] font-medium text-gray-500 sm:text-[12px]">{label}</span>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center transition active:opacity-70 sm:px-3 sm:py-2.5"
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center sm:px-3 sm:py-2.5">
+      {inner}
     </div>
   );
 }
@@ -327,6 +352,7 @@ export function SocialProfilePage({ handle }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [openProfileEditor, setOpenProfileEditor] = useState(false);
+  const [followListType, setFollowListType] = useState<"followers" | "following" | null>(null);
   const [actionLoading, setActionLoading] = useState<"follow" | "friend" | null>(null);
   const [selectedPost, setSelectedPost] = useState<{
     post: SocialPost;
@@ -670,8 +696,16 @@ export function SocialProfilePage({ handle }: Props) {
                   ) : null}
                   <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     <ProfileStat label="포스트" value={profile.postCount} />
-                    <ProfileStat label="팔로워" value={profile.followerCount} />
-                    <ProfileStat label="팔로잉" value={profile.followingCount} />
+                    <ProfileStat
+                      label="팔로워"
+                      value={profile.followerCount}
+                      onClick={() => setFollowListType("followers")}
+                    />
+                    <ProfileStat
+                      label="팔로잉"
+                      value={profile.followingCount}
+                      onClick={() => setFollowListType("following")}
+                    />
                   </div>
                 </div>
               </div>
@@ -750,6 +784,13 @@ export function SocialProfilePage({ handle }: Props) {
             />
           </>
         )}
+
+        <SocialFollowListSheet
+          open={followListType !== null}
+          onClose={() => setFollowListType(null)}
+          handle={activeProfileHandle}
+          type={followListType ?? "followers"}
+        />
 
         <SocialProfileSheet
           open={openProfileEditor}

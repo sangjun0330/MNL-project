@@ -34,7 +34,7 @@ const MAX_SOCIAL_POST_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const VISIBILITY_OPTIONS: VisibilityOption[] = [
-  { value: "public_internal", label: "허브 전체", description: "허브 멤버라면 누구나 볼 수 있어요", icon: Globe2 },
+  { value: "public_internal", label: "전체", description: "허브 멤버라면 누구나 볼 수 있어요", icon: Globe2 },
   { value: "followers", label: "팔로워", description: "나를 팔로우한 사람만 볼 수 있어요", icon: Eye },
   { value: "friends", label: "친구", description: "상호 연결된 친구에게만 공개돼요", icon: Users },
   { value: "group", label: "그룹 전용", description: "선택한 그룹 멤버만 볼 수 있어요", icon: House },

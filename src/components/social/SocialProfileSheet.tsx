@@ -80,7 +80,7 @@ function buildProfileState(profile: SocialProfile | null): SocialProfile {
     bio: profile?.bio ?? "",
     profileImagePath: profile?.profileImagePath ?? null,
     profileImageUrl: profile?.profileImageUrl ?? null,
-    discoverability: profile?.discoverability ?? "off",
+    discoverability: profile?.discoverability ?? "internal",
     defaultPostVisibility: profile?.defaultPostVisibility ?? "friends",
   };
 }
@@ -1059,18 +1059,15 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   // ── 설정 루트 목록 ────────────────────────────────────────
   const renderRootView = () => (
     <div className="space-y-3 pb-4">
+      {/* 피드 / 검색 프로필 — 탐색·공개 피드에 보이는 설정 */}
       <div className="overflow-hidden rounded-3xl bg-white shadow-apple">
         <p className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
-          내 프로필
+          피드 / 검색 프로필
         </p>
         <SettingsListRow
           icon={<User className="h-[18px] w-[18px]" />}
           label="소셜 프로필"
-          description={
-            savedProfile.displayName
-              ? savedProfile.displayName
-              : savedProfile.nickname || "이름, 사진, 소개 수정"
-          }
+          description={savedProfile.displayName || "이름, 사진, 소개 수정"}
           onClick={() => setActiveView("profile")}
         />
         <SettingsListRow
@@ -1091,9 +1088,10 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
         />
       </div>
 
+      {/* 친구 / 그룹 프로필 — 연결된 사람들에게 보이는 설정 */}
       <div className="overflow-hidden rounded-3xl bg-white shadow-apple">
         <p className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
-          친구 / 그룹
+          친구 / 그룹 프로필
         </p>
         <SettingsListRow
           icon={<Users className="h-[18px] w-[18px]" />}
@@ -1110,6 +1108,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
         />
       </div>
 
+      {/* 기타 */}
       <div className="overflow-hidden rounded-3xl bg-white shadow-apple">
         <p className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
           기타
@@ -1277,7 +1276,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               label="계정 공개"
               onToggle={() => {
                 const nextDiscoverability = isPublic ? "off" : "internal";
-                // 비공개 전환 시 게시글이 허브 전체면 팔로워로 자동 조정
+                // 비공개 전환 시 게시글이 전체면 팔로워로 자동 조정
                 const shouldCascade =
                   isPublic && savedProfile.defaultPostVisibility === "public_internal";
                 if (shouldCascade) {
@@ -1300,7 +1299,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
           <div className="divide-y divide-ios-sep">
             <RadioRow
               active={savedProfile.defaultPostVisibility === "public_internal"}
-              label="허브 전체"
+              label="전체"
               description="허브 멤버라면 누구나 볼 수 있어요"
               disabled={!isPublic || profileSaving || uploadingImage}
               onClick={() => {
@@ -1351,7 +1350,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
 
         {hasPrivateMismatch ? (
           <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[11.5px] leading-5 text-amber-700">
-            비공개 계정이지만 기본 게시글이 허브 전체로 설정돼 있어요. 팔로워 공개로 변경을 권장해요.
+            비공개 계정이지만 기본 게시글이 전체로 설정돼 있어요. 팔로워 공개로 변경을 권장해요.
           </p>
         ) : null}
 
