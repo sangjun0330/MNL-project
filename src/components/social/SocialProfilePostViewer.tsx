@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import type { FeedPage, SocialPost } from "@/types/social";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
@@ -16,7 +23,8 @@ type Props = {
   onClose: () => void;
 };
 
-const useSafeLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+const useSafeLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function mergeUniquePosts(base: SocialPost[], incoming: SocialPost[]) {
   if (incoming.length === 0) return base;
@@ -79,20 +87,59 @@ export function SocialProfilePostViewer({
   const viewerTitle = useMemo(() => {
     if (!post) return "게시글";
     if (post.authorProfile.handle) return `@${post.authorProfile.handle}`;
-    return post.authorProfile.displayName || post.authorProfile.nickname || "게시글";
+    return (
+      post.authorProfile.displayName || post.authorProfile.nickname || "게시글"
+    );
   }, [post]);
 
   const syncPostPatch = useCallback(
     (
       postId: number,
       patch: Partial<
-        Pick<SocialPost, "likeCount" | "saveCount" | "isLiked" | "isSaved" | "commentCount">
-      >
+        Pick<
+          SocialPost,
+          "likeCount" | "saveCount" | "isLiked" | "isSaved" | "commentCount"
+        >
+      >,
     ) => {
-      setPosts((prev) => prev.map((item) => (item.id === postId ? { ...item, ...patch } : item)));
-      setCommentPost((prev) => (prev && prev.id === postId ? { ...prev, ...patch } : prev));
+      setPosts((prev) =>
+        prev.map((item) => (item.id === postId ? { ...item, ...patch } : item)),
+      );
+      setCommentPost((prev) =>
+        prev && prev.id === postId ? { ...prev, ...patch } : prev,
+      );
     },
-    []
+    [],
+  );
+
+  const handleAuthorFollowChange = useCallback(
+    (authorUserId: string, isFollowing: boolean) => {
+      setPosts((prev) =>
+        prev.map((item) =>
+          item.authorUserId === authorUserId
+            ? {
+                ...item,
+                authorProfile: {
+                  ...item.authorProfile,
+                  isFollowing,
+                },
+              }
+            : item,
+        ),
+      );
+      setCommentPost((prev) =>
+        prev && prev.authorUserId === authorUserId
+          ? {
+              ...prev,
+              authorProfile: {
+                ...prev.authorProfile,
+                isFollowing,
+              },
+            }
+          : prev,
+      );
+    },
+    [],
   );
 
   const handleDelete = useCallback(
@@ -103,7 +150,7 @@ export function SocialProfilePostViewer({
         onClose();
       }
     },
-    [onClose, post?.id]
+    [onClose, post?.id],
   );
 
   const loadMore = useCallback(async () => {
@@ -125,7 +172,9 @@ export function SocialProfilePostViewer({
     if (!open || !post) return;
 
     let cancelled = false;
-    const seededPosts = initialPosts?.length ? mergeUniquePosts([], initialPosts) : [];
+    const seededPosts = initialPosts?.length
+      ? mergeUniquePosts([], initialPosts)
+      : [];
     const canUseSeed = seededPosts.some((item) => item.id === post.id);
 
     didScrollToSelectedRef.current = false;
@@ -215,7 +264,7 @@ export function SocialProfilePostViewer({
         void loadMore();
       }
     },
-    [loadMore]
+    [loadMore],
   );
 
   return (
@@ -249,7 +298,9 @@ export function SocialProfilePostViewer({
                 </svg>
               </button>
               <div className="min-w-0 flex-1 text-center">
-                <p className="truncate text-[15px] font-semibold text-gray-900">{viewerTitle}</p>
+                <p className="truncate text-[15px] font-semibold text-gray-900">
+                  {viewerTitle}
+                </p>
                 <p className="truncate text-[11px] text-gray-400">
                   위로 스크롤하면 더 최근 게시물, 아래로 스크롤하면 이전 게시물
                 </p>
@@ -291,6 +342,7 @@ export function SocialProfilePostViewer({
                     currentUserId={currentUserId}
                     onDelete={handleDelete}
                     onCommentOpen={setCommentPost}
+                    onAuthorFollowChange={handleAuthorFollowChange}
                     onStatsChange={syncPostPatch}
                   />
                 </div>
@@ -317,7 +369,9 @@ export function SocialProfilePostViewer({
         post={commentPost}
         onClose={() => setCommentPost(null)}
         currentUserId={currentUserId}
-        onCommentCountChange={(postId, count) => syncPostPatch(postId, { commentCount: count })}
+        onCommentCountChange={(postId, count) =>
+          syncPostPatch(postId, { commentCount: count })
+        }
       />
     </>
   );

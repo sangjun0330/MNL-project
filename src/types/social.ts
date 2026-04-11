@@ -258,11 +258,20 @@ export type SocialGroupBoard = {
 
 export type SocialGroupInvitePreview = {
   token: string;
-  state: "joinable" | "already_member" | "group_full" | "approval_required" | "request_pending";
+  state:
+    | "joinable"
+    | "already_member"
+    | "group_full"
+    | "approval_required"
+    | "request_pending";
   group: SocialGroupSummary;
 };
 
-export type SocialGroupAIBriefState = "locked" | "insufficient_data" | "ready" | "failed";
+export type SocialGroupAIBriefState =
+  | "locked"
+  | "insufficient_data"
+  | "ready"
+  | "failed";
 export type SocialGroupAIBriefTone = "steady" | "watch" | "recover";
 
 export type SocialGroupAIBriefFinding = {
@@ -395,7 +404,11 @@ export type ChallengeMetric =
   | "activity"
   | "caffeine"
   | "mood";
-export type ChallengeType = "leaderboard" | "low_value" | "group_goal" | "streak";
+export type ChallengeType =
+  | "leaderboard"
+  | "low_value"
+  | "group_goal"
+  | "streak";
 export type ChallengeStatus = "active" | "ended" | "canceled";
 
 /** 내 참가 엔트리 */
@@ -440,8 +453,8 @@ export type GroupChallengeSummary = {
 /** 챌린지 상세 (리더보드 포함) */
 export type GroupChallengeDetail = GroupChallengeSummary & {
   leaderboard: ChallengeLeaderboardEntry[];
-  groupCurrentAvg: number | null;  // group_goal 타입: 현재 참가자 평균
-  groupGoalMet: boolean | null;    // group_goal: 목표 달성 여부
+  groupCurrentAvg: number | null; // group_goal 타입: 현재 참가자 평균
+  groupGoalMet: boolean | null; // group_goal: 목표 달성 여부
 };
 
 /** 챌린지 생성 페이로드 */
@@ -459,9 +472,14 @@ export type CreateChallengePayload = {
 // Social Post Feed types
 // ══════════════════════════════════════════════════════════════
 
-export type SocialPostVisibility = "public_internal" | "followers" | "friends" | "group";
+export type SocialPostVisibility =
+  | "public_internal"
+  | "followers"
+  | "friends"
+  | "group";
 export type PostVisibility = SocialPostVisibility;
-export const DEFAULT_SOCIAL_POST_VISIBILITY: SocialPostVisibility = "public_internal";
+export const DEFAULT_SOCIAL_POST_VISIBILITY: SocialPostVisibility =
+  "public_internal";
 
 export type SocialAuthorProfile = {
   userId: string;
@@ -471,6 +489,8 @@ export type SocialAuthorProfile = {
   displayName: string;
   bio: string;
   profileImageUrl: string | null;
+  isFollowing: boolean;
+  isSelf: boolean;
 };
 
 export type SocialRelationshipState = {
@@ -519,17 +539,17 @@ export type SocialPost = {
   authorProfile: SocialAuthorProfile;
   body: string;
   imagePath: string | null;
-  imageUrl: string | null;     // 첫 번째 Supabase Storage public URL (legacy fallback)
+  imageUrl: string | null; // 첫 번째 Supabase Storage public URL (legacy fallback)
   imagePaths: string[];
   imageUrls: string[];
   tags: string[];
   visibility: SocialPostVisibility;
   groupId: number | null;
-  groupName: string | null;    // visibility='group' 일 때 그룹명
+  groupName: string | null; // visibility='group' 일 때 그룹명
   likeCount: number;
   commentCount: number;
   saveCount: number;
-  isLiked: boolean;            // 현재 사용자 좋아요 여부
+  isLiked: boolean; // 현재 사용자 좋아요 여부
   isSaved: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -553,7 +573,7 @@ export type SocialPostComment = {
 
 export type FeedPage = {
   posts: SocialPost[];
-  nextCursor: string | null;   // 마지막 게시글의 created_at ISO string (cursor 페이지네이션)
+  nextCursor: string | null; // 마지막 게시글의 created_at ISO string (cursor 페이지네이션)
 };
 
 export type SocialFeedItem = SocialPost;

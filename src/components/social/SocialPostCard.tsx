@@ -28,11 +28,17 @@ type Props = {
   post: SocialPost;
   onCommentOpen?: (post: SocialPost) => void;
   onDelete?: (postId: number) => void;
+  onAuthorFollowChange?: (authorUserId: string, isFollowing: boolean) => void;
   currentUserId?: string;
   isAdmin?: boolean;
   onStatsChange?: (
     postId: number,
-    patch: Partial<Pick<SocialPost, "likeCount" | "saveCount" | "isLiked" | "isSaved" | "commentCount">>
+    patch: Partial<
+      Pick<
+        SocialPost,
+        "likeCount" | "saveCount" | "isLiked" | "isSaved" | "commentCount"
+      >
+    >,
   ) => void;
 };
 
@@ -40,6 +46,7 @@ export function SocialPostCard({
   post,
   onCommentOpen,
   onDelete,
+  onAuthorFollowChange,
   currentUserId,
   isAdmin,
   onStatsChange,
@@ -51,9 +58,13 @@ export function SocialPostCard({
   const [saveCount, setSaveCount] = useState(post.saveCount);
   const [likeLoading, setLikeLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [authorFollowing, setAuthorFollowing] = useState(
+    post.authorProfile.isFollowing,
+  );
   // 더블탭 하트 애니메이션
   const [showHeartAnim, setShowHeartAnim] = useState(false);
   const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,7 +77,14 @@ export function SocialPostCard({
     setLikeCount(post.likeCount);
     setSaved(post.isSaved);
     setSaveCount(post.saveCount);
-  }, [post.isLiked, post.isSaved, post.likeCount, post.saveCount]);
+    setAuthorFollowing(post.authorProfile.isFollowing);
+  }, [
+    post.authorProfile.isFollowing,
+    post.isLiked,
+    post.isSaved,
+    post.likeCount,
+    post.saveCount,
+  ]);
 
   useEffect(() => {
     setExpanded(false);
@@ -86,13 +104,21 @@ export function SocialPostCard({
 
   const isOwnPost = currentUserId === post.authorUserId;
   const canDelete = isOwnPost || isAdmin;
+  const canFollowAuthor =
+    Boolean(currentUserId) && !isOwnPost && Boolean(post.authorProfile.handle);
   const mediaUrls = useMemo(
-    () => (post.imageUrls.length > 0 ? post.imageUrls : post.imageUrl ? [post.imageUrl] : []),
-    [post.imageUrl, post.imageUrls]
+    () =>
+      post.imageUrls.length > 0
+        ? post.imageUrls
+        : post.imageUrl
+          ? [post.imageUrl]
+          : [],
+    [post.imageUrl, post.imageUrls],
   );
   const caption = post.body.trim();
   const isLongCaption = caption.split("\n").length > 2 || caption.length > 140;
-  const profileLabel = post.authorProfile.displayName || post.authorProfile.nickname || "익명";
+  const profileLabel =
+    post.authorProfile.displayName || post.authorProfile.nickname || "익명";
 
   const goToProfile = useCallback(() => {
     if (post.authorProfile.handle) {
@@ -152,21 +178,24 @@ export function SocialPostCard({
       }
       triggerHeartAnimation();
     },
-    [liked, triggerHeartAnimation, triggerLike]
+    [liked, triggerHeartAnimation, triggerLike],
   );
 
   const goToImage = useCallback(
     (index: number) => {
       if (mediaUrls.length === 0) return;
-      const nextIndex = ((index % mediaUrls.length) + mediaUrls.length) % mediaUrls.length;
+      const nextIndex =
+        ((index % mediaUrls.length) + mediaUrls.length) % mediaUrls.length;
       setActiveImageIndex(nextIndex);
     },
-    [mediaUrls.length]
+    [mediaUrls.length],
   );
 
   const showPreviousImage = useCallback(() => {
     if (mediaUrls.length <= 1) return;
-    setActiveImageIndex((prev) => (prev === 0 ? mediaUrls.length - 1 : prev - 1));
+    setActiveImageIndex((prev) =>
+      prev === 0 ? mediaUrls.length - 1 : prev - 1,
+    );
   }, [mediaUrls.length]);
 
   const showNextImage = useCallback(() => {
@@ -192,49 +221,61 @@ export function SocialPostCard({
     });
   }, [activeImageIndex, mediaUrls]);
 
-  const handleImageTouchTap = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    const now = Date.now();
-    const delta = now - lastTapRef.current;
-    lastTapRef.current = now;
+  const handleImageTouchTap = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      const now = Date.now();
+      const delta = now - lastTapRef.current;
+      lastTapRef.current = now;
 
-    if (delta < 300 && delta > 0) {
-      handleImageDoubleLike(event);
-    }
-  }, [handleImageDoubleLike]);
+      if (delta < 300 && delta > 0) {
+        handleImageDoubleLike(event);
+      }
+    },
+    [handleImageDoubleLike],
+  );
 
   const handleImageDoubleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       handleImageDoubleLike(event);
     },
-    [handleImageDoubleLike]
+    [handleImageDoubleLike],
   );
 
-  const handleMediaTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    if (mediaUrls.length <= 1) return;
+  const handleMediaTouchStart = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      if (mediaUrls.length <= 1) return;
 
-    const touch = event.touches[0];
-    if (!touch) return;
+      const touch = event.touches[0];
+      if (!touch) return;
 
-    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-    touchDeltaRef.current = { x: 0, y: 0 };
-  }, [mediaUrls.length]);
+      touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      touchDeltaRef.current = { x: 0, y: 0 };
+    },
+    [mediaUrls.length],
+  );
 
-  const handleMediaTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    const start = touchStartRef.current;
-    const touch = event.touches[0];
+  const handleMediaTouchMove = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      const start = touchStartRef.current;
+      const touch = event.touches[0];
 
-    if (!start || !touch) return;
+      if (!start || !touch) return;
 
-    const nextDelta = {
-      x: touch.clientX - start.x,
-      y: touch.clientY - start.y,
-    };
-    touchDeltaRef.current = nextDelta;
+      const nextDelta = {
+        x: touch.clientX - start.x,
+        y: touch.clientY - start.y,
+      };
+      touchDeltaRef.current = nextDelta;
 
-    if (Math.abs(nextDelta.x) > 12 && Math.abs(nextDelta.x) > Math.abs(nextDelta.y)) {
-      event.preventDefault();
-    }
-  }, []);
+      if (
+        Math.abs(nextDelta.x) > 12 &&
+        Math.abs(nextDelta.x) > Math.abs(nextDelta.y)
+      ) {
+        event.preventDefault();
+      }
+    },
+    [],
+  );
 
   const resetTouchGesture = useCallback(() => {
     touchStartRef.current = null;
@@ -260,7 +301,13 @@ export function SocialPostCard({
 
       handleImageTouchTap(event);
     },
-    [handleImageTouchTap, mediaUrls.length, resetTouchGesture, showNextImage, showPreviousImage]
+    [
+      handleImageTouchTap,
+      mediaUrls.length,
+      resetTouchGesture,
+      showNextImage,
+      showPreviousImage,
+    ],
   );
 
   const handleSave = useCallback(async () => {
@@ -297,7 +344,9 @@ export function SocialPostCard({
 
   const handleShare = useCallback(async () => {
     const url = `${window.location.origin}/social/posts/${post.id}`;
-    const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
+    const nav = navigator as Navigator & {
+      share?: (data: ShareData) => Promise<void>;
+    };
 
     try {
       if (typeof nav.share === "function") {
@@ -325,6 +374,42 @@ export function SocialPostCard({
     }
   }, [canDelete, onDelete, post.id]);
 
+  const handleFollow = useCallback(async () => {
+    if (!post.authorProfile.handle || followLoading || isOwnPost) return;
+
+    const previous = authorFollowing;
+    setAuthorFollowing(!previous);
+    setFollowLoading(true);
+
+    try {
+      const res = await fetch(
+        `/api/social/profiles/${encodeURIComponent(post.authorProfile.handle)}/follow`,
+        {
+          method: "POST",
+        },
+      ).then((response) => response.json());
+
+      if (res.ok) {
+        const nextFollowing = Boolean(res.data?.isFollowing);
+        setAuthorFollowing(nextFollowing);
+        onAuthorFollowChange?.(post.authorUserId, nextFollowing);
+      } else {
+        setAuthorFollowing(previous);
+      }
+    } catch {
+      setAuthorFollowing(previous);
+    } finally {
+      setFollowLoading(false);
+    }
+  }, [
+    authorFollowing,
+    followLoading,
+    isOwnPost,
+    onAuthorFollowChange,
+    post.authorProfile.handle,
+    post.authorUserId,
+  ]);
+
   return (
     <article className="bg-white">
       {/* ── 헤더 ───────────────────────────────────────────── */}
@@ -339,9 +424,16 @@ export function SocialPostCard({
           <div className="rnest-social-avatar-shell flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#f6f4ff] text-[16px]">
             {post.authorProfile.profileImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={post.authorProfile.profileImageUrl} alt="" className="h-full w-full object-cover" />
+              <img
+                src={post.authorProfile.profileImageUrl}
+                alt=""
+                className="h-full w-full object-cover"
+              />
             ) : (
-              <SocialAvatarGlyph emoji={post.authorProfile.avatarEmoji} className="h-5 w-5" />
+              <SocialAvatarGlyph
+                emoji={post.authorProfile.avatarEmoji}
+                className="h-5 w-5"
+              />
             )}
           </div>
         </button>
@@ -362,17 +454,72 @@ export function SocialPostCard({
             ) : null}
           </div>
           {post.authorProfile.handle ? (
-            <div className="mt-0.5 text-[11.5px] text-gray-400">@{post.authorProfile.handle}</div>
+            <div className="mt-0.5 text-[11.5px] text-gray-400">
+              @{post.authorProfile.handle}
+            </div>
           ) : null}
         </div>
 
-        {canDelete ? (
-          <div className="relative">
+        <div className="flex shrink-0 items-center gap-2">
+          {canFollowAuthor ? (
             <button
               type="button"
-              onClick={() => setShowMenu((prev) => !prev)}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-100 active:opacity-60"
-              aria-label="게시글 옵션"
+              onClick={() => void handleFollow()}
+              disabled={followLoading}
+              className={cn(
+                "min-w-[74px] rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition active:scale-95 disabled:opacity-60",
+                authorFollowing
+                  ? "border border-gray-200 bg-[#f6f4ff] text-gray-900"
+                  : "bg-[color:var(--rnest-accent)] text-white",
+              )}
+            >
+              {authorFollowing ? "팔로잉" : "팔로우"}
+            </button>
+          ) : null}
+
+          {canDelete ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowMenu((prev) => !prev)}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-100 active:opacity-60"
+                aria-label="게시글 옵션"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <circle cx="5" cy="12" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="19" cy="12" r="1.5" />
+                </svg>
+              </button>
+              {showMenu ? (
+                <div className="absolute right-0 top-9 z-20 min-w-[140px] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    className="w-full px-4 py-3 text-left text-[13px] font-medium text-red-500 hover:bg-red-50"
+                  >
+                    삭제하기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowMenu(false)}
+                    className="w-full px-4 py-3 text-left text-[13px] text-gray-500 hover:bg-gray-50"
+                  >
+                    취소
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={goToPost}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400"
+              aria-label="게시글 보기"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
                 <circle cx="5" cy="12" r="1.5" />
@@ -380,39 +527,8 @@ export function SocialPostCard({
                 <circle cx="19" cy="12" r="1.5" />
               </svg>
             </button>
-            {showMenu ? (
-              <div className="absolute right-0 top-9 z-20 min-w-[140px] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="w-full px-4 py-3 text-left text-[13px] font-medium text-red-500 hover:bg-red-50"
-                >
-                  삭제하기
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowMenu(false)}
-                  className="w-full px-4 py-3 text-left text-[13px] text-gray-500 hover:bg-gray-50"
-                >
-                  취소
-                </button>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={goToPost}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400"
-            aria-label="게시글 보기"
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-              <circle cx="5" cy="12" r="1.5" />
-              <circle cx="12" cy="12" r="1.5" />
-              <circle cx="19" cy="12" r="1.5" />
-            </svg>
-          </button>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ── 이미지 영역 (full-bleed) ──────────────────────── */}
@@ -436,7 +552,10 @@ export function SocialPostCard({
                 }}
               >
                 {mediaUrls.map((mediaUrl, index) => (
-                  <div key={`${post.id}-media-${index}`} className="relative h-full w-full shrink-0">
+                  <div
+                    key={`${post.id}-media-${index}`}
+                    className="relative h-full w-full shrink-0"
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={mediaUrl}
@@ -459,7 +578,7 @@ export function SocialPostCard({
                   fill="white"
                   className={cn(
                     "w-24 h-24 drop-shadow-xl",
-                    "animate-[heartPop_0.9s_ease_forwards]"
+                    "animate-[heartPop_0.9s_ease_forwards]",
                   )}
                 >
                   <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -488,7 +607,7 @@ export function SocialPostCard({
                       "h-[5px] rounded-full transition-all duration-200",
                       index === activeImageIndex
                         ? "w-4 bg-white"
-                        : "w-[5px] bg-white/50"
+                        : "w-[5px] bg-white/50",
                     )}
                     aria-label={`${index + 1}번 사진으로 이동`}
                   />
@@ -508,8 +627,8 @@ export function SocialPostCard({
             onClick={handleLike}
             disabled={likeLoading}
             className={cn(
-              "flex items-center gap-1 transition-transform active:scale-90",
-              liked ? "text-rose-500" : "text-gray-900"
+              "flex items-center gap-1.5 transition-transform active:scale-90",
+              liked ? "text-rose-500" : "text-gray-900",
             )}
             aria-label={liked ? "좋아요 취소" : "좋아요"}
           >
@@ -520,17 +639,23 @@ export function SocialPostCard({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className={cn("h-[26px] w-[26px] transition-all duration-150", liked && "scale-110")}
+              className={cn(
+                "h-[26px] w-[26px] transition-all duration-150",
+                liked && "scale-110",
+              )}
             >
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
+            <span className="min-w-[1ch] text-[14px] font-semibold tabular-nums text-gray-900">
+              {formatCount(likeCount)}
+            </span>
           </button>
 
           {/* 댓글 */}
           <button
             type="button"
             onClick={() => onCommentOpen?.(post)}
-            className="text-gray-900 transition-transform active:scale-90"
+            className="flex items-center gap-1.5 text-gray-900 transition-transform active:scale-90"
             aria-label="댓글"
           >
             <svg
@@ -544,6 +669,9 @@ export function SocialPostCard({
             >
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
+            <span className="min-w-[1ch] text-[14px] font-semibold tabular-nums">
+              {formatCount(post.commentCount)}
+            </span>
           </button>
 
           {/* 공유 */}
@@ -592,15 +720,13 @@ export function SocialPostCard({
 
       {/* ── 좋아요 수 + 캡션 + 태그 ──────────────────────── */}
       <div className="px-3 pb-3">
-        {likeCount > 0 ? (
-          <div className="mb-1.5 text-[13px] font-semibold text-gray-900">
-            좋아요 {formatCount(likeCount)}개
-          </div>
-        ) : null}
-
         {caption ? (
           <div className="text-[13.5px] leading-[1.5] text-gray-900">
-            <p className={cn(!expanded && isLongCaption ? "line-clamp-2" : undefined)}>
+            <p
+              className={cn(
+                !expanded && isLongCaption ? "line-clamp-2" : undefined,
+              )}
+            >
               <button
                 type="button"
                 onClick={goToProfile}

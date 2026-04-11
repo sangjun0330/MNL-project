@@ -17,7 +17,16 @@ import {
 } from "@/lib/server/socialSecurity";
 
 const DEFAULT_AVATAR = "🐧";
-const ALLOWED_AVATARS = new Set(["🐧", "🦊", "🐱", "🐻", "🦁", "🐺", "🦅", "🐬"]);
+const ALLOWED_AVATARS = new Set([
+  "🐧",
+  "🦊",
+  "🐱",
+  "🐻",
+  "🦁",
+  "🐺",
+  "🦅",
+  "🐬",
+]);
 const HANDLE_REGEX = /^[a-z0-9](?:[a-z0-9._-]{1,28}[a-z0-9])?$/;
 const PROFILE_SELECT =
   "user_id, nickname, avatar_emoji, status_message, handle, display_name, bio, profile_image_path, account_visibility, discoverability, default_post_visibility, updated_at";
@@ -42,8 +51,16 @@ type AuthSeed = {
   handleCandidate: string;
 };
 
-export type SocialProfileAvailabilityField = "displayName" | "handle" | "nickname";
-export type SocialProfileAvailabilityReason = "available" | "same" | "taken" | "invalid" | "required";
+export type SocialProfileAvailabilityField =
+  | "displayName"
+  | "handle"
+  | "nickname";
+export type SocialProfileAvailabilityReason =
+  | "available"
+  | "same"
+  | "taken"
+  | "invalid"
+  | "required";
 
 export type SocialProfileAvailabilityResult = {
   field: SocialProfileAvailabilityField;
@@ -78,7 +95,9 @@ function normalizePostVisibility(value: unknown): SocialPostVisibility {
   return "friends";
 }
 
-function normalizeProfileDefaultPostVisibility(value: unknown): SocialPostVisibility {
+function normalizeProfileDefaultPostVisibility(
+  value: unknown,
+): SocialPostVisibility {
   if (value === "public_internal") return "public_internal";
   if (value === "followers") return "followers";
   if (value === "friends") return "friends";
@@ -86,18 +105,25 @@ function normalizeProfileDefaultPostVisibility(value: unknown): SocialPostVisibi
   return DEFAULT_SOCIAL_POST_VISIBILITY;
 }
 
-export function normalizeAccountVisibility(value: unknown): SocialAccountVisibility {
+export function normalizeAccountVisibility(
+  value: unknown,
+): SocialAccountVisibility {
   return value === "private" ? "private" : "public";
 }
 
-export function normalizeSocialDiscoverability(value: unknown): SocialProfileDiscoverability {
+export function normalizeSocialDiscoverability(
+  value: unknown,
+): SocialProfileDiscoverability {
   return value === "internal" ? "internal" : "off";
 }
 
 export function cleanSocialBio(value: unknown) {
   const raw = String(value ?? "")
     .replace(/<[^>]*>/g, "")
-    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069]/g, "")
+    .replace(
+      /[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069]/g,
+      "",
+    )
     .replace(/\r/g, "")
     .replace(/\t/g, " ")
     .split("\n")
@@ -113,13 +139,20 @@ export function cleanSocialHandle(value: unknown) {
   return HANDLE_REGEX.test(normalized) ? normalized : "";
 }
 
-function normalizeSocialProfileRow(row: SocialHubProfileRow | null | undefined, userId: string): SocialProfile {
-  const nickname = cleanSocialNickname(row?.nickname ?? "", 12) || fallbackNicknameFromUserId(userId);
+function normalizeSocialProfileRow(
+  row: SocialHubProfileRow | null | undefined,
+  userId: string,
+): SocialProfile {
+  const nickname =
+    cleanSocialNickname(row?.nickname ?? "", 12) ||
+    fallbackNicknameFromUserId(userId);
   const displayName =
     cleanSocialNickname(row?.display_name ?? "", 24) ||
     cleanSocialNickname(row?.nickname ?? "", 24) ||
     fallbackDisplayNameFromUserId(userId);
-  const avatarEmoji = ALLOWED_AVATARS.has(String(row?.avatar_emoji ?? "")) ? String(row?.avatar_emoji) : DEFAULT_AVATAR;
+  const avatarEmoji = ALLOWED_AVATARS.has(String(row?.avatar_emoji ?? ""))
+    ? String(row?.avatar_emoji)
+    : DEFAULT_AVATAR;
   const handle = cleanSocialHandle(row?.handle ?? "") || null;
   const bio = cleanSocialBio(row?.bio ?? "");
   const profileImagePath =
@@ -139,13 +172,15 @@ function normalizeSocialProfileRow(row: SocialHubProfileRow | null | undefined, 
     profileImageUrl,
     accountVisibility: normalizeAccountVisibility(row?.account_visibility),
     discoverability: normalizeSocialDiscoverability(row?.discoverability),
-    defaultPostVisibility: normalizeProfileDefaultPostVisibility(row?.default_post_visibility),
+    defaultPostVisibility: normalizeProfileDefaultPostVisibility(
+      row?.default_post_visibility,
+    ),
   };
 }
 
 export function buildSocialAuthorProfile(
   userId: string,
-  profile: SocialProfile | null | undefined
+  profile: SocialProfile | null | undefined,
 ): SocialAuthorProfile {
   const normalized = normalizeSocialProfileRow(
     profile
@@ -163,7 +198,7 @@ export function buildSocialAuthorProfile(
           default_post_visibility: profile.defaultPostVisibility,
         }
       : null,
-    userId
+    userId,
   );
   return {
     userId,
@@ -173,10 +208,15 @@ export function buildSocialAuthorProfile(
     displayName: normalized.displayName,
     bio: normalized.bio,
     profileImageUrl: normalized.profileImageUrl,
+    isFollowing: false,
+    isSelf: false,
   };
 }
 
-function buildFollowSummary(userId: string, profile: SocialProfile | null | undefined): SocialFollowSummary {
+function buildFollowSummary(
+  userId: string,
+  profile: SocialProfile | null | undefined,
+): SocialFollowSummary {
   const author = buildSocialAuthorProfile(userId, profile);
   return {
     userId,
@@ -190,7 +230,10 @@ function buildFollowSummary(userId: string, profile: SocialProfile | null | unde
   };
 }
 
-async function loadProfileRow(admin: any, userId: string): Promise<SocialHubProfileRow | null> {
+async function loadProfileRow(
+  admin: any,
+  userId: string,
+): Promise<SocialHubProfileRow | null> {
   const { data } = await (admin as any)
     .from("rnest_social_profiles")
     .select(PROFILE_SELECT)
@@ -202,7 +245,8 @@ async function loadProfileRow(admin: any, userId: string): Promise<SocialHubProf
 async function getAuthSeed(admin: any, userId: string): Promise<AuthSeed> {
   const fallbackDisplayName = fallbackDisplayNameFromUserId(userId);
   const fallbackNickname = fallbackNicknameFromUserId(userId);
-  const fallbackHandleCandidate = sanitizeHandleCandidate(userId.split("-")[0] ?? "user") || "user";
+  const fallbackHandleCandidate =
+    sanitizeHandleCandidate(userId.split("-")[0] ?? "user") || "user";
 
   try {
     const { data } = await admin.auth.admin.getUserById(userId);
@@ -215,13 +259,17 @@ async function getAuthSeed(admin: any, userId: string): Promise<AuthSeed> {
           meta.preferred_username ??
           meta.user_name ??
           meta.nickname ??
-          ""
+          "",
       ).trim() ||
-      String(authUser?.email ?? "").split("@")[0]?.trim() ||
+      String(authUser?.email ?? "")
+        .split("@")[0]
+        ?.trim() ||
       fallbackDisplayName;
 
-    const displayName = cleanSocialNickname(rawDisplayName, 24) || fallbackDisplayName;
-    const nickname = cleanSocialNickname(rawDisplayName, 12) || fallbackNickname;
+    const displayName =
+      cleanSocialNickname(rawDisplayName, 24) || fallbackDisplayName;
+    const nickname =
+      cleanSocialNickname(rawDisplayName, 12) || fallbackNickname;
     const handleCandidate =
       cleanSocialHandle(meta.preferred_username ?? "") ||
       cleanSocialHandle(meta.user_name ?? "") ||
@@ -242,7 +290,7 @@ async function getAuthSeed(admin: any, userId: string): Promise<AuthSeed> {
 async function reserveAvailableHandle(
   admin: any,
   requestedHandle: string,
-  excludeUserId?: string | null
+  excludeUserId?: string | null,
 ): Promise<string> {
   const base = cleanSocialHandle(requestedHandle) || "user";
 
@@ -266,7 +314,7 @@ async function isProfileFieldTaken(
   admin: any,
   column: "display_name" | "handle" | "nickname",
   value: string,
-  userId: string
+  userId: string,
 ) {
   const { data, error } = await (admin as any)
     .from("rnest_social_profiles")
@@ -284,7 +332,7 @@ async function assertProfileFieldAvailable(
   column: "display_name" | "nickname",
   value: string,
   userId: string,
-  errorCode: "display_name_taken" | "nickname_taken"
+  errorCode: "display_name_taken" | "nickname_taken",
 ) {
   if (await isProfileFieldTaken(admin, column, value, userId)) {
     throw Object.assign(new Error(errorCode), { code: errorCode });
@@ -295,11 +343,13 @@ async function assertProfileFieldAvailable(
 async function assertHandleAvailable(
   admin: any,
   requestedHandle: string,
-  userId: string
+  userId: string,
 ): Promise<string> {
   const normalizedHandle = cleanSocialHandle(requestedHandle);
   if (!normalizedHandle) {
-    throw Object.assign(new Error("invalid_handle"), { code: "invalid_handle" });
+    throw Object.assign(new Error("invalid_handle"), {
+      code: "invalid_handle",
+    });
   }
 
   if (await isProfileFieldTaken(admin, "handle", normalizedHandle, userId)) {
@@ -315,10 +365,12 @@ export async function checkSocialProfileAvailability(
   input: {
     field?: unknown;
     value?: unknown;
-  }
+  },
 ): Promise<SocialProfileAvailabilityResult> {
   const field =
-    input.field === "displayName" || input.field === "handle" || input.field === "nickname"
+    input.field === "displayName" ||
+    input.field === "handle" ||
+    input.field === "nickname"
       ? input.field
       : null;
 
@@ -327,17 +379,29 @@ export async function checkSocialProfileAvailability(
   }
 
   const existing = await loadProfileRow(admin, userId);
-  const current = existing ? normalizeSocialProfileRow(existing, userId) : await ensureSocialProfile(admin, userId);
+  const current = existing
+    ? normalizeSocialProfileRow(existing, userId)
+    : await ensureSocialProfile(admin, userId);
 
   if (field === "handle") {
     const normalizedValue = cleanSocialHandle(input.value);
     if (!normalizedValue) {
-      return { field, normalizedValue: "", available: false, reason: "invalid" };
+      return {
+        field,
+        normalizedValue: "",
+        available: false,
+        reason: "invalid",
+      };
     }
     if (normalizedValue === (current.handle ?? "")) {
       return { field, normalizedValue, available: true, reason: "same" };
     }
-    const taken = await isProfileFieldTaken(admin, "handle", normalizedValue, userId);
+    const taken = await isProfileFieldTaken(
+      admin,
+      "handle",
+      normalizedValue,
+      userId,
+    );
     return {
       field,
       normalizedValue,
@@ -352,7 +416,8 @@ export async function checkSocialProfileAvailability(
     return { field, normalizedValue: "", available: false, reason: "required" };
   }
 
-  const currentValue = field === "displayName" ? current.displayName : current.nickname;
+  const currentValue =
+    field === "displayName" ? current.displayName : current.nickname;
   if (normalizedValue === currentValue) {
     return { field, normalizedValue, available: true, reason: "same" };
   }
@@ -361,7 +426,7 @@ export async function checkSocialProfileAvailability(
     admin,
     field === "displayName" ? "display_name" : "nickname",
     normalizedValue,
-    userId
+    userId,
   );
 
   return {
@@ -372,7 +437,10 @@ export async function checkSocialProfileAvailability(
   };
 }
 
-export async function ensureSocialProfile(admin: any, userId: string): Promise<SocialProfile> {
+export async function ensureSocialProfile(
+  admin: any,
+  userId: string,
+): Promise<SocialProfile> {
   const existing = await loadProfileRow(admin, userId);
   const seed = await getAuthSeed(admin, userId);
   const updates: Record<string, unknown> = {};
@@ -382,11 +450,16 @@ export async function ensureSocialProfile(admin: any, userId: string): Promise<S
   if (!existing?.status_message) updates.status_message = "";
   if (!existing?.display_name) updates.display_name = seed.displayName;
   if (!existing?.handle) {
-    updates.handle = await reserveAvailableHandle(admin, seed.handleCandidate, userId);
+    updates.handle = await reserveAvailableHandle(
+      admin,
+      seed.handleCandidate,
+      userId,
+    );
   }
   if (!existing?.account_visibility) updates.account_visibility = "public";
   if (!existing?.discoverability) updates.discoverability = "off";
-  if (!existing?.default_post_visibility) updates.default_post_visibility = DEFAULT_SOCIAL_POST_VISIBILITY;
+  if (!existing?.default_post_visibility)
+    updates.default_post_visibility = DEFAULT_SOCIAL_POST_VISIBILITY;
 
   if (existing && Object.keys(updates).length === 0) {
     return normalizeSocialProfileRow(existing, userId);
@@ -400,12 +473,16 @@ export async function ensureSocialProfile(admin: any, userId: string): Promise<S
     display_name: existing?.display_name ?? seed.displayName,
     handle:
       existing?.handle ??
-      String(updates.handle ?? (await reserveAvailableHandle(admin, seed.handleCandidate, userId))),
+      String(
+        updates.handle ??
+          (await reserveAvailableHandle(admin, seed.handleCandidate, userId)),
+      ),
     bio: existing?.bio ?? "",
     profile_image_path: existing?.profile_image_path ?? null,
     account_visibility: existing?.account_visibility ?? "public",
     discoverability: existing?.discoverability ?? "off",
-    default_post_visibility: existing?.default_post_visibility ?? DEFAULT_SOCIAL_POST_VISIBILITY,
+    default_post_visibility:
+      existing?.default_post_visibility ?? DEFAULT_SOCIAL_POST_VISIBILITY,
     updated_at: new Date().toISOString(),
   };
 
@@ -436,23 +513,32 @@ export async function saveSocialProfile(
     accountVisibility?: unknown;
     discoverability?: unknown;
     defaultPostVisibility?: unknown;
-  }
+  },
 ): Promise<SocialProfile> {
   const current = await ensureSocialProfile(admin, userId);
 
   const nickname = cleanSocialNickname(input.nickname ?? current.nickname, 12);
   if (!nickname) {
-    throw Object.assign(new Error("nickname_required"), { code: "nickname_required" });
+    throw Object.assign(new Error("nickname_required"), {
+      code: "nickname_required",
+    });
   }
 
   const avatarEmoji = String(input.avatarEmoji ?? current.avatarEmoji).trim();
   if (!ALLOWED_AVATARS.has(avatarEmoji)) {
-    throw Object.assign(new Error("invalid_avatar"), { code: "invalid_avatar" });
+    throw Object.assign(new Error("invalid_avatar"), {
+      code: "invalid_avatar",
+    });
   }
 
-  const displayName = cleanSocialNickname(input.displayName ?? input.nickname ?? current.displayName, 24);
+  const displayName = cleanSocialNickname(
+    input.displayName ?? input.nickname ?? current.displayName,
+    24,
+  );
   if (!displayName) {
-    throw Object.assign(new Error("display_name_required"), { code: "display_name_required" });
+    throw Object.assign(new Error("display_name_required"), {
+      code: "display_name_required",
+    });
   }
 
   const requestedHandle =
@@ -460,27 +546,47 @@ export async function saveSocialProfile(
       ? current.handle
       : cleanSocialHandle(input.handle);
   if (!requestedHandle) {
-    throw Object.assign(new Error("invalid_handle"), { code: "invalid_handle" });
+    throw Object.assign(new Error("invalid_handle"), {
+      code: "invalid_handle",
+    });
   }
 
   if (nickname !== current.nickname) {
-    await assertProfileFieldAvailable(admin, "nickname", nickname, userId, "nickname_taken");
+    await assertProfileFieldAvailable(
+      admin,
+      "nickname",
+      nickname,
+      userId,
+      "nickname_taken",
+    );
   }
 
   if (displayName !== current.displayName) {
-    await assertProfileFieldAvailable(admin, "display_name", displayName, userId, "display_name_taken");
+    await assertProfileFieldAvailable(
+      admin,
+      "display_name",
+      displayName,
+      userId,
+      "display_name_taken",
+    );
   }
 
   const handle =
-    requestedHandle === current.handle ? requestedHandle : await assertHandleAvailable(admin, requestedHandle, userId);
+    requestedHandle === current.handle
+      ? requestedHandle
+      : await assertHandleAvailable(admin, requestedHandle, userId);
   const bio = cleanSocialBio(input.bio ?? current.bio);
-  const statusMessage = cleanStatusMessage(input.statusMessage ?? current.statusMessage);
-  const accountVisibility = normalizeAccountVisibility(
-    input.accountVisibility ?? current.accountVisibility
+  const statusMessage = cleanStatusMessage(
+    input.statusMessage ?? current.statusMessage,
   );
-  const discoverability = normalizeSocialDiscoverability(input.discoverability ?? current.discoverability);
+  const accountVisibility = normalizeAccountVisibility(
+    input.accountVisibility ?? current.accountVisibility,
+  );
+  const discoverability = normalizeSocialDiscoverability(
+    input.discoverability ?? current.discoverability,
+  );
   const defaultPostVisibility = normalizeProfileDefaultPostVisibility(
-    input.defaultPostVisibility ?? current.defaultPostVisibility
+    input.defaultPostVisibility ?? current.defaultPostVisibility,
   );
 
   const { data, error } = await (admin as any)
@@ -504,11 +610,21 @@ export async function saveSocialProfile(
 
   if (error) {
     const message = String(error.message ?? error).toLowerCase();
-    if (message.includes("display_name") && (message.includes("duplicate") || message.includes("unique"))) {
-      throw Object.assign(new Error("display_name_taken"), { code: "display_name_taken" });
+    if (
+      message.includes("display_name") &&
+      (message.includes("duplicate") || message.includes("unique"))
+    ) {
+      throw Object.assign(new Error("display_name_taken"), {
+        code: "display_name_taken",
+      });
     }
-    if (message.includes("nickname") && (message.includes("duplicate") || message.includes("unique"))) {
-      throw Object.assign(new Error("nickname_taken"), { code: "nickname_taken" });
+    if (
+      message.includes("nickname") &&
+      (message.includes("duplicate") || message.includes("unique"))
+    ) {
+      throw Object.assign(new Error("nickname_taken"), {
+        code: "nickname_taken",
+      });
     }
     if (message.includes("duplicate") || message.includes("unique")) {
       throw Object.assign(new Error("handle_taken"), { code: "handle_taken" });
@@ -519,7 +635,11 @@ export async function saveSocialProfile(
   return normalizeSocialProfileRow(data as SocialHubProfileRow, userId);
 }
 
-export async function setSocialProfileImage(admin: any, userId: string, imagePath: string | null) {
+export async function setSocialProfileImage(
+  admin: any,
+  userId: string,
+  imagePath: string | null,
+) {
   const current = await ensureSocialProfile(admin, userId);
   const { data, error } = await (admin as any)
     .from("rnest_social_profiles")
@@ -545,7 +665,9 @@ export async function setSocialProfileImage(admin: any, userId: string, imagePat
 }
 
 export async function loadSocialHubProfileMap(admin: any, userIds: string[]) {
-  const normalizedIds = Array.from(new Set(userIds.map((value) => String(value ?? "").trim()).filter(Boolean)));
+  const normalizedIds = Array.from(
+    new Set(userIds.map((value) => String(value ?? "").trim()).filter(Boolean)),
+  );
   const map = new Map<string, SocialProfile>();
   if (normalizedIds.length === 0) return map;
 
@@ -560,13 +682,18 @@ export async function loadSocialHubProfileMap(admin: any, userIds: string[]) {
   }
 
   for (const userId of normalizedIds) {
-    map.set(userId, normalizeSocialProfileRow(rowByUserId.get(userId) ?? null, userId));
+    map.set(
+      userId,
+      normalizeSocialProfileRow(rowByUserId.get(userId) ?? null, userId),
+    );
   }
 
   return map;
 }
 
-export function buildDefaultSocialRelationshipState(isSelf = false): SocialRelationshipState {
+export function buildDefaultSocialRelationshipState(
+  isSelf = false,
+): SocialRelationshipState {
   return {
     isSelf,
     isFollowing: false,
@@ -581,10 +708,12 @@ export function buildDefaultSocialRelationshipState(isSelf = false): SocialRelat
 export async function getSocialRelationshipState(
   admin: any,
   viewerId: string,
-  targetUserId: string
+  targetUserId: string,
 ): Promise<SocialRelationshipState> {
-  if (!viewerId || !targetUserId) return buildDefaultSocialRelationshipState(false);
-  if (viewerId === targetUserId) return buildDefaultSocialRelationshipState(true);
+  if (!viewerId || !targetUserId)
+    return buildDefaultSocialRelationshipState(false);
+  if (viewerId === targetUserId)
+    return buildDefaultSocialRelationshipState(true);
 
   const [
     viewerFollowsTarget,
@@ -615,7 +744,9 @@ export async function getSocialRelationshipState(
   ]);
 
   const connectionStatus =
-    viewerToTargetConnection.data?.status ?? targetToViewerConnection.data?.status ?? null;
+    viewerToTargetConnection.data?.status ??
+    targetToViewerConnection.data?.status ??
+    null;
 
   return {
     isSelf: false,
@@ -623,12 +754,18 @@ export async function getSocialRelationshipState(
     isFollowedByViewer: Boolean(viewerFollowsTarget.data),
     followsViewer: Boolean(targetFollowsViewer.data),
     isFriend: connectionStatus === "accepted",
-    hasOutgoingFriendRequest: viewerToTargetConnection.data?.status === "pending",
-    hasIncomingFriendRequest: targetToViewerConnection.data?.status === "pending",
+    hasOutgoingFriendRequest:
+      viewerToTargetConnection.data?.status === "pending",
+    hasIncomingFriendRequest:
+      targetToViewerConnection.data?.status === "pending",
   };
 }
 
-async function viewerSharesGroupWithTarget(admin: any, viewerId: string, targetUserId: string) {
+async function viewerSharesGroupWithTarget(
+  admin: any,
+  viewerId: string,
+  targetUserId: string,
+) {
   if (!viewerId || !targetUserId || viewerId === targetUserId) return false;
 
   const [viewerMemberships, targetMemberships] = await Promise.all([
@@ -643,21 +780,31 @@ async function viewerSharesGroupWithTarget(admin: any, viewerId: string, targetU
   ]);
 
   const viewerGroupIds = new Set<number>(
-    (viewerMemberships.data ?? []).map((row: any) => Number(row.group_id))
+    (viewerMemberships.data ?? []).map((row: any) => Number(row.group_id)),
   );
 
   return (targetMemberships.data ?? []).some((row: any) =>
-    viewerGroupIds.has(Number(row.group_id))
+    viewerGroupIds.has(Number(row.group_id)),
   );
 }
 
-async function countAccessibleProfilePosts(admin: any, viewerId: string, targetUserId: string) {
-  const relationship = await getSocialRelationshipState(admin, viewerId, targetUserId);
+async function countAccessibleProfilePosts(
+  admin: any,
+  viewerId: string,
+  targetUserId: string,
+) {
+  const relationship = await getSocialRelationshipState(
+    admin,
+    viewerId,
+    targetUserId,
+  );
   const { data: membershipRows } = await (admin as any)
     .from("rnest_social_group_members")
     .select("group_id")
     .eq("user_id", viewerId);
-  const groupIds = new Set<number>((membershipRows ?? []).map((row: any) => Number(row.group_id)));
+  const groupIds = new Set<number>(
+    (membershipRows ?? []).map((row: any) => Number(row.group_id)),
+  );
 
   const { data: postRows } = await (admin as any)
     .from("rnest_social_posts")
@@ -691,11 +838,21 @@ async function countAccessibleProfilePosts(admin: any, viewerId: string, targetU
   return visibleCount;
 }
 
-async function loadProfileHeaderByUserId(admin: any, targetUserId: string, viewerId: string) {
+async function loadProfileHeaderByUserId(
+  admin: any,
+  targetUserId: string,
+  viewerId: string,
+) {
   const row = await loadProfileRow(admin, targetUserId);
   if (!row) return null;
 
-  const [relationship, sharesGroup, followerCountResult, followingCountResult, postCount] = await Promise.all([
+  const [
+    relationship,
+    sharesGroup,
+    followerCountResult,
+    followingCountResult,
+    postCount,
+  ] = await Promise.all([
     getSocialRelationshipState(admin, viewerId, targetUserId),
     viewerSharesGroupWithTarget(admin, viewerId, targetUserId),
     (admin as any)
@@ -739,7 +896,7 @@ async function loadProfileHeaderByUserId(admin: any, targetUserId: string, viewe
 export async function getSocialProfileHeaderByHandle(
   admin: any,
   handle: string,
-  viewerId: string
+  viewerId: string,
 ): Promise<SocialProfileHeader | null> {
   const normalizedHandle = cleanSocialHandle(handle);
   if (!normalizedHandle) return null;
@@ -757,14 +914,20 @@ export async function getSocialProfileHeaderByHandle(
 export async function getSocialProfileHeaderByUserId(
   admin: any,
   targetUserId: string,
-  viewerId: string
+  viewerId: string,
 ) {
   return loadProfileHeaderByUserId(admin, targetUserId, viewerId);
 }
 
-export async function toggleFollow(admin: any, viewerId: string, targetUserId: string) {
+export async function toggleFollow(
+  admin: any,
+  viewerId: string,
+  targetUserId: string,
+) {
   if (!viewerId || !targetUserId || viewerId === targetUserId) {
-    throw Object.assign(new Error("invalid_follow_target"), { code: "invalid_follow_target" });
+    throw Object.assign(new Error("invalid_follow_target"), {
+      code: "invalid_follow_target",
+    });
   }
 
   const [{ data: existing }, viewerProfile] = await Promise.all([
@@ -825,23 +988,34 @@ export async function toggleFollow(admin: any, viewerId: string, targetUserId: s
 export async function listFollowSummaries(
   admin: any,
   targetUserId: string,
-  direction: "followers" | "following"
+  direction: "followers" | "following",
 ) {
   const { data: rows, error } = await (admin as any)
     .from("rnest_social_follows")
-    .select(direction === "followers" ? "follower_user_id, created_at" : "followee_user_id, created_at")
-    .eq(direction === "followers" ? "followee_user_id" : "follower_user_id", targetUserId)
+    .select(
+      direction === "followers"
+        ? "follower_user_id, created_at"
+        : "followee_user_id, created_at",
+    )
+    .eq(
+      direction === "followers" ? "followee_user_id" : "follower_user_id",
+      targetUserId,
+    )
     .order("created_at", { ascending: false })
     .limit(50);
 
   if (error) throw error;
 
   const userIds = (rows ?? []).map((row: any) =>
-    String(direction === "followers" ? row.follower_user_id : row.followee_user_id)
+    String(
+      direction === "followers" ? row.follower_user_id : row.followee_user_id,
+    ),
   );
   const profileMap = await loadSocialHubProfileMap(admin, userIds);
 
-  return userIds.map((userId: string) => buildFollowSummary(userId, profileMap.get(userId)));
+  return userIds.map((userId: string) =>
+    buildFollowSummary(userId, profileMap.get(userId)),
+  );
 }
 
 function escapeLike(value: string) {
@@ -859,14 +1033,19 @@ export async function searchSocialProfiles(admin: any, query: string) {
 
   if (normalizedQuery) {
     const like = `%${escapeLike(normalizedQuery)}%`;
-    builder = builder.or(`handle.ilike.${like},display_name.ilike.${like},nickname.ilike.${like}`);
+    builder = builder.or(
+      `handle.ilike.${like},display_name.ilike.${like},nickname.ilike.${like}`,
+    );
   }
 
   const { data, error } = await builder;
   if (error) throw error;
 
   return ((data as SocialHubProfileRow[] | null) ?? []).map((row) =>
-    buildFollowSummary(String(row.user_id), normalizeSocialProfileRow(row, String(row.user_id)))
+    buildFollowSummary(
+      String(row.user_id),
+      normalizeSocialProfileRow(row, String(row.user_id)),
+    ),
   );
 }
 
@@ -881,6 +1060,9 @@ export async function listDiscoverableProfiles(admin: any) {
   if (error) throw error;
 
   return ((data as SocialHubProfileRow[] | null) ?? []).map((row) =>
-    buildFollowSummary(String(row.user_id), normalizeSocialProfileRow(row, String(row.user_id)))
+    buildFollowSummary(
+      String(row.user_id),
+      normalizeSocialProfileRow(row, String(row.user_id)),
+    ),
   );
 }

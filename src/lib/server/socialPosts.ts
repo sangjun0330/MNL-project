@@ -41,6 +41,11 @@ type PostRow = {
   updated_at: string | null;
 };
 
+type PostAuthorRelationship = {
+  isFollowing: boolean;
+  isSelf: boolean;
+};
+
 type CommentRow = {
   id: number;
   post_id: number;
@@ -61,7 +66,10 @@ function normalizeVisibility(value: unknown): SocialPostVisibility {
 
 function buildImageUrl(imagePath: string | null): string | null {
   if (!imagePath) return null;
-  const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
+  const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(
+    /\/+$/,
+    "",
+  );
   if (!base) return null;
   return `${base}/storage/v1/object/public/social-post-images/${imagePath}`;
 }
@@ -72,10 +80,16 @@ function buildImageUrls(imagePaths: string[]) {
     .filter((value): value is string => Boolean(value));
 }
 
-function normalizeStoredImagePaths(row: Pick<PostRow, "image_path" | "image_paths">) {
+function normalizeStoredImagePaths(
+  row: Pick<PostRow, "image_path" | "image_paths">,
+) {
   const fromArray = Array.isArray(row.image_paths)
     ? row.image_paths
-        .map((value) => String(value ?? "").replace(/^\/+/, "").trim())
+        .map((value) =>
+          String(value ?? "")
+            .replace(/^\/+/, "")
+            .trim(),
+        )
         .filter(Boolean)
     : [];
 
@@ -83,7 +97,9 @@ function normalizeStoredImagePaths(row: Pick<PostRow, "image_path" | "image_path
     return Array.from(new Set(fromArray));
   }
 
-  const legacyPath = row.image_path ? String(row.image_path).replace(/^\/+/, "").trim() : "";
+  const legacyPath = row.image_path
+    ? String(row.image_path).replace(/^\/+/, "").trim()
+    : "";
   return legacyPath ? [legacyPath] : [];
 }
 
@@ -147,7 +163,10 @@ export function cleanPostImagePaths(value: unknown): string[] {
   const seen = new Set<string>();
 
   for (const rawPath of value) {
-    const imagePath = String(rawPath ?? "").replace(/^\/+/, "").trim().slice(0, 500);
+    const imagePath = String(rawPath ?? "")
+      .replace(/^\/+/, "")
+      .trim()
+      .slice(0, 500);
     if (!imagePath) continue;
     if (seen.has(imagePath)) continue;
     seen.add(imagePath);
@@ -158,7 +177,10 @@ export function cleanPostImagePaths(value: unknown): string[] {
   return normalized;
 }
 
-async function buildViewerAccessContext(admin: any, userId: string): Promise<ViewerAccessContext> {
+async function buildViewerAccessContext(
+  admin: any,
+  userId: string,
+): Promise<ViewerAccessContext> {
   const [followRows, connectionRows, membershipRows] = await Promise.all([
     (admin as any)
       .from("rnest_social_follows")
@@ -175,19 +197,26 @@ async function buildViewerAccessContext(admin: any, userId: string): Promise<Vie
       .eq("user_id", userId),
   ]);
 
-  const followingIds = new Set<string>((followRows.data ?? []).map((row: any) => String(row.followee_user_id)));
+  const followingIds = new Set<string>(
+    (followRows.data ?? []).map((row: any) => String(row.followee_user_id)),
+  );
   const friendIds = new Set<string>();
   for (const row of connectionRows.data ?? []) {
     const requesterId = String(row.requester_id);
     const receiverId = String(row.receiver_id);
     friendIds.add(requesterId === userId ? receiverId : requesterId);
   }
-  const groupIds = new Set<number>((membershipRows.data ?? []).map((row: any) => Number(row.group_id)));
+  const groupIds = new Set<number>(
+    (membershipRows.data ?? []).map((row: any) => Number(row.group_id)),
+  );
 
   return { userId, followingIds, friendIds, groupIds };
 }
 
-function canUserAccessPostWithContext(postRow: any, context: ViewerAccessContext): boolean {
+function canUserAccessPostWithContext(
+  postRow: any,
+  context: ViewerAccessContext,
+): boolean {
   const authorUserId = String(postRow.author_user_id);
   if (authorUserId === context.userId) return true;
 
@@ -195,18 +224,25 @@ function canUserAccessPostWithContext(postRow: any, context: ViewerAccessContext
   if (visibility === "public_internal") return true;
   if (visibility === "followers") return context.followingIds.has(authorUserId);
   if (visibility === "friends") return context.friendIds.has(authorUserId);
-  if (visibility === "group") return context.groupIds.has(Number(postRow.group_id));
+  if (visibility === "group")
+    return context.groupIds.has(Number(postRow.group_id));
   return false;
 }
 
-export async function canUserAccessPost(admin: any, postRow: any, userId: string) {
+export async function canUserAccessPost(
+  admin: any,
+  postRow: any,
+  userId: string,
+) {
   const context = await buildViewerAccessContext(admin, userId);
   return canUserAccessPostWithContext(postRow, context);
 }
 
 async function loadGroupNameMap(admin: any, groupIds: number[]) {
   const map = new Map<number, string>();
-  const normalized = Array.from(new Set(groupIds.filter((value) => Number.isFinite(value) && value > 0)));
+  const normalized = Array.from(
+    new Set(groupIds.filter((value) => Number.isFinite(value) && value > 0)),
+  );
   if (normalized.length === 0) return map;
 
   const { data } = await (admin as any)
@@ -221,8 +257,14 @@ async function loadGroupNameMap(admin: any, groupIds: number[]) {
   return map;
 }
 
-async function loadPostInteractionMaps(admin: any, userId: string, postIds: number[]) {
-  const normalized = Array.from(new Set(postIds.filter((value) => Number.isFinite(value) && value > 0)));
+async function loadPostInteractionMaps(
+  admin: any,
+  userId: string,
+  postIds: number[],
+) {
+  const normalized = Array.from(
+    new Set(postIds.filter((value) => Number.isFinite(value) && value > 0)),
+  );
   if (normalized.length === 0) {
     return {
       likedPostIds: new Set<number>(),
@@ -248,8 +290,12 @@ async function loadPostInteractionMaps(admin: any, userId: string, postIds: numb
       .in("post_id", normalized),
   ]);
 
-  const likedPostIds = new Set<number>((likeRows.data ?? []).map((row: any) => Number(row.post_id)));
-  const savedPostIds = new Set<number>((saveRows.data ?? []).map((row: any) => Number(row.post_id)));
+  const likedPostIds = new Set<number>(
+    (likeRows.data ?? []).map((row: any) => Number(row.post_id)),
+  );
+  const savedPostIds = new Set<number>(
+    (saveRows.data ?? []).map((row: any) => Number(row.post_id)),
+  );
   const saveCountMap = new Map<number, number>();
 
   for (const row of saveCountRows.data ?? []) {
@@ -262,15 +308,27 @@ async function loadPostInteractionMaps(admin: any, userId: string, postIds: numb
 
 function buildSocialPost(
   row: PostRow,
-  profileMap: Map<string, ReturnType<typeof ensureSocialProfile> extends Promise<infer T> ? T : never>,
+  profileMap: Map<
+    string,
+    ReturnType<typeof ensureSocialProfile> extends Promise<infer T> ? T : never
+  >,
+  authorRelationshipMap: Map<string, PostAuthorRelationship>,
   likedPostIds: Set<number>,
   savedPostIds: Set<number>,
   saveCountMap: Map<number, number>,
-  groupNameMap: Map<number, string>
+  groupNameMap: Map<number, string>,
 ): SocialPost {
   const authorUserId = String(row.author_user_id);
   const profile = profileMap.get(authorUserId);
-  const authorProfile = buildSocialAuthorProfile(authorUserId, profile);
+  const relationship = authorRelationshipMap.get(authorUserId) ?? {
+    isFollowing: false,
+    isSelf: false,
+  };
+  const authorProfile = {
+    ...buildSocialAuthorProfile(authorUserId, profile),
+    isFollowing: relationship.isFollowing,
+    isSelf: relationship.isSelf,
+  };
   const groupId = row.group_id ? Number(row.group_id) : null;
   const imagePaths = normalizeStoredImagePaths(row);
   const imageUrls = buildImageUrls(imagePaths);
@@ -287,7 +345,7 @@ function buildSocialPost(
     tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
     visibility: normalizeVisibility(row.visibility),
     groupId,
-    groupName: groupId ? groupNameMap.get(groupId) ?? null : null,
+    groupName: groupId ? (groupNameMap.get(groupId) ?? null) : null,
     likeCount: Number(row.like_count ?? 0),
     commentCount: Number(row.comment_count ?? 0),
     saveCount: Number(saveCountMap.get(Number(row.id)) ?? 0),
@@ -298,33 +356,89 @@ function buildSocialPost(
   };
 }
 
-async function hydratePosts(admin: any, userId: string, rows: PostRow[]): Promise<SocialPost[]> {
+async function loadPostAuthorRelationshipMap(
+  admin: any,
+  userId: string,
+  authorIds: string[],
+): Promise<Map<string, PostAuthorRelationship>> {
+  const relationshipMap = new Map<string, PostAuthorRelationship>();
+  const normalizedAuthorIds = Array.from(new Set(authorIds.filter(Boolean)));
+
+  if (normalizedAuthorIds.length === 0) {
+    return relationshipMap;
+  }
+
+  const followTargetIds = normalizedAuthorIds.filter(
+    (authorId) => authorId !== userId,
+  );
+  let followingIds = new Set<string>();
+
+  if (followTargetIds.length > 0) {
+    const { data } = await (admin as any)
+      .from("rnest_social_follows")
+      .select("followee_user_id")
+      .eq("follower_user_id", userId)
+      .in("followee_user_id", followTargetIds);
+
+    followingIds = new Set<string>(
+      (data ?? []).map((row: any) => String(row.followee_user_id)),
+    );
+  }
+
+  for (const authorId of normalizedAuthorIds) {
+    relationshipMap.set(authorId, {
+      isFollowing: followingIds.has(authorId),
+      isSelf: authorId === userId,
+    });
+  }
+
+  return relationshipMap;
+}
+
+async function hydratePosts(
+  admin: any,
+  userId: string,
+  rows: PostRow[],
+): Promise<SocialPost[]> {
   if (rows.length === 0) return [];
-  const authorIds = Array.from(new Set(rows.map((row) => String(row.author_user_id))));
+  const authorIds = Array.from(
+    new Set(rows.map((row) => String(row.author_user_id))),
+  );
   const groupIds = Array.from(
-    new Set(rows.map((row) => (row.group_id ? Number(row.group_id) : null)).filter(Boolean))
+    new Set(
+      rows
+        .map((row) => (row.group_id ? Number(row.group_id) : null))
+        .filter(Boolean),
+    ),
   ) as number[];
   const postIds = rows.map((row) => Number(row.id));
 
-  const [profileMap, interactionMaps, groupNameMap] = await Promise.all([
-    loadSocialHubProfileMap(admin, authorIds),
-    loadPostInteractionMaps(admin, userId, postIds),
-    loadGroupNameMap(admin, groupIds),
-  ]);
+  const [profileMap, authorRelationshipMap, interactionMaps, groupNameMap] =
+    await Promise.all([
+      loadSocialHubProfileMap(admin, authorIds),
+      loadPostAuthorRelationshipMap(admin, userId, authorIds),
+      loadPostInteractionMaps(admin, userId, postIds),
+      loadGroupNameMap(admin, groupIds),
+    ]);
 
   return rows.map((row) =>
     buildSocialPost(
       row,
       profileMap,
+      authorRelationshipMap,
       interactionMaps.likedPostIds,
       interactionMaps.savedPostIds,
       interactionMaps.saveCountMap,
-      groupNameMap
-    )
+      groupNameMap,
+    ),
   );
 }
 
-async function resolveTargetUserIdForScope(admin: any, handle?: string | null, currentUserId?: string) {
+async function resolveTargetUserIdForScope(
+  admin: any,
+  handle?: string | null,
+  currentUserId?: string,
+) {
   if (!handle) return currentUserId ?? null;
   const header = currentUserId
     ? await getSocialProfileHeaderByHandle(admin, handle, currentUserId)
@@ -340,7 +454,7 @@ export async function getFeedPage(
     cursor?: string | null;
     limit?: number;
     handle?: string | null;
-  } = {}
+  } = {},
 ): Promise<FeedPage> {
   const scope = options.scope ?? "following";
   const limit = options.limit ?? 20;
@@ -352,7 +466,8 @@ export async function getFeedPage(
   let rawRows: PostRow[] = [];
 
   if (scope === "saved" || scope === "liked") {
-    const table = scope === "saved" ? "rnest_social_post_saves" : "rnest_social_post_likes";
+    const table =
+      scope === "saved" ? "rnest_social_post_saves" : "rnest_social_post_likes";
     const idColumn = scope === "saved" ? "post_id" : "post_id";
     const { data: relationRows } = await (admin as any)
       .from(table)
@@ -361,7 +476,9 @@ export async function getFeedPage(
       .order("created_at", { ascending: false })
       .limit(200);
 
-    const candidatePostIds = (relationRows ?? []).map((row: any) => Number(row.post_id)).filter(Boolean);
+    const candidatePostIds = (relationRows ?? [])
+      .map((row: any) => Number(row.post_id))
+      .filter(Boolean);
     if (candidatePostIds.length === 0) {
       return { posts: [], nextCursor: null };
     }
@@ -381,7 +498,11 @@ export async function getFeedPage(
     if (error) throw error;
     rawRows = (data as PostRow[] | null) ?? [];
   } else if (scope === "profile") {
-    const targetUserId = await resolveTargetUserIdForScope(admin, options.handle, userId);
+    const targetUserId = await resolveTargetUserIdForScope(
+      admin,
+      options.handle,
+      userId,
+    );
     if (!targetUserId) {
       return { posts: [], nextCursor: null };
     }
@@ -416,7 +537,9 @@ export async function getFeedPage(
     if (error) throw error;
     rawRows = (data as PostRow[] | null) ?? [];
   } else {
-    const authorIds = Array.from(new Set([userId, ...context.followingIds, ...context.friendIds]));
+    const authorIds = Array.from(
+      new Set([userId, ...context.followingIds, ...context.friendIds]),
+    );
     const groupIds = Array.from(context.groupIds);
     let query = (admin as any)
       .from("rnest_social_posts")
@@ -442,12 +565,16 @@ export async function getFeedPage(
     rawRows = (data as PostRow[] | null) ?? [];
   }
 
-  const filteredRows = rawRows.filter((row) => canUserAccessPostWithContext(row, context));
+  const filteredRows = rawRows.filter((row) =>
+    canUserAccessPostWithContext(row, context),
+  );
 
   const pageRows = filteredRows.slice(0, limit);
   const hasMore = filteredRows.length > limit;
   const posts = await hydratePosts(admin, userId, pageRows);
-  const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?.created_at ?? "") : null;
+  const nextCursor = hasMore
+    ? String(pageRows[pageRows.length - 1]?.created_at ?? "")
+    : null;
   return { posts, nextCursor };
 }
 
@@ -455,7 +582,7 @@ export async function getFriendFeed(
   admin: any,
   userId: string,
   cursor?: string | null,
-  limit = 20
+  limit = 20,
 ) {
   return getFeedPage(admin, userId, { scope: "following", cursor, limit });
 }
@@ -464,18 +591,23 @@ export async function searchSocialPosts(
   admin: any,
   userId: string,
   query: string,
-  limit = 8
+  limit = 8,
 ) {
   const cleanedQuery = cleanPostBody(query).trim();
   let builder = (admin as any)
     .from("rnest_social_posts")
-    .select("id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
+    .select(
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at",
+    )
     .eq("visibility", "public_internal")
     .order("created_at", { ascending: false })
     .limit(limit * 3);
 
   if (cleanedQuery) {
-    builder = builder.ilike("body", `%${cleanedQuery.replace(/[%_]/g, "\\$&")}%`);
+    builder = builder.ilike(
+      "body",
+      `%${cleanedQuery.replace(/[%_]/g, "\\$&")}%`,
+    );
   }
 
   const { data, error } = await builder;
@@ -490,7 +622,9 @@ export async function searchSocialPosts(
 export async function getPostById(admin: any, postId: number, userId: string) {
   const { data, error } = await (admin as any)
     .from("rnest_social_posts")
-    .select("id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
+    .select(
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at",
+    )
     .eq("id", postId)
     .maybeSingle();
 
@@ -504,7 +638,11 @@ export async function getPostById(admin: any, postId: number, userId: string) {
   return posts[0] ?? null;
 }
 
-async function notifyFollowersAboutPost(admin: any, userId: string, post: SocialPost) {
+async function notifyFollowersAboutPost(
+  admin: any,
+  userId: string,
+  post: SocialPost,
+) {
   if (post.visibility === "group" || post.visibility === "friends") return;
 
   const [{ data: followerRows }, actorProfile] = await Promise.all([
@@ -552,22 +690,26 @@ export async function createPost(
     tags?: string[];
     groupId?: number | null;
     visibility?: SocialPostVisibility;
-  } = {}
+  } = {},
 ): Promise<SocialPost> {
-  const visibility = normalizeVisibility(opts.visibility ?? DEFAULT_SOCIAL_POST_VISIBILITY);
+  const visibility = normalizeVisibility(
+    opts.visibility ?? DEFAULT_SOCIAL_POST_VISIBILITY,
+  );
   const groupId = visibility === "group" ? (opts.groupId ?? null) : null;
   const imagePaths = cleanPostImagePaths(
     opts.imagePaths && opts.imagePaths.length > 0
       ? opts.imagePaths
       : opts.imagePath
         ? [opts.imagePath]
-        : []
+        : [],
   );
   const imagePath = imagePaths[0] ?? null;
 
   for (const candidatePath of imagePaths) {
     if (!isOwnedSocialPostImagePath(userId, candidatePath)) {
-      throw Object.assign(new Error("invalid_image_path"), { code: "invalid_image_path" });
+      throw Object.assign(new Error("invalid_image_path"), {
+        code: "invalid_image_path",
+      });
     }
   }
 
@@ -579,7 +721,9 @@ export async function createPost(
       .eq("user_id", userId)
       .maybeSingle();
     if (!memberRow) {
-      throw Object.assign(new Error("not_group_member"), { code: "not_group_member" });
+      throw Object.assign(new Error("not_group_member"), {
+        code: "not_group_member",
+      });
     }
   }
 
@@ -594,7 +738,9 @@ export async function createPost(
       visibility,
       group_id: groupId,
     })
-    .select("id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at")
+    .select(
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at",
+    )
     .single();
 
   if (error) throw error;
@@ -607,7 +753,12 @@ export async function createPost(
   return post;
 }
 
-export async function deletePost(admin: any, postId: number, userId: string, isAdmin = false) {
+export async function deletePost(
+  admin: any,
+  postId: number,
+  userId: string,
+  isAdmin = false,
+) {
   let query = (admin as any)
     .from("rnest_social_posts")
     .delete()
@@ -634,21 +785,26 @@ async function updatePostLikeCount(admin: any, postId: number) {
   return likeCount;
 }
 
-export async function togglePostLike(admin: any, postId: number, userId: string) {
-  const [{ data: existing }, { data: postRow }, actorProfile] = await Promise.all([
-    (admin as any)
-      .from("rnest_social_post_likes")
-      .select("post_id")
-      .eq("post_id", postId)
-      .eq("user_id", userId)
-      .maybeSingle(),
-    (admin as any)
-      .from("rnest_social_posts")
-      .select("id, author_user_id, body")
-      .eq("id", postId)
-      .maybeSingle(),
-    ensureSocialProfile(admin, userId),
-  ]);
+export async function togglePostLike(
+  admin: any,
+  postId: number,
+  userId: string,
+) {
+  const [{ data: existing }, { data: postRow }, actorProfile] =
+    await Promise.all([
+      (admin as any)
+        .from("rnest_social_post_likes")
+        .select("post_id")
+        .eq("post_id", postId)
+        .eq("user_id", userId)
+        .maybeSingle(),
+      (admin as any)
+        .from("rnest_social_posts")
+        .select("id, author_user_id, body")
+        .eq("id", postId)
+        .maybeSingle(),
+      ensureSocialProfile(admin, userId),
+    ]);
 
   let liked = false;
   if (existing) {
@@ -668,7 +824,11 @@ export async function togglePostLike(admin: any, postId: number, userId: string)
 
   const count = await updatePostLikeCount(admin, postId);
 
-  if (liked && postRow?.author_user_id && String(postRow.author_user_id) !== userId) {
+  if (
+    liked &&
+    postRow?.author_user_id &&
+    String(postRow.author_user_id) !== userId
+  ) {
     const preview = String(postRow.body ?? "").slice(0, 80) || "사진 게시글";
     await appendSocialEvent({
       admin,
@@ -689,7 +849,11 @@ export async function togglePostLike(admin: any, postId: number, userId: string)
   return { liked, count };
 }
 
-export async function togglePostSave(admin: any, postId: number, userId: string) {
+export async function togglePostSave(
+  admin: any,
+  postId: number,
+  userId: string,
+) {
   const { data: existing } = await (admin as any)
     .from("rnest_social_post_saves")
     .select("post_id")
@@ -721,8 +885,14 @@ export async function togglePostSave(admin: any, postId: number, userId: string)
   return { saved, count: Number(count ?? 0) };
 }
 
-async function buildCommentLikeMaps(admin: any, userId: string, commentIds: number[]) {
-  const normalized = Array.from(new Set(commentIds.filter((value) => Number.isFinite(value) && value > 0)));
+async function buildCommentLikeMaps(
+  admin: any,
+  userId: string,
+  commentIds: number[],
+) {
+  const normalized = Array.from(
+    new Set(commentIds.filter((value) => Number.isFinite(value) && value > 0)),
+  );
   if (normalized.length === 0) {
     return {
       likedCommentIds: new Set<number>(),
@@ -749,21 +919,29 @@ async function buildCommentLikeMaps(admin: any, userId: string, commentIds: numb
   }
 
   return {
-    likedCommentIds: new Set<number>((viewerLikeRows.data ?? []).map((row: any) => Number(row.comment_id))),
+    likedCommentIds: new Set<number>(
+      (viewerLikeRows.data ?? []).map((row: any) => Number(row.comment_id)),
+    ),
     likeCountMap,
   };
 }
 
 function buildCommentEntity(
   row: CommentRow,
-  profileMap: Map<string, ReturnType<typeof ensureSocialProfile> extends Promise<infer T> ? T : never>,
+  profileMap: Map<
+    string,
+    ReturnType<typeof ensureSocialProfile> extends Promise<infer T> ? T : never
+  >,
   likedCommentIds: Set<number>,
   likeCountMap: Map<number, number>,
   replyCountMap: Map<number, number>,
-  replies: SocialPostComment[]
+  replies: SocialPostComment[],
 ): SocialPostComment {
   const authorUserId = String(row.author_user_id);
-  const authorProfile = buildSocialAuthorProfile(authorUserId, profileMap.get(authorUserId));
+  const authorProfile = buildSocialAuthorProfile(
+    authorUserId,
+    profileMap.get(authorUserId),
+  );
   return {
     id: Number(row.id),
     postId: Number(row.post_id),
@@ -786,11 +964,13 @@ export async function getPostComments(
   postId: number,
   userId: string,
   cursor?: string | null,
-  limit = 30
+  limit = 30,
 ): Promise<{ comments: SocialPostComment[]; nextCursor: string | null }> {
   let query = (admin as any)
     .from("rnest_social_post_comments")
-    .select("id, post_id, author_user_id, parent_id, body, created_at, updated_at, is_edited")
+    .select(
+      "id, post_id, author_user_id, parent_id, body, created_at, updated_at, is_edited",
+    )
     .eq("post_id", postId)
     .is("parent_id", null)
     .order("created_at", { ascending: true })
@@ -814,7 +994,9 @@ export async function getPostComments(
   const parentIds = pageRows.map((row) => Number(row.id));
   const { data: replyRowsData, error: replyError } = await (admin as any)
     .from("rnest_social_post_comments")
-    .select("id, post_id, author_user_id, parent_id, body, created_at, updated_at, is_edited")
+    .select(
+      "id, post_id, author_user_id, parent_id, body, created_at, updated_at, is_edited",
+    )
     .eq("post_id", postId)
     .in("parent_id", parentIds)
     .order("created_at", { ascending: true });
@@ -823,7 +1005,9 @@ export async function getPostComments(
 
   const replyRows = (replyRowsData as CommentRow[] | null) ?? [];
   const allRows = [...pageRows, ...replyRows];
-  const authorIds = Array.from(new Set(allRows.map((row) => String(row.author_user_id))));
+  const authorIds = Array.from(
+    new Set(allRows.map((row) => String(row.author_user_id))),
+  );
   const commentIds = allRows.map((row) => Number(row.id));
   const [profileMap, commentLikeMaps] = await Promise.all([
     loadSocialHubProfileMap(admin, authorIds),
@@ -847,8 +1031,8 @@ export async function getPostComments(
         commentLikeMaps.likedCommentIds,
         commentLikeMaps.likeCountMap,
         new Map(),
-        []
-      )
+        [],
+      ),
     );
     repliesByParentId.set(parentId, nextReplies);
   }
@@ -860,11 +1044,13 @@ export async function getPostComments(
       commentLikeMaps.likedCommentIds,
       commentLikeMaps.likeCountMap,
       replyCountMap,
-      repliesByParentId.get(Number(row.id)) ?? []
-    )
+      repliesByParentId.get(Number(row.id)) ?? [],
+    ),
   );
 
-  const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?.created_at ?? "") : null;
+  const nextCursor = hasMore
+    ? String(pageRows[pageRows.length - 1]?.created_at ?? "")
+    : null;
   return { comments, nextCursor };
 }
 
@@ -884,18 +1070,28 @@ export async function addComment(
   postId: number,
   userId: string,
   body: string,
-  options: { parentId?: number | null } = {}
+  options: { parentId?: number | null } = {},
 ): Promise<SocialPostComment> {
   let parentId: number | null = null;
-  if (options.parentId && Number.isFinite(options.parentId) && Number(options.parentId) > 0) {
+  if (
+    options.parentId &&
+    Number.isFinite(options.parentId) &&
+    Number(options.parentId) > 0
+  ) {
     const { data: parentComment } = await (admin as any)
       .from("rnest_social_post_comments")
       .select("id, post_id, parent_id, author_user_id")
       .eq("id", Number(options.parentId))
       .maybeSingle();
 
-    if (!parentComment || Number(parentComment.post_id) !== postId || parentComment.parent_id) {
-      throw Object.assign(new Error("invalid_parent_comment"), { code: "invalid_parent_comment" });
+    if (
+      !parentComment ||
+      Number(parentComment.post_id) !== postId ||
+      parentComment.parent_id
+    ) {
+      throw Object.assign(new Error("invalid_parent_comment"), {
+        code: "invalid_parent_comment",
+      });
     }
     parentId = Number(parentComment.id);
   }
@@ -909,7 +1105,9 @@ export async function addComment(
         parent_id: parentId,
         body,
       })
-      .select("id, post_id, author_user_id, parent_id, body, created_at, updated_at, is_edited")
+      .select(
+        "id, post_id, author_user_id, parent_id, body, created_at, updated_at, is_edited",
+      )
       .single(),
     (admin as any)
       .from("rnest_social_posts")
@@ -929,7 +1127,7 @@ export async function addComment(
     new Set(),
     new Map(),
     new Map(),
-    []
+    [],
   );
 
   const postAuthorId = String(postResult.data?.author_user_id ?? "");
@@ -980,7 +1178,12 @@ export async function addComment(
   return comment;
 }
 
-export async function deleteComment(admin: any, commentId: number, userId: string, isAdmin = false) {
+export async function deleteComment(
+  admin: any,
+  commentId: number,
+  userId: string,
+  isAdmin = false,
+) {
   const { data: comment } = await (admin as any)
     .from("rnest_social_post_comments")
     .select("id, post_id, author_user_id")
@@ -1001,7 +1204,11 @@ export async function deleteComment(admin: any, commentId: number, userId: strin
   await updatePostCommentCount(admin, Number(comment.post_id));
 }
 
-export async function toggleCommentLike(admin: any, commentId: number, userId: string) {
+export async function toggleCommentLike(
+  admin: any,
+  commentId: number,
+  userId: string,
+) {
   const [{ data: existing }] = await Promise.all([
     (admin as any)
       .from("rnest_social_comment_likes")

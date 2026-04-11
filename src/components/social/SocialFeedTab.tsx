@@ -61,13 +61,15 @@ function buildEmptyCopy(scope: FeedScope) {
   if (scope === "saved") {
     return {
       title: "저장한 게시글이 없어요",
-      description: "나중에 다시 보고 싶은 글을 저장해두면\n여기에서 바로 모아볼 수 있어요",
+      description:
+        "나중에 다시 보고 싶은 글을 저장해두면\n여기에서 바로 모아볼 수 있어요",
     };
   }
   if (scope === "liked") {
     return {
       title: "좋아요한 게시글이 없어요",
-      description: "좋아요를 누른 게시글이 생기면\n여기에서 다시 확인할 수 있어요",
+      description:
+        "좋아요를 누른 게시글이 생기면\n여기에서 다시 확인할 수 있어요",
     };
   }
   if (scope === "profile") {
@@ -78,7 +80,8 @@ function buildEmptyCopy(scope: FeedScope) {
   }
   return {
     title: "아직 게시글이 없어요",
-    description: "팔로우를 시작하거나 그룹에 참여하면\n일상을 함께 나눌 수 있어요",
+    description:
+      "팔로우를 시작하거나 그룹에 참여하면\n일상을 함께 나눌 수 있어요",
   };
 }
 
@@ -109,37 +112,40 @@ export function SocialFeedTab({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const emptyCopy = buildEmptyCopy(scope);
 
-  const loadFeed = useCallback(async (cursor?: string | null) => {
-    const isInitial = !cursor;
-    if (isInitial) setLoading(true);
-    else setLoadingMore(true);
+  const loadFeed = useCallback(
+    async (cursor?: string | null) => {
+      const isInitial = !cursor;
+      if (isInitial) setLoading(true);
+      else setLoadingMore(true);
 
-    try {
-      const params = new URLSearchParams();
-      params.set("scope", scope);
-      if (handle) params.set("handle", handle);
-      if (cursor) params.set("cursor", cursor);
-      const url = `/api/social/feed?${params.toString()}`;
-      const res = await fetch(url).then((r) => r.json());
-      if (res.ok) {
-        const data = res.data as FeedPage;
-        if (isInitial) {
-          setPosts(data.posts);
-        } else {
-          setPosts((prev) => {
-            const existingIds = new Set(prev.map((p) => p.id));
-            const newPosts = data.posts.filter((p) => !existingIds.has(p.id));
-            return [...prev, ...newPosts];
-          });
+      try {
+        const params = new URLSearchParams();
+        params.set("scope", scope);
+        if (handle) params.set("handle", handle);
+        if (cursor) params.set("cursor", cursor);
+        const url = `/api/social/feed?${params.toString()}`;
+        const res = await fetch(url).then((r) => r.json());
+        if (res.ok) {
+          const data = res.data as FeedPage;
+          if (isInitial) {
+            setPosts(data.posts);
+          } else {
+            setPosts((prev) => {
+              const existingIds = new Set(prev.map((p) => p.id));
+              const newPosts = data.posts.filter((p) => !existingIds.has(p.id));
+              return [...prev, ...newPosts];
+            });
+          }
+          setNextCursor(data.nextCursor);
         }
-        setNextCursor(data.nextCursor);
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+        setHasLoaded(true);
       }
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-      setHasLoaded(true);
-    }
-  }, [handle, scope]);
+    },
+    [handle, scope],
+  );
 
   useEffect(() => {
     loadFeed();
@@ -160,7 +166,7 @@ export function SocialFeedTab({
           loadFeed(nextCursor);
         }
       },
-      { rootMargin: "200px" }
+      { rootMargin: "200px" },
     );
 
     observerRef.current.observe(sentinelRef.current);
@@ -176,12 +182,39 @@ export function SocialFeedTab({
   }, []);
 
   const handlePostStatsChange = useCallback(
-    (postId: number, patch: Partial<Pick<SocialPost, "commentCount" | "likeCount" | "saveCount" | "isLiked" | "isSaved">>) => {
+    (
+      postId: number,
+      patch: Partial<
+        Pick<
+          SocialPost,
+          "commentCount" | "likeCount" | "saveCount" | "isLiked" | "isSaved"
+        >
+      >,
+    ) => {
       setPosts((prev) =>
-        prev.map((post) => (post.id === postId ? { ...post, ...patch } : post))
+        prev.map((post) => (post.id === postId ? { ...post, ...patch } : post)),
       );
     },
-    []
+    [],
+  );
+
+  const handleAuthorFollowChange = useCallback(
+    (authorUserId: string, isFollowing: boolean) => {
+      setPosts((prev) =>
+        prev.map((post) =>
+          post.authorUserId === authorUserId
+            ? {
+                ...post,
+                authorProfile: {
+                  ...post.authorProfile,
+                  isFollowing,
+                },
+              }
+            : post,
+        ),
+      );
+    },
+    [],
   );
 
   const handleCommentOpen = useCallback((post: SocialPost) => {
@@ -205,7 +238,10 @@ export function SocialFeedTab({
               className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
               style={{ backgroundColor: "var(--rnest-lavender-soft)" }}
             >
-              <FileText className="h-7 w-7 text-[color:var(--rnest-accent)]" strokeWidth={1.9} />
+              <FileText
+                className="h-7 w-7 text-[color:var(--rnest-accent)]"
+                strokeWidth={1.9}
+              />
             </div>
             <h3 className="text-[15px] font-semibold text-[var(--rnest-text)] mb-1.5">
               {emptyCopy.title}
@@ -233,6 +269,7 @@ export function SocialFeedTab({
                 onDelete={handleDelete}
                 currentUserId={currentUserId}
                 isAdmin={isAdmin}
+                onAuthorFollowChange={handleAuthorFollowChange}
                 onStatsChange={handlePostStatsChange}
               />
             ))}
@@ -243,7 +280,10 @@ export function SocialFeedTab({
               <div className="flex justify-center py-4">
                 <div
                   className="w-5 h-5 rounded-full border-2 animate-spin"
-                  style={{ borderColor: "var(--rnest-accent)", borderTopColor: "transparent" }}
+                  style={{
+                    borderColor: "var(--rnest-accent)",
+                    borderTopColor: "transparent",
+                  }}
                 />
               </div>
             )}
@@ -269,7 +309,14 @@ export function SocialFeedTab({
           onClick={() => setComposerOpen(true)}
           aria-label="새 게시글 작성"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-6 h-6">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            className="w-6 h-6"
+          >
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>

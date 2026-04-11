@@ -16,7 +16,10 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
-  const returnTo = sanitizeInternalPath(searchParams.get("returnTo"), "/social");
+  const returnTo = sanitizeInternalPath(
+    searchParams.get("returnTo"),
+    "/social",
+  );
 
   const [post, setPost] = useState<SocialPost | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,10 +41,17 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
       setError(null);
       try {
         const postId = Number.parseInt(rawPostId, 10);
-        if (!Number.isFinite(postId) || postId <= 0) throw new Error("잘못된 게시글이에요.");
-        const res = await fetch(`/api/social/posts/${postId}`, { cache: "no-store" }).then((response) => response.json());
+        if (!Number.isFinite(postId) || postId <= 0)
+          throw new Error("잘못된 게시글이에요.");
+        const res = await fetch(`/api/social/posts/${postId}`, {
+          cache: "no-store",
+        }).then((response) => response.json());
         if (!res.ok) {
-          throw new Error(res.error === "not_found" ? "게시글을 찾을 수 없어요." : "게시글을 불러오지 못했어요.");
+          throw new Error(
+            res.error === "not_found"
+              ? "게시글을 찾을 수 없어요."
+              : "게시글을 불러오지 못했어요.",
+          );
         }
         setPost(res.data?.post ?? null);
       } catch (loadError: any) {
@@ -62,7 +72,16 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
           className="flex h-9 w-9 items-center justify-center rounded-full text-ios-muted transition hover:bg-ios-sep/40 active:opacity-60"
           aria-label="뒤로"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
@@ -72,7 +91,9 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
 
       {status !== "authenticated" ? (
         <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-          <p className="text-[14px] text-ios-muted">로그인 후 게시글을 볼 수 있어요.</p>
+          <p className="text-[14px] text-ios-muted">
+            로그인 후 게시글을 볼 수 있어요.
+          </p>
         </div>
       ) : loading ? (
         <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
@@ -80,7 +101,9 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
         </div>
       ) : error || !post ? (
         <div className="rounded-apple border border-ios-sep bg-white p-5 shadow-apple">
-          <p className="text-[14px] text-red-500">{error ?? "게시글을 찾을 수 없어요."}</p>
+          <p className="text-[14px] text-red-500">
+            {error ?? "게시글을 찾을 수 없어요."}
+          </p>
         </div>
       ) : (
         <>
@@ -88,8 +111,23 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
             post={post}
             currentUserId={user?.userId}
             onCommentOpen={() => setCommentsOpen(true)}
+            onAuthorFollowChange={(authorUserId, isFollowing) =>
+              setPost((prev) =>
+                prev && prev.authorUserId === authorUserId
+                  ? {
+                      ...prev,
+                      authorProfile: {
+                        ...prev.authorProfile,
+                        isFollowing,
+                      },
+                    }
+                  : prev,
+              )
+            }
             onStatsChange={(postId, patch) =>
-              setPost((prev) => (prev && prev.id === postId ? { ...prev, ...patch } : prev))
+              setPost((prev) =>
+                prev && prev.id === postId ? { ...prev, ...patch } : prev,
+              )
             }
           />
           <button
@@ -108,7 +146,11 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
         onClose={() => setCommentsOpen(false)}
         currentUserId={user?.userId}
         onCommentCountChange={(postId, count) =>
-          setPost((prev) => (prev && prev.id === postId ? { ...prev, commentCount: count } : prev))
+          setPost((prev) =>
+            prev && prev.id === postId
+              ? { ...prev, commentCount: count }
+              : prev,
+          )
         }
       />
     </div>
