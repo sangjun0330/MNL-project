@@ -53,13 +53,6 @@ import { withReturnTo } from "@/lib/navigation";
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
 type SocialViewTab = "following" | "explore" | "friends" | "groups";
 
-const SOCIAL_PAGE_TABS: Array<{ id: SocialViewTab; label: string }> = [
-  { id: "following", label: "피드" },
-  { id: "explore", label: "검색" },
-  { id: "friends", label: "친구" },
-  { id: "groups", label: "그룹" },
-];
-
 function resolveSocialViewTab(value: string | null | undefined, fallback: SocialViewTab): SocialViewTab {
   if (value === "feed" || value === "following") return "following";
   if (value === "explore") return "explore";
@@ -165,6 +158,9 @@ export function SocialPage() {
   const groupsLoadedRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
   const canCreateGroup = hasEntitlement("socialGroupCreate");
+  const handleBackToHome = useCallback(() => {
+    router.push("/");
+  }, [router]);
 
   const profileCacheKey = useMemo(
     () => (currentUserId ? buildSocialClientCacheKey(currentUserId, "profile") : null),
@@ -904,21 +900,34 @@ export function SocialPage() {
   if (status === "loading") {
     return (
       <div className="min-h-screen bg-white">
-        {/* 인스타 스타일 헤더 스켈레톤 */}
-        <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-          <div className="h-6 w-16 rounded-full bg-gray-100 animate-pulse" />
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-gray-100 bg-white px-4 py-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBackToHome}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition active:opacity-60"
+              aria-label="홈으로 돌아가기"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            <div className="h-6 w-16 rounded-full bg-gray-100 animate-pulse" />
+          </div>
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-gray-100 animate-pulse" />
             <div className="h-8 w-8 rounded-full bg-gray-100 animate-pulse" />
           </div>
         </header>
-        <div className="flex border-b border-gray-100">
-          {[0,1,2,3].map(i => (
-            <div key={i} className="flex-1 py-3 flex justify-center">
-              <div className="h-5 w-5 rounded bg-gray-100 animate-pulse" />
-            </div>
-          ))}
-        </div>
         {/* 스토리 스켈레톤 */}
         <div className="flex items-start gap-3 overflow-hidden px-3 py-3 border-b border-gray-100">
           {[0,1,2,3,4].map(i => (
@@ -935,9 +944,30 @@ export function SocialPage() {
   if (status !== "authenticated") {
     return (
       <div className="min-h-screen bg-white">
-        {/* 인스타 스타일 헤더 */}
-        <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
-          <span className="text-[22px] font-black italic tracking-tight text-gray-900">소셜</span>
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-gray-100 bg-white px-4 py-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBackToHome}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition active:opacity-60"
+              aria-label="홈으로 돌아가기"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            <span className="text-[22px] font-black italic tracking-tight text-gray-900">소셜</span>
+          </div>
+          <div className="h-9 w-9" />
         </header>
 
         <div className="px-4 pt-6 pb-4">
@@ -974,16 +1004,34 @@ export function SocialPage() {
   return (
     <div className="min-h-screen bg-white">
 
-      {/* ── 인스타그램 스타일 sticky 헤더 ─────────────────── */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-gray-100">
         <div className="flex items-center justify-between px-4 py-3">
-          {/* 앱 로고 */}
-          <span className="text-[22px] font-black italic tracking-tight text-gray-900 select-none">
-            소셜
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBackToHome}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
+              aria-label="홈으로 돌아가기"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            <span className="text-[22px] font-black italic tracking-tight text-gray-900 select-none">
+              소셜
+            </span>
+          </div>
 
           <div className="flex items-center gap-2">
-            {/* 알림 버튼 */}
             <button
               type="button"
               onClick={() => setOpenEventCenter(true)}
@@ -998,7 +1046,6 @@ export function SocialPage() {
               )}
             </button>
 
-            {/* 프로필 아바타 */}
             <button
               type="button"
               onClick={() => {
@@ -1025,24 +1072,6 @@ export function SocialPage() {
               </span>
             </button>
           </div>
-        </div>
-
-        <div className="flex border-t border-gray-50 px-2">
-          {SOCIAL_PAGE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => updateActiveTab(tab.id)}
-              className={`flex min-w-0 flex-1 items-center justify-center border-b-2 px-1 py-3 text-[13.5px] font-semibold transition-colors ${
-                activeTab === tab.id
-                  ? "border-[color:var(--rnest-accent)] text-[color:var(--rnest-accent)]"
-                  : "border-transparent text-gray-400"
-              }`}
-              aria-current={activeTab === tab.id ? "page" : undefined}
-            >
-              <span className="truncate">{tab.label}</span>
-            </button>
-          ))}
         </div>
       </header>
 
