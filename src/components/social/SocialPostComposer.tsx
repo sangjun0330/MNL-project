@@ -19,6 +19,7 @@ type ComposerStep = "media" | "details";
 type VisibilityOption = {
   value: SocialPostVisibility;
   label: string;
+  description: string;
   icon: LucideIcon;
 };
 
@@ -33,10 +34,10 @@ const MAX_SOCIAL_POST_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const VISIBILITY_OPTIONS: VisibilityOption[] = [
-  { value: "public_internal", label: "허브 공개", icon: Globe2 },
-  { value: "followers", label: "팔로워", icon: Eye },
-  { value: "friends", label: "친구", icon: Users },
-  { value: "group", label: "그룹", icon: House },
+  { value: "public_internal", label: "허브 전체", description: "허브 멤버라면 누구나 볼 수 있어요", icon: Globe2 },
+  { value: "followers", label: "팔로워", description: "나를 팔로우한 사람만 볼 수 있어요", icon: Eye },
+  { value: "friends", label: "친구", description: "상호 연결된 친구에게만 공개돼요", icon: Users },
+  { value: "group", label: "그룹 전용", description: "선택한 그룹 멤버만 볼 수 있어요", icon: House },
 ];
 
 function normalizeTag(value: string) {
@@ -96,6 +97,7 @@ export function SocialPostComposer({
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [posting, setPosting] = useState(false);
+  const [visibilityOpen, setVisibilityOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -775,30 +777,80 @@ export function SocialPostComposer({
 
               <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
                 <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">공개 범위</p>
-                <div className="mt-3 flex items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3">
-                  <SelectedVisibilityIcon className="h-[18px] w-[18px] text-[color:var(--rnest-accent)]" strokeWidth={1.9} />
-                  <select
-                    value={visibility}
-                    disabled={posting}
-                    onChange={(event) =>
-                      handleVisibilityChange(event.target.value as SocialPostVisibility)
-                    }
-                    className="w-full appearance-none bg-transparent text-[14px] font-medium text-[#111827] outline-none"
+                {/* 현재 선택된 옵션 표시 + 탭하면 펼침 */}
+                <button
+                  type="button"
+                  disabled={posting}
+                  onClick={() => setVisibilityOpen((prev) => !prev)}
+                  className="mt-3 flex w-full items-center gap-3 rounded-[18px] border border-black/[0.06] bg-[#fafafa] px-4 py-3 transition active:opacity-70"
+                >
+                  <SelectedVisibilityIcon className="h-[18px] w-[18px] shrink-0 text-[color:var(--rnest-accent)]" strokeWidth={1.9} />
+                  <span className="flex-1 text-left text-[14px] font-medium text-[#111827]">
+                    {selectedVisibility.label}
+                  </span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    className={`h-4 w-4 shrink-0 text-[#9ca3af] transition-transform duration-200 ${
+                      visibilityOpen ? "rotate-180" : ""
+                    }`}
                   >
-                    {VISIBILITY_OPTIONS.map((option) => (
-                      <option
-                        key={option.value}
-                        value={option.value}
-                        disabled={option.value === "group" && userGroups.length === 0}
-                      >
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 text-[#9ca3af]">
                     <path d="m6 9 6 6 6-6" />
                   </svg>
-                </div>
+                </button>
+
+                {/* 펼침 목록 */}
+                {visibilityOpen ? (
+                  <div className="mt-2 overflow-hidden rounded-[18px] border border-black/[0.06] bg-white">
+                    {VISIBILITY_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const isSelected = option.value === visibility;
+                      const isDisabled = option.value === "group" && userGroups.length === 0;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={isDisabled || posting}
+                          onClick={() => {
+                            handleVisibilityChange(option.value);
+                            setVisibilityOpen(false);
+                          }}
+                          className="flex w-full items-center gap-3 border-b border-black/[0.04] px-4 py-3 text-left last:border-b-0 transition active:bg-gray-50 disabled:opacity-40"
+                        >
+                          <Icon
+                            className="h-[18px] w-[18px] shrink-0 text-[color:var(--rnest-accent)]"
+                            strokeWidth={1.9}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[14px] font-medium text-[#111827]">{option.label}</p>
+                            <p className="mt-0.5 text-[11.5px] leading-relaxed text-[#6b7280]">
+                              {option.description}
+                            </p>
+                          </div>
+                          {isSelected ? (
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color:var(--rnest-accent)]">
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="white"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-3 w-3"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            </span>
+                          ) : (
+                            <span className="h-5 w-5 shrink-0 rounded-full border-2 border-[#e5e7eb]" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </section>
 
               {visibility === "group" ? (
