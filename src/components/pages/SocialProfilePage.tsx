@@ -682,7 +682,7 @@ export function SocialProfilePage({ handle }: Props) {
         ) : (
           <>
             <section className="px-4 py-5 sm:py-6">
-              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)] sm:gap-5">
+              <div className="grid grid-cols-[98px_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[118px_minmax(0,1fr)] sm:gap-6">
                 <div className="shrink-0">
                   <div className="rnest-social-avatar-ring inline-flex rounded-full p-[3px]">
                     <div className="rnest-social-avatar-shell inline-flex rounded-full p-[4px]">
@@ -702,9 +702,9 @@ export function SocialProfilePage({ handle }: Props) {
                   </div>
                 </div>
 
-                <div className="min-w-0">
+                <div className="min-w-0 pl-1 sm:pl-2">
                   {profileDisplayLabel ? (
-                    <p className="mb-2 truncate text-[15px] font-semibold leading-tight text-gray-900 sm:mb-3 sm:text-[16px]">
+                    <p className="mb-2 truncate pl-1 text-[15px] font-semibold leading-tight text-gray-900 sm:mb-3 sm:pl-2 sm:text-[16px]">
                       {profileDisplayLabel}
                     </p>
                   ) : null}
