@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Globe, Link2, Lock, User, Users } from "lucide-react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import {
@@ -42,7 +43,18 @@ type Props = {
 };
 
 type ShareState = "idle" | "link-copied" | "shared";
-type EditorView = "main" | "displayName" | "handle" | "nickname" | "bio" | "statusMessage";
+type EditorView =
+  | "root"
+  | "profile"
+  | "visibility"
+  | "friendProfile"
+  | "privacy"
+  | "connectCode"
+  | "displayName"
+  | "handle"
+  | "nickname"
+  | "bio"
+  | "statusMessage";
 type AvailabilityField = "displayName" | "handle" | "nickname";
 type AvailabilityState = {
   status: "idle" | "checking" | "available" | "unavailable" | "invalid";
@@ -309,12 +321,93 @@ function SegmentedOptionButton({
   );
 }
 
+function SettingsListRow({
+  icon,
+  label,
+  description,
+  badge,
+  onClick,
+  isLast = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  description?: string;
+  badge?: string;
+  onClick: () => void;
+  isLast?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition active:bg-gray-50 ${
+        !isLast ? "border-b border-ios-sep" : ""
+      }`}
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color:var(--rnest-accent-soft)] text-[color:var(--rnest-accent)]">
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[14px] font-semibold text-ios-text">{label}</p>
+        {description ? (
+          <p className="mt-0.5 truncate text-[12px] text-ios-muted">{description}</p>
+        ) : null}
+      </div>
+      {badge ? (
+        <span className="shrink-0 text-[12px] text-ios-muted">{badge}</span>
+      ) : null}
+      <span className="shrink-0 text-ios-muted">
+        <ChevronRightIcon />
+      </span>
+    </button>
+  );
+}
+
+function RadioRow({
+  active,
+  label,
+  description,
+  disabled = false,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-3 py-3 text-left first:pt-1 last:pb-1 disabled:opacity-40"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[13.5px] font-semibold text-ios-text">{label}</p>
+        {description ? (
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ios-muted">{description}</p>
+        ) : null}
+      </div>
+      <span
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${
+          active
+            ? "border-[color:var(--rnest-accent)] bg-[color:var(--rnest-accent)]"
+            : "border-ios-sep bg-white"
+        }`}
+      >
+        {active ? <span className="h-2 w-2 rounded-full bg-white" /> : null}
+      </span>
+    </button>
+  );
+}
+
 export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const mySchedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
   const autoStatus = useMemo(() => generateAutoStatus(mySchedule), [mySchedule]);
 
   const [savedProfile, setSavedProfile] = useState<SocialProfile>(() => buildProfileState(profile));
-  const [activeView, setActiveView] = useState<EditorView>("main");
+  const [activeView, setActiveView] = useState<EditorView>("root");
   const [displayNameDraft, setDisplayNameDraft] = useState(profile?.displayName ?? "");
   const [handleDraft, setHandleDraft] = useState(profile?.handle ?? "");
   const [nicknameDraft, setNicknameDraft] = useState(profile?.nickname ?? "");
@@ -365,7 +458,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     if (!open) return;
     const nextProfile = buildProfileState(profile);
     setSavedProfile(nextProfile);
-    setActiveView("main");
+    setActiveView("root");
     setDisplayNameDraft(nextProfile.displayName);
     setHandleDraft(nextProfile.handle ?? "");
     setNicknameDraft(nextProfile.nickname);
@@ -737,18 +830,18 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
 
     if (activeIdentityField === "displayName") {
       const nextProfile = await commitProfilePatch({ displayName: availability.normalizedValue });
-      if (nextProfile) setActiveView("main");
+      if (nextProfile) setActiveView("profile");
       return;
     }
 
     if (activeIdentityField === "handle") {
       const nextProfile = await commitProfilePatch({ handle: availability.normalizedValue });
-      if (nextProfile) setActiveView("main");
+      if (nextProfile) setActiveView("profile");
       return;
     }
 
     const nextProfile = await commitProfilePatch({ nickname: availability.normalizedValue });
-    if (nextProfile) setActiveView("main");
+    if (nextProfile) setActiveView("friendProfile");
   }, [activeIdentityField, availability, commitProfilePatch, identityEditorChanged]);
 
   const sheetFooter = useMemo(() => {
@@ -770,16 +863,22 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     if (activeView === "displayName") {
       setDisplayNameDraft(savedProfile.displayName);
       setAvailability({ status: "idle", message: null, normalizedValue: "" });
-    }
-    if (activeView === "handle") {
+      setActiveView("profile");
+    } else if (activeView === "handle") {
       setHandleDraft(savedProfile.handle ?? "");
       setAvailability({ status: "idle", message: null, normalizedValue: "" });
-    }
-    if (activeView === "nickname") {
+      setActiveView("profile");
+    } else if (activeView === "bio") {
+      setActiveView("profile");
+    } else if (activeView === "nickname") {
       setNicknameDraft(savedProfile.nickname);
       setAvailability({ status: "idle", message: null, normalizedValue: "" });
+      setActiveView("friendProfile");
+    } else if (activeView === "statusMessage") {
+      setActiveView("friendProfile");
+    } else {
+      setActiveView("root");
     }
-    setActiveView("main");
   }, [activeView, savedProfile.displayName, savedProfile.handle, savedProfile.nickname]);
 
   const handleBioBlur = useCallback(() => {
@@ -957,9 +1056,84 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     );
   };
 
-  const renderMainView = () => (
+  // ── 설정 루트 목록 ────────────────────────────────────────
+  const renderRootView = () => (
+    <div className="space-y-3 pb-4">
+      <div className="overflow-hidden rounded-3xl bg-white shadow-apple">
+        <p className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
+          내 프로필
+        </p>
+        <SettingsListRow
+          icon={<User className="h-[18px] w-[18px]" />}
+          label="소셜 프로필"
+          description={
+            savedProfile.displayName
+              ? savedProfile.displayName
+              : savedProfile.nickname || "이름, 사진, 소개 수정"
+          }
+          onClick={() => setActiveView("profile")}
+        />
+        <SettingsListRow
+          icon={<Globe className="h-[18px] w-[18px]" />}
+          label="공개 범위"
+          description={
+            savedProfile.discoverability === "internal" ? "공개 계정" : "비공개 계정"
+          }
+          badge={
+            savedProfile.discoverability === "internal" &&
+            (savedProfile.defaultPostVisibility === "followers" ||
+              savedProfile.defaultPostVisibility === "friends")
+              ? "혼합"
+              : undefined
+          }
+          onClick={() => setActiveView("visibility")}
+          isLast
+        />
+      </div>
+
+      <div className="overflow-hidden rounded-3xl bg-white shadow-apple">
+        <p className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
+          친구 / 그룹
+        </p>
+        <SettingsListRow
+          icon={<Users className="h-[18px] w-[18px]" />}
+          label="친구 프로필"
+          description={savedProfile.nickname || "닉네임, 상태 메시지"}
+          onClick={() => setActiveView("friendProfile")}
+        />
+        <SettingsListRow
+          icon={<Link2 className="h-[18px] w-[18px]" />}
+          label="연결 코드"
+          description="친구 연결용 코드 및 공유 링크"
+          onClick={() => setActiveView("connectCode")}
+          isLast
+        />
+      </div>
+
+      <div className="overflow-hidden rounded-3xl bg-white shadow-apple">
+        <p className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-ios-muted">
+          기타
+        </p>
+        <SettingsListRow
+          icon={<Lock className="h-[18px] w-[18px]" />}
+          label="프라이버시"
+          description="근무 공개, 건강 데이터 설정"
+          onClick={() => setActiveView("privacy")}
+          isLast
+        />
+      </div>
+
+      {error ? (
+        <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p>
+      ) : null}
+    </div>
+  );
+
+  // ── 소셜 프로필 ────────────────────────────────────────────
+  const renderProfileView = () => (
     <div className="space-y-5 pb-2">
-      <SectionCard title="피드 / 검색 프로필">
+      {renderSubviewHeader("소셜 프로필")}
+      <SectionCard title="프로필 사진">
         <div className="rounded-[28px] bg-ios-bg px-4 py-4">
           <div className="flex items-center gap-3">
             <button
@@ -1000,8 +1174,10 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             </button>
           </div>
         </div>
+      </SectionCard>
 
-        <div className="mt-4 divide-y divide-ios-sep">
+      <SectionCard title="기본 정보">
+        <div className="divide-y divide-ios-sep">
           <SettingRow
             label="표시 이름"
             value={savedProfile.displayName || "표시 이름을 설정해 주세요"}
@@ -1034,86 +1210,162 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             }}
           />
         </div>
+      </SectionCard>
 
-        <div className="mt-5">
-          <label className="mb-2 block text-[13px] font-semibold text-ios-text">탐색 노출</label>
-          <div className="grid grid-cols-2 gap-2">
-            {([
-              { id: "off", label: "비공개" },
-              { id: "internal", label: "허브 공개" },
-            ] as const).map((item) => (
-              <SegmentedOptionButton
-                key={item.id}
-                active={savedProfile.discoverability === item.id}
-                disabled={profileSaving || uploadingImage}
-                label={item.label}
-                onClick={() => {
-                  if (savedProfile.discoverability === item.id) return;
-                  void saveInstantProfilePatch(
-                    { discoverability: item.id },
-                    { discoverability: item.id }
-                  );
-                }}
+      <SectionCard title="아바타">
+        <div className="flex flex-wrap gap-3">
+          {SOCIAL_AVATAR_OPTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              disabled={profileSaving || uploadingImage}
+              onClick={() => {
+                if (savedProfile.avatarEmoji === emoji) return;
+                void saveInstantProfilePatch({ avatarEmoji: emoji }, { avatarEmoji: emoji });
+              }}
+              className={`flex h-12 w-12 items-center justify-center rounded-2xl transition active:scale-95 disabled:opacity-50 ${
+                savedProfile.avatarEmoji === emoji
+                  ? "bg-[color:var(--rnest-accent-soft)] ring-2 ring-[color:var(--rnest-accent)]"
+                  : "bg-ios-bg"
+              }`}
+            >
+              <SocialAvatarBadge
+                emoji={emoji}
+                className="h-9 w-9 bg-transparent"
+                iconClassName="h-8 w-8"
               />
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <label className="mb-2 block text-[13px] font-semibold text-ios-text">기본 게시글 공개 범위</label>
-          <div className="grid grid-cols-2 gap-2">
-            {([
-              { id: "public_internal", label: "허브 공개" },
-              { id: "followers", label: "팔로워" },
-              { id: "friends", label: "친구" },
-              { id: "group", label: "그룹" },
-            ] as const).map((item) => (
-              <SegmentedOptionButton
-                key={item.id}
-                active={savedProfile.defaultPostVisibility === item.id}
-                disabled={profileSaving || uploadingImage}
-                label={item.label}
-                onClick={() => {
-                  if (savedProfile.defaultPostVisibility === item.id) return;
-                  void saveInstantProfilePatch(
-                    { defaultPostVisibility: item.id },
-                    { defaultPostVisibility: item.id }
-                  );
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <label className="mb-2 block text-[13px] font-semibold text-ios-text">아바타</label>
-          <div className="flex flex-wrap gap-3">
-            {SOCIAL_AVATAR_OPTIONS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                disabled={profileSaving || uploadingImage}
-                onClick={() => {
-                  if (savedProfile.avatarEmoji === emoji) return;
-                  void saveInstantProfilePatch({ avatarEmoji: emoji }, { avatarEmoji: emoji });
-                }}
-                className={`flex h-12 w-12 items-center justify-center rounded-2xl transition active:scale-95 disabled:opacity-50 ${
-                  savedProfile.avatarEmoji === emoji
-                    ? "bg-[color:var(--rnest-accent-soft)] ring-2 ring-[color:var(--rnest-accent)]"
-                    : "bg-ios-bg"
-                }`}
-              >
-                <SocialAvatarBadge
-                  emoji={emoji}
-                  className="h-9 w-9 bg-transparent"
-                  iconClassName="h-8 w-8"
-                />
-              </button>
-            ))}
-          </div>
+            </button>
+          ))}
         </div>
       </SectionCard>
 
+      {error ? (
+        <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p>
+      ) : null}
+    </div>
+  );
+
+  // ── 공개 범위 (Instagram-style) ───────────────────────────
+  const renderVisibilityView = () => {
+    const isPublic = savedProfile.discoverability === "internal";
+    const hasMismatch =
+      isPublic &&
+      (savedProfile.defaultPostVisibility === "followers" ||
+        savedProfile.defaultPostVisibility === "friends");
+    const hasPrivateMismatch =
+      !isPublic && savedProfile.defaultPostVisibility === "public_internal";
+
+    return (
+      <div className="space-y-5 pb-2">
+        {renderSubviewHeader("공개 범위", "내 게시글과 프로필을 누가 볼 수 있는지 설정해요")}
+
+        <SectionCard title="계정 공개 범위">
+          <div className="flex items-start justify-between gap-3 pb-1">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13.5px] font-semibold text-ios-text">
+                {isPublic ? "공개 계정" : "비공개 계정"}
+              </p>
+              <p className="mt-1 text-[12px] leading-5 text-ios-muted">
+                {isPublic
+                  ? "허브 내 누구나 내 프로필을 검색하고 팔로우할 수 있어요"
+                  : "내 프로필이 탐색에 노출되지 않아요"}
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={isPublic}
+              disabled={profileSaving || uploadingImage}
+              label="계정 공개"
+              onToggle={() => {
+                const nextDiscoverability = isPublic ? "off" : "internal";
+                // 비공개 전환 시 게시글이 허브 전체면 팔로워로 자동 조정
+                const shouldCascade =
+                  isPublic && savedProfile.defaultPostVisibility === "public_internal";
+                if (shouldCascade) {
+                  void saveInstantProfilePatch(
+                    { discoverability: "off", defaultPostVisibility: "followers" },
+                    { discoverability: "off", defaultPostVisibility: "followers" }
+                  );
+                } else {
+                  void saveInstantProfilePatch(
+                    { discoverability: nextDiscoverability },
+                    { discoverability: nextDiscoverability }
+                  );
+                }
+              }}
+            />
+          </div>
+        </SectionCard>
+
+        <SectionCard title="기본 게시글 공개 범위">
+          <div className="divide-y divide-ios-sep">
+            <RadioRow
+              active={savedProfile.defaultPostVisibility === "public_internal"}
+              label="허브 전체"
+              description="허브 멤버라면 누구나 볼 수 있어요"
+              disabled={!isPublic || profileSaving || uploadingImage}
+              onClick={() => {
+                if (savedProfile.defaultPostVisibility === "public_internal") return;
+                void saveInstantProfilePatch(
+                  { defaultPostVisibility: "public_internal" },
+                  { defaultPostVisibility: "public_internal" }
+                );
+              }}
+            />
+            <RadioRow
+              active={savedProfile.defaultPostVisibility === "followers"}
+              label="팔로워"
+              description="나를 팔로우한 사람만 볼 수 있어요"
+              disabled={profileSaving || uploadingImage}
+              onClick={() => {
+                if (savedProfile.defaultPostVisibility === "followers") return;
+                void saveInstantProfilePatch(
+                  { defaultPostVisibility: "followers" },
+                  { defaultPostVisibility: "followers" }
+                );
+              }}
+            />
+            <RadioRow
+              active={savedProfile.defaultPostVisibility === "friends"}
+              label="친구"
+              description="상호 연결된 친구에게만 공개돼요"
+              disabled={profileSaving || uploadingImage}
+              onClick={() => {
+                if (savedProfile.defaultPostVisibility === "friends") return;
+                void saveInstantProfilePatch(
+                  { defaultPostVisibility: "friends" },
+                  { defaultPostVisibility: "friends" }
+                );
+              }}
+            />
+          </div>
+          <p className="mt-3 border-t border-ios-sep pt-3 text-[11px] leading-relaxed text-ios-muted">
+            그룹 전용 게시글은 작성 시점에 직접 지정할 수 있어요
+          </p>
+        </SectionCard>
+
+        {hasMismatch ? (
+          <p className="rounded-2xl bg-[#f6f4ff] px-4 py-3 text-[11.5px] leading-5 text-[color:var(--rnest-accent)]">
+            공개 계정이지만 기본 게시글은 제한 공개로 설정돼 있어요. 의도한 설정이라면 그대로 두세요.
+          </p>
+        ) : null}
+
+        {hasPrivateMismatch ? (
+          <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[11.5px] leading-5 text-amber-700">
+            비공개 계정이지만 기본 게시글이 허브 전체로 설정돼 있어요. 팔로워 공개로 변경을 권장해요.
+          </p>
+        ) : null}
+
+        {error ? (
+          <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p>
+        ) : null}
+      </div>
+    );
+  };
+
+  // ── 친구 프로필 ────────────────────────────────────────────
+  const renderFriendProfileView = () => (
+    <div className="space-y-5 pb-2">
+      {renderSubviewHeader("친구 프로필")}
       <SectionCard title="친구 / 그룹 프로필">
         <div className="divide-y divide-ios-sep">
           <SettingRow
@@ -1137,70 +1389,85 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             }}
           />
         </div>
+      </SectionCard>
 
-        <div className="mt-5 border-t border-ios-sep pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[14px] font-semibold text-ios-text">내 친구 코드</p>
-              <p className="mt-0.5 text-[12px] text-ios-muted">친구가 직접 입력할 때 쓰는 6자리 코드예요.</p>
-            </div>
-            <button
-              type="button"
-              onClick={handleRegenerate}
-              disabled={regenerating || codeLoading}
-              className="shrink-0 text-[12px] font-semibold text-ios-muted underline underline-offset-2 disabled:opacity-40"
-            >
-              재생성
-            </button>
-          </div>
+      {error ? (
+        <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p>
+      ) : null}
+    </div>
+  );
 
-          <div className="mt-3 flex h-24 items-center justify-center rounded-2xl bg-ios-bg">
-            {codeLoading ? (
-              <span className="text-[18px] font-semibold tracking-widest text-ios-muted">로드 중…</span>
-            ) : codeError ? (
-              <div className="flex flex-col items-center gap-2 px-4 text-center">
-                <span className="text-[13px] text-red-500">{codeError}</span>
-                <button
-                  type="button"
-                  onClick={() => void loadCode()}
-                  className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline underline-offset-2"
-                >
-                  다시 불러오기
-                </button>
-              </div>
-            ) : (
-              <span className="select-all text-[28px] font-bold tracking-widest text-ios-text">{formattedCode}</span>
-            )}
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <Button
-              variant="secondary"
-              disabled={!code || codeLoading || !!codeError}
-              onClick={handleCopyCode}
-              className="h-12 rounded-2xl text-[14px]"
-            >
-              {codeCopied ? "코드 복사됨" : "코드 복사"}
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={sharing}
-              onClick={handleShareLink}
-              className="h-12 rounded-2xl text-[14px]"
-            >
-              {shareState === "link-copied"
-                ? "링크 복사됨"
-                : shareState === "shared"
-                  ? "공유 완료"
-                  : "공유 링크 보내기"}
-            </Button>
-          </div>
+  // ── 연결 코드 ──────────────────────────────────────────────
+  const renderConnectCodeView = () => (
+    <div className="space-y-5 pb-2">
+      {renderSubviewHeader("연결 코드")}
+      <SectionCard title="내 친구 코드">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[12px] text-ios-muted">친구가 직접 입력할 때 쓰는 6자리 코드예요.</p>
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            disabled={regenerating || codeLoading}
+            className="shrink-0 text-[12px] font-semibold text-ios-muted underline underline-offset-2 disabled:opacity-40"
+          >
+            재생성
+          </button>
         </div>
 
-        <div className="mt-5 border-t border-ios-sep pt-4">
-          <p className="text-[14px] font-semibold text-ios-text">프라이버시</p>
+        <div className="mt-3 flex h-24 items-center justify-center rounded-2xl bg-ios-bg">
+          {codeLoading ? (
+            <span className="text-[18px] font-semibold tracking-widest text-ios-muted">로드 중…</span>
+          ) : codeError ? (
+            <div className="flex flex-col items-center gap-2 px-4 text-center">
+              <span className="text-[13px] text-red-500">{codeError}</span>
+              <button
+                type="button"
+                onClick={() => void loadCode()}
+                className="text-[12px] font-semibold text-[color:var(--rnest-accent)] underline underline-offset-2"
+              >
+                다시 불러오기
+              </button>
+            </div>
+          ) : (
+            <span className="select-all text-[28px] font-bold tracking-widest text-ios-text">
+              {formattedCode}
+            </span>
+          )}
+        </div>
 
-          <div className="mt-3">
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Button
+            variant="secondary"
+            disabled={!code || codeLoading || !!codeError}
+            onClick={handleCopyCode}
+            className="h-12 rounded-2xl text-[14px]"
+          >
+            {codeCopied ? "코드 복사됨" : "코드 복사"}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={sharing}
+            onClick={handleShareLink}
+            className="h-12 rounded-2xl text-[14px]"
+          >
+            {shareState === "link-copied"
+              ? "링크 복사됨"
+              : shareState === "shared"
+                ? "공유 완료"
+                : "공유 링크 보내기"}
+          </Button>
+        </div>
+      </SectionCard>
+    </div>
+  );
+
+  // ── 프라이버시 ─────────────────────────────────────────────
+  const renderPrivacyView = () => (
+    <div className="space-y-5 pb-2">
+      {renderSubviewHeader("프라이버시")}
+      <SectionCard title="공개 설정">
+        <div className="divide-y divide-ios-sep">
+          <div className="pb-3">
             <p className="mb-1.5 text-[12.5px] font-medium text-ios-text">근무 공개 범위</p>
             <div className="flex rounded-2xl bg-ios-bg p-1 gap-1">
               {(["full", "off_only", "hidden"] as ScheduleVisibility[]).map((value) => {
@@ -1220,7 +1487,9 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
                       void handleSavePrefs({ scheduleVisibility: value });
                     }}
                     className={`flex-1 rounded-xl py-2 text-[11.5px] font-semibold transition ${
-                      scheduleVisibility === value ? "bg-white text-ios-text shadow-sm" : "text-ios-muted"
+                      scheduleVisibility === value
+                        ? "bg-white text-ios-text shadow-sm"
+                        : "text-ios-muted"
                     }`}
                   >
                     {labels[value]}
@@ -1230,7 +1499,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between py-3 border-t border-ios-sep mt-3">
+          <div className="flex items-center justify-between py-3">
             <div>
               <p className="text-[12.5px] font-medium text-ios-text">상태 메시지 공개</p>
               <p className="text-[11px] text-ios-muted mt-0.5">친구에게 내 상태 메시지 표시</p>
@@ -1247,7 +1516,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3 border-t border-ios-sep">
+          <div className="flex items-center justify-between py-3">
             <div>
               <p className="text-[12.5px] font-medium text-ios-text">친구 요청 수신</p>
               <p className="text-[11px] text-ios-muted mt-0.5">코드/링크로 연결 요청 받기</p>
@@ -1264,7 +1533,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
             />
           </div>
 
-          <div className="flex items-center justify-between py-3 border-t border-ios-sep">
+          <div className="flex items-center justify-between pt-3">
             <div>
               <p className="text-[12.5px] font-medium text-ios-text">건강 데이터 그룹 공유</p>
               <p className="text-[11px] text-ios-muted mt-0.5">그룹 랭킹에 배터리·수면 점수 참여</p>
@@ -1274,7 +1543,8 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
               disabled={prefsSaving}
               label="건강 데이터 그룹 공유"
               onToggle={() => {
-                const next: HealthVisibility = healthVisibility === "full" ? "hidden" : "full";
+                const next: HealthVisibility =
+                  healthVisibility === "full" ? "hidden" : "full";
                 setHealthVisibility(next);
                 void handleSavePrefs({ healthVisibility: next });
               }}
@@ -1282,26 +1552,34 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
           </div>
         </div>
       </SectionCard>
-
-      {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-[13px] text-red-600">{error}</p> : null}
     </div>
   );
 
   const content =
-    activeView === "main"
-      ? renderMainView()
-      : activeView === "bio"
-        ? renderBioEditor()
-        : activeView === "statusMessage"
-          ? renderStatusEditor()
-          : renderIdentityEditor();
+    activeView === "root"
+      ? renderRootView()
+      : activeView === "profile"
+        ? renderProfileView()
+        : activeView === "visibility"
+          ? renderVisibilityView()
+          : activeView === "friendProfile"
+            ? renderFriendProfileView()
+            : activeView === "connectCode"
+              ? renderConnectCodeView()
+              : activeView === "privacy"
+                ? renderPrivacyView()
+                : activeView === "bio"
+                  ? renderBioEditor()
+                  : activeView === "statusMessage"
+                    ? renderStatusEditor()
+                    : renderIdentityEditor();
 
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
-      title={activeView === "main" ? "내 소셜 프로필" : undefined}
-      subtitle={activeView === "main" ? "프로필을 설정하고, 내 코드를 확인하고, 공유 링크를 만들 수 있어요" : undefined}
+      title={activeView === "root" ? "설정" : undefined}
+      subtitle={activeView === "root" ? "프로필, 공개 범위, 프라이버시를 관리해요" : undefined}
       variant="appstore"
       maxHeightClassName="max-h-[84dvh]"
       footer={sheetFooter}
