@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { sanitizeInternalPath } from "@/lib/navigation";
@@ -8,6 +8,7 @@ import type { FeedPage, SocialPost, SocialProfile, SocialProfileHeader } from "@
 import { SocialAvatarBadge, SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
 import { SocialProfilePostViewer } from "@/components/social/SocialProfilePostViewer";
+import { SocialFollowListSheet } from "@/components/social/SocialFollowListSheet";
 
 type Props = {
   handle: string;
@@ -27,13 +28,37 @@ function formatProfileCount(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
-function ProfileStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center sm:px-3 sm:py-2.5">
+function ProfileStat({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
       <span className="text-[17px] font-bold text-gray-900 sm:text-[18px]">
         {formatProfileCount(value)}
       </span>
       <span className="mt-0.5 text-[11px] font-medium text-gray-500 sm:text-[12px]">{label}</span>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center transition active:opacity-70 sm:px-3 sm:py-2.5"
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="flex min-w-0 flex-col items-center justify-center rounded-2xl bg-[#faf8ff] px-2.5 py-2 text-center sm:px-3 sm:py-2.5">
+      {inner}
     </div>
   );
 }
@@ -327,8 +352,8 @@ export function SocialProfilePage({ handle }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [openProfileEditor, setOpenProfileEditor] = useState(false);
+  const [followListType, setFollowListType] = useState<"followers" | "following" | null>(null);
   const [actionLoading, setActionLoading] = useState<"follow" | "friend" | null>(null);
-  const [showActionMenu, setShowActionMenu] = useState(false);
   const [selectedPost, setSelectedPost] = useState<{
     post: SocialPost;
     initialPosts?: SocialPost[];
@@ -336,7 +361,6 @@ export function SocialProfilePage({ handle }: Props) {
     fallbackHandle?: string | null;
   } | null>(null);
 
-  const actionMenuRef = useRef<HTMLDivElement>(null);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -373,7 +397,6 @@ export function SocialProfilePage({ handle }: Props) {
 
   useEffect(() => {
     setSelectedPost(null);
-    setShowActionMenu(false);
   }, [handle]);
 
   const handlePostSelect = useCallback((selection: ProfileGridSelection) => {
@@ -385,19 +408,6 @@ export function SocialProfilePage({ handle }: Props) {
       fallbackHandle: isProfileScope ? selection.handle ?? selection.post.authorProfile.handle : null,
     });
   }, []);
-
-  useEffect(() => {
-    if (!showActionMenu) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!actionMenuRef.current?.contains(event.target as Node)) {
-        setShowActionMenu(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [showActionMenu]);
 
   const isSelf = profile?.relationship.isSelf ?? false;
   const isLocked = profile?.isProfileLocked ?? false;
@@ -502,15 +512,6 @@ export function SocialProfilePage({ handle }: Props) {
     } catch {}
   }, [profile?.displayName, profile?.handle]);
 
-  const handleActionMenuShare = useCallback(async () => {
-    setShowActionMenu(false);
-    await handleShare();
-  }, [handleShare]);
-
-  const handleActionMenuEdit = useCallback(() => {
-    setShowActionMenu(false);
-    setOpenProfileEditor(true);
-  }, []);
 
   const friendButtonLabel = profile?.relationship.isFriend
     ? "친구"
@@ -618,48 +619,33 @@ export function SocialProfilePage({ handle }: Props) {
             </svg>
           </button>
           <h1 className="truncate px-4 text-[16px] font-bold text-gray-900">{headerLabel}</h1>
-          <div ref={actionMenuRef} className="relative">
+          {isSelf ? (
             <button
               type="button"
-              onClick={() => setShowActionMenu((prev) => !prev)}
+              onClick={() => setOpenProfileEditor(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
-              aria-label="프로필 더보기"
+              aria-label="설정"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-                <circle cx="12" cy="5" r="1.5" />
-                <circle cx="12" cy="12" r="1.5" />
-                <circle cx="12" cy="19" r="1.5" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-5 w-5">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             </button>
-
-            {showActionMenu ? (
-              <div className="absolute right-0 top-10 z-30 min-w-[172px] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.14)]">
-                {isSelf ? (
-                  <button
-                    type="button"
-                    onClick={handleActionMenuEdit}
-                    className="w-full px-4 py-3 text-left text-[13px] font-medium text-gray-900 transition hover:bg-gray-50"
-                  >
-                    프로필 수정
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void handleActionMenuShare()}
-                  className="w-full px-4 py-3 text-left text-[13px] font-medium text-gray-900 transition hover:bg-gray-50"
-                >
-                  공유하기
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowActionMenu(false)}
-                  className="w-full border-t border-gray-100 px-4 py-3 text-left text-[13px] text-gray-500 transition hover:bg-gray-50"
-                >
-                  닫기
-                </button>
-              </div>
-            ) : null}
-          </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleShare()}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-700 transition hover:bg-gray-100 active:opacity-60"
+              aria-label="공유하기"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                <polyline points="16 6 12 2 8 6" />
+                <line x1="12" y1="2" x2="12" y2="15" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {notice ? (
@@ -720,8 +706,16 @@ export function SocialProfilePage({ handle }: Props) {
                   ) : null}
                   <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     <ProfileStat label="포스트" value={profile.postCount} />
-                    <ProfileStat label="팔로워" value={profile.followerCount} />
-                    <ProfileStat label="팔로잉" value={profile.followingCount} />
+                    <ProfileStat
+                      label="팔로워"
+                      value={profile.followerCount}
+                      onClick={() => setFollowListType("followers")}
+                    />
+                    <ProfileStat
+                      label="팔로잉"
+                      value={profile.followingCount}
+                      onClick={() => setFollowListType("following")}
+                    />
                   </div>
                 </div>
               </div>
@@ -809,6 +803,13 @@ export function SocialProfilePage({ handle }: Props) {
             />
           </>
         )}
+
+        <SocialFollowListSheet
+          open={followListType !== null}
+          onClose={() => setFollowListType(null)}
+          handle={activeProfileHandle}
+          type={followListType ?? "followers"}
+        />
 
         <SocialProfileSheet
           open={openProfileEditor}
