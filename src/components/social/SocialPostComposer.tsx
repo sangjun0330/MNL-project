@@ -12,8 +12,12 @@ import type {
   SocialPost,
   SocialPostVisibility,
 } from "@/types/social";
-import { useAppStoreSelector } from "@/lib/store";
-import { todayISO } from "@/lib/date";
+import { hasHealthInput } from "@/lib/healthRecords";
+import { vitalDisplayScore } from "@/lib/rnestInsight";
+import { useAppStore } from "@/lib/store";
+import { computeVitalsRange, hasReliableEstimatedSignal } from "@/lib/vitals";
+import { addDays, fromISODate, toISODate, todayISO } from "@/lib/date";
+import { cn } from "@/lib/cn";
 
 type Props = {
   open: boolean;
@@ -38,6 +42,14 @@ type SelectedImage = {
   id: string;
   file: File;
   previewUrl: string;
+};
+
+type ComposerMediaItem = {
+  key: string;
+  kind: "existing" | "new";
+  url: string;
+  imagePath?: string;
+  imageId?: string;
 };
 
 const MAX_SOCIAL_POST_IMAGES = 10;
@@ -92,6 +104,63 @@ function revokeImageUrls(images: SelectedImage[]) {
   }
 }
 
+function buildClientPostImageUrl(imagePath: string | null | undefined) {
+  if (!imagePath) return null;
+  const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/social-post-images/${String(imagePath).replace(/^\/+/, "")}`;
+}
+
+function normalizeShiftCode(value: string | null | undefined) {
+  if (!value) return undefined;
+  const normalized = value.trim().toUpperCase();
+
+  if (normalized === "DAY") return "D";
+  if (normalized === "EVENING") return "E";
+  if (normalized === "NIGHT") return "N";
+  if (normalized === "MID" || normalized === "MIDDLE") return "M";
+  if (normalized === "OFF" || normalized === "휴" || normalized === "휴무") return "OFF";
+  if (normalized === "VAC" || normalized === "VA" || normalized === "휴가" || normalized === "연차") return "VAC";
+  if (normalized === "D" || normalized === "E" || normalized === "N" || normalized === "M") return normalized;
+
+  return normalized.slice(0, 8);
+}
+
+function ComposerSwitch({
+  checked,
+  disabled,
+  onToggle,
+  ariaLabel,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onToggle}
+      aria-label={ariaLabel}
+      aria-pressed={checked}
+      className={cn(
+        "inline-flex h-8 w-14 shrink-0 items-center rounded-full p-1 transition-all duration-200 ease-out",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--rnest-accent)]/35 focus-visible:ring-offset-2",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+        checked ? "bg-[color:var(--rnest-accent)] shadow-[0_10px_24px_rgba(125,109,224,0.18)]" : "bg-[#e5e7eb]"
+      )}
+    >
+      <span
+        className={cn(
+          "block h-6 w-6 rounded-full bg-white shadow-[0_4px_10px_rgba(15,23,42,0.16)] transition-transform duration-200 ease-out",
+          checked ? "translate-x-6" : "translate-x-0"
+        )}
+      />
+    </button>
+  );
+}
+
 export function SocialPostComposer({
   open,
   onClose,
@@ -103,34 +172,89 @@ export function SocialPostComposer({
 }: Props) {
   const isEditMode = Boolean(editPost);
   const today = todayISO();
-  const schedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
-  const bio = useAppStoreSelector((s) => s.bio as Record<string, any>);
-  const emotions = useAppStoreSelector((s) => s.emotions as Record<string, any>);
+  const store = useAppStore();
+  const { schedule, bio, emotions } = store;
 
-  const todayShift: string | null = schedule[today] ?? null;
+  const weekStart = useMemo(() => toISODate(addDays(fromISODate(today), -6)), [today]);
+  const weekVitals = useMemo(
+    () => computeVitalsRange({ state: store, start: weekStart, end: today }),
+    [store, today, weekStart]
+  );
+  const weekVitalMap = useMemo(
+    () => new Map(weekVitals.map((vital) => [vital.dateISO, vital])),
+    [weekVitals]
+  );
+  const todayVital = useMemo(() => weekVitalMap.get(today) ?? null, [today, weekVitalMap]);
   const todayBio = bio[today] ?? null;
   const todayEmotion = emotions[today] ?? null;
+  const todayShift = useMemo(
+    () => normalizeShiftCode((schedule[today] as string | undefined) ?? todayVital?.shift ?? undefined) ?? null,
+    [schedule, today, todayVital]
+  );
+  const hasTodayVital = useMemo(() => {
+    if (hasHealthInput(todayBio, todayEmotion)) return true;
+    return hasReliableEstimatedSignal(todayVital);
+  }, [todayBio, todayEmotion, todayVital]);
 
-  // 오늘 배터리 추정 (수면, 스트레스, 기분 기반 간이 계산)
-  const estimatedBattery = useMemo<number | null>(() => {
-    if (!todayBio) return null;
-    const sleep = typeof todayBio.sleepHours === "number" ? todayBio.sleepHours : null;
-    const stress = typeof todayBio.stress === "number" ? todayBio.stress : null;
-    const mood = typeof todayBio.mood === "number" ? todayBio.mood : (typeof todayEmotion?.mood === "number" ? todayEmotion.mood : null);
-    if (sleep === null && stress === null && mood === null) return null;
-    const sleepScore = sleep !== null ? Math.min(100, (sleep / 8) * 100) : 70;
-    const stressScore = stress !== null ? Math.max(0, 100 - stress * 25) : 70;
-    const moodScore = mood !== null ? (mood / 5) * 100 : 70;
-    return Math.round((sleepScore * 0.4 + stressScore * 0.35 + moodScore * 0.25));
-  }, [todayBio, todayEmotion]);
+  const todayVitalScore = useMemo<number | null>(() => {
+    if (!todayVital || !hasTodayVital) return null;
+    return vitalDisplayScore(todayVital);
+  }, [hasTodayVital, todayVital]);
 
-  // 번아웃 레벨 추정
-  const estimatedBurnout = useMemo<"ok" | "warning" | "danger">(() => {
+  const todaySleepDebtHours = useMemo<number | null>(() => {
+    if (!todayVital || !hasTodayVital) return null;
+    const sleepDebtHours = todayVital.engine?.sleepDebtHours;
+    if (typeof sleepDebtHours !== "number") return null;
+    return Math.round(sleepDebtHours * 10) / 10;
+  }, [hasTodayVital, todayVital]);
+
+  const weeklyVitalAverage = useMemo<number | null>(() => {
+    const scores = weekVitals.flatMap((vital) => {
+      const hasInput = hasHealthInput(bio[vital.dateISO] ?? null, emotions[vital.dateISO] ?? null);
+      if (!hasInput && !hasReliableEstimatedSignal(vital)) return [];
+      return [vitalDisplayScore(vital)];
+    });
+
+    if (scores.length === 0) return todayVitalScore;
+    const sum = scores.reduce((acc, value) => acc + value, 0);
+    return Math.round(sum / scores.length);
+  }, [bio, emotions, todayVitalScore, weekVitals]);
+
+  const todayBurnoutLevel = useMemo<"ok" | "warning" | "danger">(() => {
+    if (todayVital?.burnout.level) return todayVital.burnout.level;
     const stress = typeof todayBio?.stress === "number" ? todayBio.stress : 0;
     if (stress >= 3) return "danger";
     if (stress >= 2) return "warning";
     return "ok";
-  }, [todayBio]);
+  }, [todayBio, todayVital]);
+
+  const suggestedHealthBadge = useMemo<SocialHealthBadge>(() => {
+    return {
+      shiftType: todayShift ?? undefined,
+      batteryLevel: todayVitalScore ?? undefined,
+      burnoutLevel: todayBurnoutLevel,
+    };
+  }, [todayBurnoutLevel, todayShift, todayVitalScore]);
+
+  const suggestedRecoveryCard = useMemo<RecoveryCardSnapshot>(() => {
+    const headline =
+      weeklyVitalAverage !== null
+        ? `이번 주 RNest Vital ${weeklyVitalAverage} — 기록 중`
+        : "이번 주 회복 기록";
+    return {
+      headline,
+      batteryAvg: weeklyVitalAverage,
+      sleepDebtHours: todaySleepDebtHours,
+      weekDays: 7,
+    };
+  }, [todaySleepDebtHours, weeklyVitalAverage]);
+
+  const initialHealthBadge = editPost?.healthBadge
+    ? suggestedHealthBadge
+    : null;
+  const initialRecoveryCard = editPost?.recoveryCard
+    ? suggestedRecoveryCard
+    : null;
 
   const [step, setStep] = useState<ComposerStep>(isEditMode ? "details" : "media");
   const [body, setBody] = useState(editPost?.body ?? "");
@@ -147,12 +271,12 @@ export function SocialPostComposer({
   const [visibilityOpen, setVisibilityOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 건강 배지
-  const [badgeOpen, setBadgeOpen] = useState(false);
-  const [healthBadge, setHealthBadge] = useState<SocialHealthBadge | null>(editPost?.healthBadge ?? null);
+  const [badgeOpen, setBadgeOpen] = useState(Boolean(initialHealthBadge));
+  const [healthBadge, setHealthBadge] = useState<SocialHealthBadge | null>(initialHealthBadge);
   // 회복 카드
-  const [recoveryCardOpen, setRecoveryCardOpen] = useState(false);
-  const [recoveryCard, setRecoveryCard] = useState<RecoveryCardSnapshot | null>(editPost?.recoveryCard ?? null);
-  const [recoveryHeadline, setRecoveryHeadline] = useState(editPost?.recoveryCard?.headline ?? "");
+  const [recoveryCardOpen, setRecoveryCardOpen] = useState(Boolean(initialRecoveryCard));
+  const [recoveryCard, setRecoveryCard] = useState<RecoveryCardSnapshot | null>(initialRecoveryCard);
+  const [recoveryHeadline, setRecoveryHeadline] = useState(initialRecoveryCard?.headline ?? "");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -183,15 +307,15 @@ export function SocialPostComposer({
     setSelectedGroupId(editPost?.groupId ?? (defaultVisibility === "group" ? userGroups[0]?.id ?? null : null));
     setExistingImagePaths(editPost?.imagePaths ?? []);
     setRemovedImagePaths([]);
-    setHealthBadge(editPost?.healthBadge ?? null);
-    setRecoveryCard(editPost?.recoveryCard ?? null);
-    setRecoveryHeadline(editPost?.recoveryCard?.headline ?? "");
-    setBadgeOpen(false);
-    setRecoveryCardOpen(false);
+    setHealthBadge(initialHealthBadge);
+    setRecoveryCard(initialRecoveryCard);
+    setRecoveryHeadline(initialRecoveryCard?.headline ?? "");
+    setBadgeOpen(Boolean(initialHealthBadge));
+    setRecoveryCardOpen(Boolean(initialRecoveryCard));
     setPosting(false);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [defaultVisibility, editPost, isEditMode, userGroups]);
+  }, [defaultVisibility, editPost, initialHealthBadge, initialRecoveryCard, isEditMode, userGroups]);
 
   useEffect(() => {
     const hadPendingReset = resetTimeoutRef.current !== null;
@@ -249,7 +373,46 @@ export function SocialPostComposer({
   const SelectedVisibilityIcon = selectedVisibility.icon;
   const charCount = Array.from(body).length;
   const outgoingTags = useMemo(() => mergeTags(selectedTags, tagInput), [selectedTags, tagInput]);
-  const totalImageCount = (isEditMode ? existingImagePaths.length - removedImagePaths.length : 0) + selectedImages.length;
+  const existingMediaItems = useMemo<ComposerMediaItem[]>(
+    () =>
+      existingImagePaths.flatMap((imagePath, index) => {
+        if (removedImagePaths.includes(imagePath)) return [];
+
+        const imageUrl =
+          editPost?.imageUrls[index] ??
+          (index === 0 ? editPost?.imageUrl : null) ??
+          buildClientPostImageUrl(imagePath);
+
+        if (!imageUrl) return [];
+
+        return [
+          {
+            key: `existing-${imagePath}-${index}`,
+            kind: "existing" as const,
+            url: imageUrl,
+            imagePath,
+          },
+        ];
+      }),
+    [editPost?.imageUrl, editPost?.imageUrls, existingImagePaths, removedImagePaths]
+  );
+  const selectedMediaItems = useMemo<ComposerMediaItem[]>(
+    () =>
+      selectedImages.map((image) => ({
+        key: `new-${image.id}`,
+        kind: "new" as const,
+        url: image.previewUrl,
+        imageId: image.id,
+      })),
+    [selectedImages]
+  );
+  const composerMediaItems = useMemo(
+    () => [...existingMediaItems, ...selectedMediaItems],
+    [existingMediaItems, selectedMediaItems]
+  );
+  const visibleExistingImageCount = existingMediaItems.length;
+  const totalImageCount = composerMediaItems.length;
+  const isMediaStep = !isEditMode && step === "media";
   const canSubmit =
     !posting &&
     charCount <= 500 &&
@@ -264,12 +427,12 @@ export function SocialPostComposer({
     } else {
       setHealthBadge({
         shiftType: todayShift ?? undefined,
-        batteryLevel: estimatedBattery ?? undefined,
-        burnoutLevel: estimatedBurnout,
+        batteryLevel: todayVitalScore ?? undefined,
+        burnoutLevel: todayBurnoutLevel,
       });
       setBadgeOpen(true);
     }
-  }, [estimatedBattery, estimatedBurnout, healthBadge, todayShift]);
+  }, [healthBadge, todayBurnoutLevel, todayShift, todayVitalScore]);
 
   // 회복 카드 토글 핸들러
   const handleToggleRecoveryCard = useCallback(() => {
@@ -278,20 +441,11 @@ export function SocialPostComposer({
       setRecoveryCardOpen(false);
       setRecoveryHeadline("");
     } else {
-      const avgBattery = estimatedBattery;
-      const headline = avgBattery !== null
-        ? `이번 주 배터리 ${avgBattery}% — 기록 중`
-        : "이번 주 회복 기록";
-      setRecoveryHeadline(headline);
-      setRecoveryCard({
-        headline,
-        batteryAvg: avgBattery,
-        sleepDebtHours: null,
-        weekDays: 7,
-      });
+      setRecoveryHeadline(suggestedRecoveryCard.headline);
+      setRecoveryCard(suggestedRecoveryCard);
       setRecoveryCardOpen(true);
     }
-  }, [estimatedBattery, recoveryCard]);
+  }, [recoveryCard, suggestedRecoveryCard]);
 
   const appendTags = useCallback((tags: string[]) => {
     setSelectedTags((prev) => {
@@ -358,7 +512,7 @@ export function SocialPostComposer({
     event.target.value = "";
     if (files.length === 0) return;
 
-    const remainingSlots = MAX_SOCIAL_POST_IMAGES - selectedImagesRef.current.length;
+    const remainingSlots = MAX_SOCIAL_POST_IMAGES - (visibleExistingImageCount + selectedImagesRef.current.length);
     if (remainingSlots <= 0) {
       setError(`사진은 최대 ${MAX_SOCIAL_POST_IMAGES}장까지 선택할 수 있어요.`);
       return;
@@ -391,7 +545,7 @@ export function SocialPostComposer({
     if (nextImages.length > 0) {
       setSelectedImages((prev) => {
         const merged = [...prev, ...nextImages];
-        if (prev.length === 0) {
+        if (visibleExistingImageCount + prev.length === 0) {
           setActiveImageIndex(0);
         }
         return merged;
@@ -402,9 +556,13 @@ export function SocialPostComposer({
     if (nextError) {
       setError(nextError);
     }
-  }, []);
+  }, [visibleExistingImageCount]);
 
-  const removeImage = useCallback((imageId: string) => {
+  const removeSelectedImage = useCallback((imageId: string) => {
+    const removedIndex = composerMediaItems.findIndex(
+      (item) => item.kind === "new" && item.imageId === imageId
+    );
+
     setSelectedImages((prev) => {
       const index = prev.findIndex((image) => image.id === imageId);
       if (index === -1) return prev;
@@ -416,13 +574,31 @@ export function SocialPostComposer({
 
       const next = prev.filter((image) => image.id !== imageId);
       setActiveImageIndex((current) => {
-        if (next.length === 0) return 0;
-        if (current > index) return current - 1;
-        return Math.min(current, next.length - 1);
+        const nextLength = composerMediaItems.length - 1;
+        if (nextLength <= 0) return 0;
+        if (removedIndex >= 0 && current > removedIndex) return current - 1;
+        return Math.min(current, nextLength - 1);
       });
       return next;
     });
-  }, []);
+  }, [composerMediaItems]);
+
+  const removeExistingImage = useCallback((imagePath: string) => {
+    const removedIndex = composerMediaItems.findIndex(
+      (item) => item.kind === "existing" && item.imagePath === imagePath
+    );
+
+    setRemovedImagePaths((prev) => {
+      if (prev.includes(imagePath)) return prev;
+      return [...prev, imagePath];
+    });
+    setActiveImageIndex((current) => {
+      const nextLength = composerMediaItems.length - 1;
+      if (nextLength <= 0) return 0;
+      if (removedIndex >= 0 && current > removedIndex) return current - 1;
+      return Math.min(current, nextLength - 1);
+    });
+  }, [composerMediaItems]);
 
   const uploadImages = useCallback(async () => {
     if (selectedImages.length === 0) return [] as string[];
@@ -533,6 +709,7 @@ export function SocialPostComposer({
   }, [body, canSubmit, editPost, healthBadge, isEditMode, onClose, onEdited, onPosted, outgoingTags, recoveryCard, removedImagePaths, selectedGroupId, uploadImages, visibility]);
 
   const activeImage = selectedImages[activeImageIndex] ?? null;
+  const activeComposerImage = composerMediaItems[activeImageIndex] ?? null;
   const handleRequestClose = useCallback(() => {
     if (posting) return;
     onClose();
@@ -575,7 +752,7 @@ export function SocialPostComposer({
       contentClassName="bg-transparent"
       backdropClassName="bg-black/50 backdrop-blur-[10px]"
       footer={
-        step === "details" ? (
+        !isMediaStep ? (
           <div className="pt-1">
             {error ? (
               <p className="mb-2 text-center text-[12px] text-red-500">{error}</p>
@@ -587,7 +764,7 @@ export function SocialPostComposer({
               className="h-12 w-full rounded-[18px] text-[14px] font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-[#c8ccd3]"
               style={{ backgroundColor: canSubmit ? "var(--rnest-accent)" : undefined }}
             >
-              {posting ? "게시 중..." : "게시하기"}
+              {posting ? (isEditMode ? "저장 중..." : "게시 중...") : (isEditMode ? "저장하기" : "게시하기")}
             </button>
           </div>
         ) : undefined
@@ -604,7 +781,7 @@ export function SocialPostComposer({
         onChange={handleImageSelect}
       />
 
-      {step === "media" ? (
+      {isMediaStep ? (
         <div className="flex h-full min-h-0 flex-col bg-[#09090c] text-white">
           <div className="shrink-0 px-4 pb-4 pt-[calc(14px+env(safe-area-inset-top))]">
             <div className="flex items-center justify-between">
@@ -729,7 +906,7 @@ export function SocialPostComposer({
                     </button>
                     <button
                       type="button"
-                      onClick={() => removeImage(image.id)}
+                      onClick={() => removeSelectedImage(image.id)}
                       disabled={posting}
                       className="absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
                       aria-label="사진 제거"
@@ -755,10 +932,10 @@ export function SocialPostComposer({
             <div className="flex items-center justify-between">
               <button
                 type="button"
-                onClick={handleReturnToMedia}
+                onClick={isEditMode ? handleRequestClose : handleReturnToMedia}
                 disabled={posting}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-[#1c1c1e] transition hover:bg-black/5 disabled:opacity-40"
-                aria-label="이전 단계"
+                aria-label={isEditMode ? "닫기" : "이전 단계"}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" className="h-5 w-5">
                   <path d="m15 18-6-6 6-6" />
@@ -771,68 +948,107 @@ export function SocialPostComposer({
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-4 px-4 pb-6 pt-4">
-              {selectedImages.length > 0 ? (
-                <section className="overflow-hidden rounded-2xl border border-black/[0.05] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+              {composerMediaItems.length > 0 ? (
+                <section className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
                   <div className="relative aspect-square bg-[#f2f3f5]">
-                    {activeImage ? (
+                    {activeComposerImage ? (
                       <>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={activeImage.previewUrl}
+                          src={activeComposerImage.url}
                           alt="게시할 사진"
                           className="h-full w-full object-cover"
                         />
                         <div className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white">
-                          {activeImageIndex + 1}/{selectedImages.length}
+                          {activeImageIndex + 1}/{composerMediaItems.length}
                         </div>
                       </>
                     ) : null}
                   </div>
 
-                  <div className="flex gap-2 overflow-x-auto px-3 py-3">
-                    {selectedImages.map((image, index) => (
+                  <div className="border-t border-black/[0.06] bg-white px-3 py-3">
+                    <div className="flex items-center justify-between gap-3 px-1">
+                      <div>
+                        <p className="text-[13px] font-semibold text-[#111827]">사진</p>
+                        <p className="mt-0.5 text-[11px] text-[#9ca3af]">
+                          기존 사진과 새 사진을 한 화면에서 바로 정리할 수 있어요.
+                        </p>
+                      </div>
                       <button
-                        key={image.id}
                         type="button"
-                        onClick={() => setActiveImageIndex(index)}
+                        onClick={openFilePicker}
                         disabled={posting}
-                        className="relative shrink-0 overflow-hidden rounded-[16px]"
-                        aria-label={`${index + 1}번 사진 보기`}
+                        className="rounded-full border border-black/10 px-3.5 py-1.5 text-[11px] font-semibold text-[#111827] transition hover:bg-black/[0.03]"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={image.previewUrl}
-                          alt=""
-                          className="h-16 w-16 object-cover"
-                        />
-                        <span className="absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
-                          {index + 1}
-                        </span>
-                        {index === activeImageIndex ? (
-                          <div className="absolute inset-0 rounded-[16px] ring-2 ring-[color:var(--rnest-accent)]" />
-                        ) : null}
+                        사진 추가
                       </button>
-                    ))}
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={openFilePicker}
-                      disabled={posting}
-                      className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[16px] border border-dashed border-black/10 bg-[#f6f7f9] text-[#6b7280]"
-                      aria-label="사진 추가"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5">
-                        <path d="M12 5v14" />
-                        <path d="M5 12h14" />
-                      </svg>
-                    </button>
+                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                      {composerMediaItems.map((image, index) => (
+                        <div
+                          key={image.key}
+                          className="relative shrink-0 overflow-hidden rounded-[16px]"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setActiveImageIndex(index)}
+                            disabled={posting}
+                            className="relative block overflow-hidden rounded-[16px]"
+                            aria-label={`${index + 1}번 사진 보기`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={image.url}
+                              alt=""
+                              className="h-16 w-16 object-cover"
+                            />
+                            <span className="absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
+                              {index + 1}
+                            </span>
+                            {index === activeImageIndex ? (
+                              <div className="absolute inset-0 rounded-[16px] ring-2 ring-[color:var(--rnest-accent)]" />
+                            ) : null}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              image.kind === "existing"
+                                ? removeExistingImage(image.imagePath ?? "")
+                                : removeSelectedImage(image.imageId ?? "")
+                            }
+                            disabled={posting}
+                            className="absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                            aria-label={image.kind === "existing" ? "기존 사진 제거" : "사진 제거"}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                              <path d="M18 6 6 18" />
+                              <path d="m6 6 12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={openFilePicker}
+                        disabled={posting}
+                        className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[16px] border border-dashed border-black/10 bg-[#f6f7f9] text-[#6b7280]"
+                        aria-label="사진 추가"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5">
+                          <path d="M12 5v14" />
+                          <path d="M5 12h14" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </section>
               ) : (
                 <section className="rounded-2xl border border-dashed border-black/10 bg-white px-5 py-6 text-center shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
-                  <p className="text-[14px] font-semibold text-[#111827]">텍스트만 작성하는 게시글</p>
+                  <p className="text-[14px] font-semibold text-[#111827]">사진 없이 올리는 게시글</p>
                   <p className="mt-1 text-[12px] leading-5 text-[#6b7280]">
-                    필요하면 언제든 이전 단계로 돌아가 사진을 추가할 수 있어요.
+                    여기서 바로 사진을 추가하거나, 기존 사진을 모두 제거한 상태로 저장할 수 있어요.
                   </p>
                   <button
                     type="button"
@@ -1014,24 +1230,17 @@ export function SocialPostComposer({
 
               {/* ── 오늘의 상태 배지 ─────────────────────────── */}
               <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
                     <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">오늘의 상태 배지</p>
-                    <p className="mt-0.5 text-[11px] text-[#9ca3af]">근무·배터리 상태를 게시글에 첨부할 수 있어요</p>
+                    <p className="mt-0.5 text-[11px] text-[#9ca3af]">근무·RNest Vital 상태를 게시글에 첨부할 수 있어요</p>
                   </div>
-                  <button
-                    type="button"
+                  <ComposerSwitch
+                    checked={Boolean(healthBadge)}
                     disabled={posting}
-                    onClick={handleToggleBadge}
-                    className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
-                      healthBadge ? "bg-[color:var(--rnest-accent)]" : "bg-gray-200"
-                    }`}
-                    aria-label="오늘의 상태 배지 토글"
-                  >
-                    <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                      healthBadge ? "translate-x-5" : "translate-x-0.5"
-                    }`} />
-                  </button>
+                    onToggle={handleToggleBadge}
+                    ariaLabel="오늘의 상태 배지 토글"
+                  />
                 </div>
                 {healthBadge && badgeOpen ? (
                   <div className="mt-3 space-y-2.5">
@@ -1041,7 +1250,7 @@ export function SocialPostComposer({
                           <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
                             <path d="M10 2a8 8 0 1 0 0 16A8 8 0 0 0 10 2zm1 11H9V9h2v4zm0-6H9V5h2v2z" />
                           </svg>
-                          {healthBadge.shiftType} 근무
+                          {normalizeShiftCode(healthBadge.shiftType) ?? healthBadge.shiftType}
                           <button
                             type="button"
                             onClick={() => setHealthBadge((prev) => prev ? { ...prev, shiftType: undefined } : null)}
@@ -1061,12 +1270,12 @@ export function SocialPostComposer({
                             <rect x="16" y="2.5" width="2.5" height="5" rx="0.8" fill="currentColor" />
                             <rect x="1.5" y="1.5" width={Math.round((healthBadge.batteryLevel / 100) * 12)} height="7" rx="1" fill="currentColor" />
                           </svg>
-                          배터리 {healthBadge.batteryLevel}%
+                          RNest Vital {healthBadge.batteryLevel}
                           <button
                             type="button"
                             onClick={() => setHealthBadge((prev) => prev ? { ...prev, batteryLevel: undefined } : null)}
                             className="ml-0.5 opacity-60 hover:opacity-100"
-                            aria-label="배터리 배지 제거"
+                            aria-label="Vital 배지 제거"
                           >
                             <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
                               <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
@@ -1094,7 +1303,8 @@ export function SocialPostComposer({
                       ) : null}
                     </div>
                     <p className="text-[11px] text-[#9ca3af]">
-                      {todayShift ? `오늘 근무: ${todayShift}` : "오늘 일정 미입력"}{estimatedBattery !== null ? ` · 추정 배터리 ${estimatedBattery}%` : ""}
+                      {todayShift ? `오늘 근무: ${todayShift}` : "오늘 일정 미입력"}
+                      {todayVitalScore !== null ? ` · RNest Vital ${todayVitalScore}` : ""}
                     </p>
                   </div>
                 ) : null}
@@ -1102,24 +1312,17 @@ export function SocialPostComposer({
 
               {/* ── 회복 카드 첨부 ───────────────────────────── */}
               <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
                     <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">회복 카드 첨부</p>
-                    <p className="mt-0.5 text-[11px] text-[#9ca3af]">이번 주 회복 현황을 카드로 공유할 수 있어요</p>
+                    <p className="mt-0.5 text-[11px] text-[#9ca3af]">이번 주 RNest Vital 흐름을 카드로 공유할 수 있어요</p>
                   </div>
-                  <button
-                    type="button"
+                  <ComposerSwitch
+                    checked={Boolean(recoveryCard)}
                     disabled={posting}
-                    onClick={handleToggleRecoveryCard}
-                    className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
-                      recoveryCard ? "bg-[color:var(--rnest-accent)]" : "bg-gray-200"
-                    }`}
-                    aria-label="회복 카드 토글"
-                  >
-                    <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                      recoveryCard ? "translate-x-5" : "translate-x-0.5"
-                    }`} />
-                  </button>
+                    onToggle={handleToggleRecoveryCard}
+                    ariaLabel="회복 카드 토글"
+                  />
                 </div>
                 {recoveryCard && recoveryCardOpen ? (
                   <div className="mt-3 overflow-hidden rounded-[14px] bg-gradient-to-r from-[#f0eeff] to-[#e8f5e9] px-3.5 py-3">
@@ -1137,12 +1340,12 @@ export function SocialPostComposer({
                         setRecoveryHeadline(v);
                         setRecoveryCard((prev) => prev ? { ...prev, headline: v } : prev);
                       }}
-                      placeholder="예: 이번 주 배터리 72% — 나이트 이후 회복 완료"
+                      placeholder="예: 이번 주 RNest Vital 72 — 나이트 이후 회복 완료"
                       className="w-full bg-transparent text-[13px] font-semibold text-gray-800 outline-none placeholder:text-gray-400 placeholder:font-normal"
                     />
                     <div className="mt-1.5 flex flex-wrap gap-2.5 text-[11px] text-gray-500">
                       {recoveryCard.batteryAvg !== null && recoveryCard.batteryAvg !== undefined ? (
-                        <span>주간 평균 {recoveryCard.batteryAvg}%</span>
+                        <span>주간 평균 Vital {recoveryCard.batteryAvg}</span>
                       ) : null}
                       <span className="text-gray-400">7일 기준</span>
                     </div>

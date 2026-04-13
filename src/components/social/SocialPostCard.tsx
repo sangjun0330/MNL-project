@@ -6,9 +6,24 @@ import type { SocialPost, SocialHealthBadge, RecoveryCardSnapshot } from "@/type
 import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { cn } from "@/lib/cn";
 
+function normalizeShiftCode(value: string | null | undefined) {
+  if (!value) return undefined;
+  const normalized = value.trim().toUpperCase();
+
+  if (normalized === "DAY") return "D";
+  if (normalized === "EVENING") return "E";
+  if (normalized === "NIGHT") return "N";
+  if (normalized === "MID" || normalized === "MIDDLE") return "M";
+  if (normalized === "OFF" || normalized === "휴" || normalized === "휴무") return "OFF";
+  if (normalized === "VAC" || normalized === "VA" || normalized === "휴가" || normalized === "연차") return "VAC";
+  if (normalized === "D" || normalized === "E" || normalized === "N" || normalized === "M") return normalized;
+
+  return normalized.slice(0, 8);
+}
+
 // ── 교대 유형 SVG 아이콘 ─────────────────────────────────────
 function ShiftIcon({ shiftType }: { shiftType: string }) {
-  const t = shiftType.toUpperCase();
+  const t = normalizeShiftCode(shiftType) ?? shiftType.toUpperCase();
   if (t === "N" || t.startsWith("N")) {
     // 나이트 → 달
     return (
@@ -79,23 +94,21 @@ function BurnoutIcon({ level }: { level: "ok" | "warning" | "danger" }) {
 
 function HealthBadgeRow({ badge }: { badge: SocialHealthBadge }) {
   const hasBadge = badge.shiftType || badge.batteryLevel !== undefined || badge.burnoutLevel;
+  const shiftCode = normalizeShiftCode(badge.shiftType) ?? badge.shiftType;
   if (!hasBadge) return null;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      {badge.shiftType ? (
+      {shiftCode ? (
         <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 ring-1 ring-gray-200">
-          <ShiftIcon shiftType={badge.shiftType} />
-          {badge.shiftType === "N" || badge.shiftType.startsWith("N") ? "나이트" :
-           badge.shiftType === "E" || badge.shiftType.startsWith("E") ? "이브닝" :
-           badge.shiftType === "D" || badge.shiftType.startsWith("D") ? "데이" :
-           badge.shiftType === "OFF" || badge.shiftType === "M" ? "휴무" : badge.shiftType} 근무
+          <ShiftIcon shiftType={shiftCode} />
+          {shiftCode}
         </span>
       ) : null}
       {badge.batteryLevel !== undefined ? (
         <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 ring-1 ring-gray-200">
           <BatteryIcon level={badge.batteryLevel} />
-          배터리 {badge.batteryLevel}%
+          Vital {badge.batteryLevel}
         </span>
       ) : null}
       {badge.burnoutLevel ? (
@@ -126,7 +139,7 @@ function RecoveryCardRow({ card }: { card: RecoveryCardSnapshot }) {
               <rect x="20" y="3.5" width="3" height="5" rx="1" fill="#6b7280" />
               <rect x="2" y="2" width={Math.round((card.batteryAvg / 100) * 14)} height="8" rx="1.5" fill="#6b7280" />
             </svg>
-            주간 평균 {card.batteryAvg}%
+            주간 평균 Vital {card.batteryAvg}
           </span>
         ) : null}
         {card.sleepDebtHours !== null && card.sleepDebtHours !== undefined ? (
@@ -159,6 +172,14 @@ function formatRelativeTime(iso: string): string {
 
 function formatCount(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
+}
+
+function wasPostEdited(createdAt: string, updatedAt?: string | null) {
+  if (!updatedAt) return false;
+  const createdMs = new Date(createdAt).getTime();
+  const updatedMs = new Date(updatedAt).getTime();
+  if (!Number.isFinite(createdMs) || !Number.isFinite(updatedMs)) return false;
+  return updatedMs - createdMs > 1000;
 }
 
 type Props = {
@@ -260,6 +281,7 @@ export function SocialPostCard({
   const isLongCaption = caption.split("\n").length > 2 || caption.length > 140;
   const profileLabel =
     post.authorProfile.displayName || post.authorProfile.nickname || "익명";
+  const showEditedBadge = wasPostEdited(post.createdAt, post.updatedAt);
 
   const goToProfile = useCallback(() => {
     if (post.authorProfile.handle) {
@@ -616,6 +638,12 @@ export function SocialPostCard({
             >
               {authorFollowing ? "팔로잉" : "팔로우"}
             </button>
+          ) : null}
+
+          {showEditedBadge ? (
+            <span className="text-[11px] font-medium text-gray-400">
+              수정됨
+            </span>
           ) : null}
 
           {canDelete ? (
