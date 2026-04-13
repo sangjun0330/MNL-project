@@ -541,20 +541,19 @@ export async function scanScheduleImage(
 
     reportProgress("recognizing", 25, "이미지 분석 중...");
     let recognitionResult: any;
-    const imageUrl = URL.createObjectURL(file);
 
     try {
-      recognitionResult = await worker.recognize(imageUrl);
+      recognitionResult = await worker.recognize(file);
     } finally {
-      URL.revokeObjectURL(imageUrl);
       await worker.terminate().catch(() => undefined);
     }
 
     reportProgress("parsing", 82, "테이블 구조 분석 중...");
 
     const data = recognitionResult?.data ?? {};
-    const words = (data.words ?? [])
-      .filter((word: any) => word.confidence > 20 && word.text?.trim())
+    const rawWords = (data.words ?? []).filter((word: any) => word.text?.trim());
+    const filteredWords = rawWords.filter((word: any) => word.confidence > 20);
+    const words = (filteredWords.length > 0 ? filteredWords : rawWords)
       .map(
         (word: any): OcrWord => ({
           text: word.text.trim(),

@@ -128,12 +128,10 @@ export async function parseScheduleImage(
 
     report("recognizing", 25, "이미지 분석 중...");
 
-    const imageUrl = URL.createObjectURL(file);
     let result;
     try {
-      result = await worker.recognize(imageUrl);
+      result = await worker.recognize(file);
     } finally {
-      URL.revokeObjectURL(imageUrl);
       await worker.terminate();
     }
 
@@ -149,8 +147,8 @@ export async function parseScheduleImage(
     const rawWords: TesseractWord[] = rawData.words ?? [];
     const fullText: string = rawData.text ?? "";
 
-    const words: OcrWord[] = rawWords
-      .filter((w) => w.confidence > 20 && w.text.trim())
+    const filteredWords = rawWords.filter((w) => w.confidence > 20 && w.text.trim());
+    const words: OcrWord[] = (filteredWords.length > 0 ? filteredWords : rawWords.filter((w) => w.text.trim()))
       .map((w) => ({
         text: w.text.trim(),
         bbox: w.bbox,
