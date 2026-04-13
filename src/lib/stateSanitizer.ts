@@ -341,11 +341,6 @@ function sanitizeSettings(raw: unknown): AppSettings {
       caffeineSensitivity:
         sensitivityNum == null ? defaults.profile?.caffeineSensitivity ?? 1 : clamp(sensitivityNum, 0.5, 1.5),
     },
-    customShiftTypes,
-    ocrLastUserName:
-      typeof loaded.ocrLastUserName === "string"
-        ? loaded.ocrLastUserName.trim().slice(0, 20)
-        : defaults.ocrLastUserName ?? "",
   };
 }
 

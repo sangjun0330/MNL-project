@@ -97,19 +97,12 @@ export type MenstrualSettings = {
   startISO?: ISODate | null;
 };
 
-export type CustomShiftType = {
-  id: string;
-  displayName: string;
-  semanticType: Shift;
-  aliases: string[];
-};
+export type CustomShiftType = CustomShiftDef;
 
 export type AppSettings = {
   schedulePatternEnabled?: boolean;
   defaultSchedulePattern?: string; // e.g. D2E2N2OFF2
   schedulePatternAppliedFrom?: ISODate | null;
-  customShiftTypes?: CustomShiftType[];
-  ocrLastUserName?: string;
 
   emotionTagsPositive?: string[];
   emotionTagsNegative?: string[];
@@ -152,7 +145,6 @@ export type AppStore = AppState & {
   setShiftForDate: (iso: ISODate, shift: Shift) => void;
   batchSetSchedule: (patch: Record<ISODate, Shift>) => void;
   setShiftNameForDate: (iso: ISODate, name: string) => void;
-  batchSetShiftNames: (patch: Record<ISODate, string>) => void;
   clearShiftNameForDate: (iso: ISODate) => void;
   /** OCR 결과 일괄 적용: shiftNames를 한 번에 병합 */
   batchSetShiftNames: (patch: Record<ISODate, string>) => void;
@@ -202,8 +194,6 @@ export function defaultSettings(): AppSettings {
     },
     language: "ko",
     hasSeenOnboarding: false,
-    customShiftTypes: [],
-    ocrLastUserName: "",
   };
 }
 
