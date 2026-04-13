@@ -1,6 +1,7 @@
 import type { ISODate } from "@/lib/date";
 import type { CustomShiftType } from "@/lib/model";
 import type { Shift } from "@/lib/types";
+import { LOCAL_TESSERACT_WORKER_OPTIONS } from "@/lib/tesseractAssetPaths";
 
 type ShiftLookupValue = [Shift, string];
 
@@ -524,10 +525,7 @@ export async function scanScheduleImage(
 
     reportProgress("loading", 20, "한국어 OCR 모델 준비 중... (첫 실행 시 ~5MB 다운로드)");
     const worker = await createWorker("kor+eng", OEM.LSTM_ONLY, {
-      workerBlobURL: false,
-      workerPath: "/tesseract/worker.min.js",
-      corePath: "/tesseract/core",
-      langPath: "/tesseract/lang",
+      ...LOCAL_TESSERACT_WORKER_OPTIONS,
       logger: (event) => {
         if (event.status === "recognizing text") {
           reportProgress(
@@ -609,9 +607,15 @@ export async function scanScheduleImage(
     };
   } catch (error) {
     console.error("[ocrSchedule] 오류:", error);
+    const message =
+      typeof error === "string"
+        ? error
+        : error instanceof Error
+          ? error.message
+          : "OCR 처리 중 오류가 발생했습니다.";
     return {
       kind: "error",
-      message: error instanceof Error ? error.message : "OCR 처리 중 오류가 발생했습니다.",
+      message,
       code: "OCR_FAILED",
     };
   }

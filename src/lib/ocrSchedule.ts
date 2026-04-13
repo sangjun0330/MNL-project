@@ -18,6 +18,7 @@ import {
   isLikelyKoreanName,
   normalizeShiftText,
 } from "@/lib/shiftAliasMap";
+import { LOCAL_TESSERACT_WORKER_OPTIONS } from "@/lib/tesseractAssetPaths";
 
 // ────────────────────────────────────────────────────────────
 // 공개 타입
@@ -119,6 +120,7 @@ export async function parseScheduleImage(
     report("loading", 20, "한국어 OCR 모델 준비 중... (첫 실행 시 ~12MB 다운로드)");
 
     const worker = await createWorker("kor+eng", 1, {
+      ...LOCAL_TESSERACT_WORKER_OPTIONS,
       logger: (m) => {
         if (m.status === "recognizing text") {
           report("recognizing", 20 + Math.round(m.progress * 60), "텍스트 인식 중...");
@@ -193,9 +195,15 @@ export async function parseScheduleImage(
 
   } catch (err) {
     console.error("[ocrSchedule] 오류:", err);
+    const message =
+      typeof err === "string"
+        ? err
+        : err instanceof Error
+          ? err.message
+          : "OCR 처리 중 오류가 발생했습니다.";
     return {
       kind: "error",
-      message: err instanceof Error ? err.message : "OCR 처리 중 오류가 발생했습니다.",
+      message,
       code: "OCR_FAILED",
     };
   }
