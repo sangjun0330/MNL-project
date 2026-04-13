@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/Card";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { ScheduleRecordSheet } from "@/components/schedule/ScheduleRecordSheet";
+import { ShiftPatternOcrCard } from "@/components/schedule/ShiftPatternOcrCard";
 import { ShiftPatternQuickApplyCard } from "@/components/schedule/ShiftPatternQuickApplyCard";
 import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsForm";
 import { useI18n } from "@/lib/useI18n";
@@ -507,12 +508,15 @@ export function SchedulePage() {
         subtitle={t("선택한 날짜부터 자동 채우기")}
         variant="appstore"
       >
-        <div className="pb-4 space-y-3">
+        <div className="space-y-3 pb-4">
           <ShiftPatternQuickApplyCard selectedISO={selected} />
-          {/* 전체 설정 페이지 진입 */}
+          <ShiftPatternOcrCard selectedISO={selected} />
           <button
             type="button"
-            onClick={() => { setOpenPattern(false); router.push("/schedule/pattern-settings"); }}
+            onClick={() => {
+              setOpenPattern(false);
+              router.push("/schedule/pattern-settings");
+            }}
             className="flex w-full items-center justify-between rounded-2xl border border-ios-sep bg-white px-4 py-3 text-[13px] font-medium hover:bg-ios-fill active:opacity-70"
           >
             <span className="flex items-center gap-2 text-ios-label">

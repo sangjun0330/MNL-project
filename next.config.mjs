@@ -58,6 +58,7 @@ if (supabaseOrigin) {
 const scriptSources = [
   "'self'",
   "'unsafe-inline'",
+  "'wasm-unsafe-eval'",
   "https://static.cloudflareinsights.com",
   tossScriptOrigin,
   tossWildcard,
