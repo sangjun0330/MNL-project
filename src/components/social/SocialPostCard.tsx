@@ -2,9 +2,146 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SocialPost } from "@/types/social";
+import type { SocialPost, SocialHealthBadge, RecoveryCardSnapshot } from "@/types/social";
 import { SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { cn } from "@/lib/cn";
+
+// ── 교대 유형 SVG 아이콘 ─────────────────────────────────────
+function ShiftIcon({ shiftType }: { shiftType: string }) {
+  const t = shiftType.toUpperCase();
+  if (t === "N" || t.startsWith("N")) {
+    // 나이트 → 달
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-indigo-500">
+        <path d="M17.293 13.293A8 8 0 0 1 6.707 2.707a8.002 8.002 0 1 0 10.586 10.586z" />
+      </svg>
+    );
+  }
+  if (t === "E" || t.startsWith("E")) {
+    // 이브닝 → 반달/석양
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-orange-400">
+        <path fillRule="evenodd" d="M10 2a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm4.243 2.757a1 1 0 0 1 0 1.414L13.07 7.343a1 1 0 1 1-1.414-1.414l1.172-1.172a1 1 0 0 1 1.414 0zM18 9a1 1 0 1 0 0 2h-1a1 1 0 1 0 0-2h1zM5.636 5.636a1 1 0 0 0-1.414 0L3.05 6.808a1 1 0 0 0 1.414 1.414l1.172-1.172a1 1 0 0 0 0-1.414zM3 10a1 1 0 0 0-1 1 1 1 0 0 0 1 1H2a1 1 0 1 0 0-2h1zM10 15a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" clipRule="evenodd" />
+      </svg>
+    );
+  }
+  if (t === "OFF" || t === "M" || t === "휴") {
+    // 휴무 → 커피컵
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-emerald-500">
+        <path fillRule="evenodd" d="M6 2a1 1 0 0 1 1-1h6a1 1 0 0 1 .894.553l1.447 2.894A1 1 0 0 1 16 5.5V15a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5.5a1 1 0 0 1 .659-.94L6 2zm1.553.553L6 5h8l-1.553-2.447A1 1 0 0 0 11.553 2H8.447a1 1 0 0 0-.894.553zM5 6v9a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6H5zm9 1h1a2 2 0 0 1 0 4h-1V7z" clipRule="evenodd" />
+      </svg>
+    );
+  }
+  // 데이 (D) → 태양
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-yellow-400">
+      <path fillRule="evenodd" d="M10 2a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm4.243 2.757a1 1 0 0 1 0 1.414L13.07 7.343a1 1 0 1 1-1.414-1.414l1.172-1.172a1 1 0 0 1 1.414 0zM18 9a1 1 0 1 0 0 2h-1a1 1 0 1 0 0-2h1zM5.636 5.636a1 1 0 0 0-1.414 0L3.05 6.808a1 1 0 0 0 1.414 1.414l1.172-1.172a1 1 0 0 0 0-1.414zM3 10a1 1 0 0 0-1 1 1 1 0 0 0 1 1H2a1 1 0 1 0 0-2h1zM10 15a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 5a1 1 0 0 1-1-1v-1a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1zm4.95-2.464a1 1 0 0 1-1.414 0l-1.172-1.172a1 1 0 0 1 1.414-1.414l1.172 1.172a1 1 0 0 1 0 1.414zM5.05 17.536a1 1 0 0 1 0-1.414l1.172-1.172a1 1 0 0 1 1.414 1.414L6.464 17.536a1 1 0 0 1-1.414 0z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+// ── 배터리 SVG 아이콘 ────────────────────────────────────────
+function BatteryIcon({ level }: { level: number }) {
+  const color = level >= 70 ? "#22c55e" : level >= 40 ? "#eab308" : "#ef4444";
+  const fill = Math.round((level / 100) * 14);
+  return (
+    <svg viewBox="0 0 24 12" className="h-3.5 w-5" aria-hidden>
+      <rect x="0.5" y="0.5" width="19" height="11" rx="2.5" stroke={color} strokeWidth="1" fill="none" />
+      <rect x="20" y="3.5" width="3" height="5" rx="1" fill={color} />
+      <rect x="2" y="2" width={fill} height="8" rx="1.5" fill={color} />
+    </svg>
+  );
+}
+
+// ── 번아웃 SVG 아이콘 ────────────────────────────────────────
+function BurnoutIcon({ level }: { level: "ok" | "warning" | "danger" }) {
+  if (level === "ok") {
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-emerald-500">
+        <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.707-9.293a1 1 0 0 0-1.414-1.414L9 10.586 7.707 9.293a1 1 0 0 0-1.414 1.414l2 2a1 1 0 0 0 1.414 0l4-4z" clipRule="evenodd" />
+      </svg>
+    );
+  }
+  if (level === "warning") {
+    return (
+      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-yellow-500">
+        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-1-8a1 1 0 0 1 1 1v3a1 1 0 1 1-2 0V6a1 1 0 0 1 1-1z" clipRule="evenodd" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-red-500">
+      <path fillRule="evenodd" d="M12.395 2.553a1 1 0 0 0-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 0 0-.613 3.58 2.64 2.64 0 0 1-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 0 0 5.05 6.05 6.981 6.981 0 0 0 3 11a7 7 0 1 0 11.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function HealthBadgeRow({ badge }: { badge: SocialHealthBadge }) {
+  const hasBadge = badge.shiftType || badge.batteryLevel !== undefined || badge.burnoutLevel;
+  if (!hasBadge) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      {badge.shiftType ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 ring-1 ring-gray-200">
+          <ShiftIcon shiftType={badge.shiftType} />
+          {badge.shiftType === "N" || badge.shiftType.startsWith("N") ? "나이트" :
+           badge.shiftType === "E" || badge.shiftType.startsWith("E") ? "이브닝" :
+           badge.shiftType === "D" || badge.shiftType.startsWith("D") ? "데이" :
+           badge.shiftType === "OFF" || badge.shiftType === "M" ? "휴무" : badge.shiftType} 근무
+        </span>
+      ) : null}
+      {badge.batteryLevel !== undefined ? (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 ring-1 ring-gray-200">
+          <BatteryIcon level={badge.batteryLevel} />
+          배터리 {badge.batteryLevel}%
+        </span>
+      ) : null}
+      {badge.burnoutLevel ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2.5 py-1 text-[11.5px] font-semibold text-gray-700 ring-1 ring-gray-200">
+          <BurnoutIcon level={badge.burnoutLevel} />
+          {badge.burnoutLevel === "ok" ? "안정" : badge.burnoutLevel === "warning" ? "주의" : "위험"}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function RecoveryCardRow({ card }: { card: RecoveryCardSnapshot }) {
+  return (
+    <div className="mt-2 overflow-hidden rounded-[14px] bg-gradient-to-r from-[#f0eeff] to-[#e8f5e9] px-3.5 py-3 ring-1 ring-[#c7c2f7]/40">
+      <div className="flex items-center gap-1.5 mb-1">
+        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-[color:var(--rnest-accent)] shrink-0">
+          <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0 1 12 2v5h4a1 1 0 0 1 .82 1.573l-7 10A1 1 0 0 1 8 18v-5H4a1 1 0 0 1-.82-1.573l7-10a1 1 0 0 1 1.12-.38z" clipRule="evenodd" />
+        </svg>
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--rnest-accent)]">회복 카드</span>
+      </div>
+      <p className="text-[13px] font-semibold text-gray-800 leading-snug">{card.headline}</p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-[11px] text-gray-500">
+        {card.batteryAvg !== null && card.batteryAvg !== undefined ? (
+          <span className="flex items-center gap-1">
+            <svg viewBox="0 0 24 12" className="h-3 w-4.5" aria-hidden>
+              <rect x="0.5" y="0.5" width="19" height="11" rx="2.5" stroke="#6b7280" strokeWidth="1" fill="none" />
+              <rect x="20" y="3.5" width="3" height="5" rx="1" fill="#6b7280" />
+              <rect x="2" y="2" width={Math.round((card.batteryAvg / 100) * 14)} height="8" rx="1.5" fill="#6b7280" />
+            </svg>
+            주간 평균 {card.batteryAvg}%
+          </span>
+        ) : null}
+        {card.sleepDebtHours !== null && card.sleepDebtHours !== undefined ? (
+          <span className="flex items-center gap-1">
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3 text-gray-400">
+              <path d="M17.293 13.293A8 8 0 0 1 6.707 2.707a8.002 8.002 0 1 0 10.586 10.586z" />
+            </svg>
+            수면 부채 {card.sleepDebtHours.toFixed(1)}h
+          </span>
+        ) : null}
+        <span className="text-gray-400">{card.weekDays}일 기준</span>
+      </div>
+    </div>
+  );
+}
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -28,7 +165,9 @@ type Props = {
   post: SocialPost;
   onCommentOpen?: (post: SocialPost) => void;
   onDelete?: (postId: number) => void;
+  onEdit?: (post: SocialPost) => void;
   onAuthorFollowChange?: (authorUserId: string, isFollowing: boolean) => void;
+  onTagClick?: (tag: string) => void;
   currentUserId?: string;
   isAdmin?: boolean;
   onStatsChange?: (
@@ -46,7 +185,9 @@ export function SocialPostCard({
   post,
   onCommentOpen,
   onDelete,
+  onEdit,
   onAuthorFollowChange,
+  onTagClick,
   currentUserId,
   isAdmin,
   onStatsChange,
@@ -497,11 +638,31 @@ export function SocialPostCard({
               </button>
               {showMenu ? (
                 <div className="absolute right-0 top-9 z-20 min-w-[140px] overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+                  {isOwnPost && onEdit ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowMenu(false); onEdit(post); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[13px] font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-gray-500">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                      수정하기
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={handleDelete}
-                    className="w-full px-4 py-3 text-left text-[13px] font-medium text-red-500 hover:bg-red-50"
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[13px] font-medium text-red-500 hover:bg-red-50"
                   >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                    </svg>
                     삭제하기
                   </button>
                   <button
@@ -749,11 +910,28 @@ export function SocialPostCard({
         ) : null}
 
         {post.tags.length > 0 ? (
-          <div className="mt-1.5 flex flex-wrap gap-x-1.5 gap-y-1 text-[13px] font-medium text-[color:var(--rnest-accent)]">
+          <div className="mt-1.5 flex flex-wrap gap-x-1.5 gap-y-1">
             {post.tags.map((tag) => (
-              <span key={tag}>#{tag}</span>
+              <button
+                key={tag}
+                type="button"
+                onClick={() => onTagClick?.(tag)}
+                className="text-[13px] font-medium text-[color:var(--rnest-accent)] transition hover:underline active:opacity-70"
+              >
+                #{tag}
+              </button>
             ))}
           </div>
+        ) : null}
+
+        {/* ── 건강/교대 배지 ─────────────────────────────── */}
+        {post.healthBadge ? (
+          <HealthBadgeRow badge={post.healthBadge} />
+        ) : null}
+
+        {/* ── 회복 카드 ──────────────────────────────────── */}
+        {post.recoveryCard ? (
+          <RecoveryCardRow card={post.recoveryCard} />
         ) : null}
 
         <button

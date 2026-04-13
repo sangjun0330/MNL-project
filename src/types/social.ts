@@ -481,6 +481,43 @@ export type PostVisibility = SocialPostVisibility;
 export const DEFAULT_SOCIAL_POST_VISIBILITY: SocialPostVisibility =
   "public_internal";
 
+/** 게시글에 첨부하는 건강/교대 배지 (사용자 명시 선택 시에만 첨부) */
+export type SocialHealthBadge = {
+  shiftType?: string; // D / E / N / OFF 등
+  batteryLevel?: number; // 0-100
+  burnoutLevel?: "ok" | "warning" | "danger";
+};
+
+/** 게시글에 첨부하는 회복 카드 스냅샷 */
+export type RecoveryCardSnapshot = {
+  headline: string;
+  batteryAvg: number | null;
+  sleepDebtHours: number | null;
+  weekDays: number; // 집계 기간 (일)
+};
+
+// ══════════════════════════════════════════════════════════════
+// Story types
+// ══════════════════════════════════════════════════════════════
+
+export type SocialStoryContentType = "text" | "image" | "recovery";
+
+export type SocialStory = {
+  id: number;
+  authorUserId: string;
+  authorProfile: SocialAuthorProfile;
+  contentType: SocialStoryContentType;
+  mediaUrl: string | null;
+  text: string | null;
+  textColor: string | null;
+  bgColor: string | null;
+  recoverySnapshot: RecoveryCardSnapshot | null;
+  expiresAt: string;
+  createdAt: string;
+  viewCount: number;
+  isViewed: boolean;
+};
+
 export type SocialAuthorProfile = {
   userId: string;
   nickname: string;
@@ -553,6 +590,8 @@ export type SocialPost = {
   isSaved: boolean;
   createdAt: string;
   updatedAt?: string;
+  healthBadge: SocialHealthBadge | null;
+  recoveryCard: RecoveryCardSnapshot | null;
 };
 
 export type SocialPostComment = {

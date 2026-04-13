@@ -138,6 +138,8 @@ export function SocialPage() {
   const [groupInvitePreview, setGroupInvitePreview] = useState<SocialGroupInvitePreview | null>(null);
   const [selectedCommonOffFriendIds, setSelectedCommonOffFriendIds] = useState<string[]>([]);
   const [exploreQuery, setExploreQuery] = useState("");
+  const requestedTag = searchParams.get("tag") ?? "";
+  const [exploreTag, setExploreTag] = useState(requestedTag);
   const handledInviteRef = useRef<string | null>(null);
   const handledGroupInviteRef = useRef<string | null>(null);
   const appliedTabKeyRef = useRef<string | null>(null);
@@ -1145,6 +1147,10 @@ export function SocialPage() {
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
           isAdmin={false}
           defaultVisibility={profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY}
+          onTagClick={(t) => {
+            setExploreTag(t);
+            updateActiveTab("explore");
+          }}
         />
       )}
 
@@ -1153,6 +1159,15 @@ export function SocialPage() {
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
           defaultVisibility={profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY}
           query={exploreQuery}
+          tag={exploreTag}
+          onTagChange={(t) => {
+            setExploreTag(t);
+            if (typeof window !== "undefined") {
+              const params = new URLSearchParams(window.location.search);
+              if (t) params.set("tag", t); else params.delete("tag");
+              window.history.replaceState(window.history.state, "", params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname);
+            }
+          }}
         />
       )}
 
