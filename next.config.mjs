@@ -37,6 +37,7 @@ const tesseractCdn = "https://cdn.jsdelivr.net";
 
 const connectSources = [
   "'self'",
+  "blob:",
   "https://cloudflareinsights.com",
   tossApiOrigin,
   tossWildcard,
