@@ -24,6 +24,9 @@ export async function GET(
     if (!profile) {
       return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
     }
+    if (profile.isProfileLocked && !profile.relationship.isSelf) {
+      return jsonNoStore({ ok: false, error: "profile_locked" }, { status: 403 });
+    }
 
     const items = await listFollowSummaries(admin, profile.userId, "following");
     return jsonNoStore({ ok: true, data: { items } });

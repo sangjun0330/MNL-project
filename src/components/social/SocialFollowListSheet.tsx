@@ -87,7 +87,12 @@ export function SocialFollowListSheet({ open, onClose, handle, type }: Props) {
           ? `/api/social/profiles/${encodeURIComponent(handle)}/followers`
           : `/api/social/profiles/${encodeURIComponent(handle)}/following`;
       const res = await fetch(endpoint, { cache: "no-store" }).then((r) => r.json());
-      if (!res.ok) throw new Error("목록을 불러오지 못했어요.");
+      if (!res.ok) {
+        if (res.error === "profile_locked") {
+          throw new Error("비공개 프로필에서는 팔로워와 팔로잉 목록을 볼 수 없어요.");
+        }
+        throw new Error("목록을 불러오지 못했어요.");
+      }
       setItems((res.data?.items ?? []) as SocialFollowSummary[]);
     } catch (err: any) {
       setError(String(err?.message ?? "목록을 불러오지 못했어요."));

@@ -411,6 +411,7 @@ export function SocialProfilePage({ handle }: Props) {
 
   const isSelf = profile?.relationship.isSelf ?? false;
   const isLocked = profile?.isProfileLocked ?? false;
+  const canOpenFollowLists = isSelf || !isLocked;
   const headerLabel = profile?.handle ? `@${profile.handle}` : `@${handle}`;
   const visibleTab: ProfileTab = isSelf ? tab : "posts";
   const activeProfileHandle = profile?.handle ?? handle;
@@ -709,12 +710,20 @@ export function SocialProfilePage({ handle }: Props) {
                     <ProfileStat
                       label="팔로워"
                       value={profile.followerCount}
-                      onClick={() => setFollowListType("followers")}
+                      onClick={
+                        canOpenFollowLists
+                          ? () => setFollowListType("followers")
+                          : undefined
+                      }
                     />
                     <ProfileStat
                       label="팔로잉"
                       value={profile.followingCount}
-                      onClick={() => setFollowListType("following")}
+                      onClick={
+                        canOpenFollowLists
+                          ? () => setFollowListType("following")
+                          : undefined
+                      }
                     />
                   </div>
                 </div>

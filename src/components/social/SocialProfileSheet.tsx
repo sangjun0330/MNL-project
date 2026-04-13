@@ -89,6 +89,22 @@ function buildProfileState(profile: SocialProfile | null): SocialProfile {
   };
 }
 
+function buildProfileSyncKey(profile: SocialProfile | null) {
+  return [
+    profile?.nickname ?? "",
+    profile?.avatarEmoji ?? "",
+    profile?.statusMessage ?? "",
+    profile?.handle ?? "",
+    profile?.displayName ?? "",
+    profile?.bio ?? "",
+    profile?.profileImagePath ?? "",
+    profile?.profileImageUrl ?? "",
+    profile?.accountVisibility ?? "public",
+    profile?.discoverability ?? "off",
+    profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY,
+  ].join("|");
+}
+
 function limitCharacters(value: string, maxLength: number) {
   return Array.from(value).slice(0, maxLength).join("");
 }
@@ -506,6 +522,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const hydratedProfileKeyRef = useRef<string | null>(null);
 
   const [code, setCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(false);
@@ -533,6 +550,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
 
   const applySavedProfile = useCallback(
     (nextProfile: SocialProfile) => {
+      hydratedProfileKeyRef.current = buildProfileSyncKey(nextProfile);
       setSavedProfile(nextProfile);
       setDisplayNameDraft(nextProfile.displayName);
       setHandleDraft(nextProfile.handle ?? "");
@@ -545,8 +563,14 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      hydratedProfileKeyRef.current = null;
+      return;
+    }
     const nextProfile = buildProfileState(profile);
+    const nextProfileKey = buildProfileSyncKey(nextProfile);
+    if (hydratedProfileKeyRef.current === nextProfileKey) return;
+    hydratedProfileKeyRef.current = nextProfileKey;
     setSavedProfile(nextProfile);
     setActiveView("main");
     setDisplayNameDraft(nextProfile.displayName);
@@ -558,7 +582,7 @@ export function SocialProfileSheet({ open, onClose, profile, onSaved }: Props) {
     setError(null);
     setCodeCopied(false);
     setShareState("idle");
-  }, [open]);
+  }, [open, profile]);
 
   const commitProfilePatch = useCallback(
     async (
