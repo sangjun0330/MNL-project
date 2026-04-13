@@ -5,8 +5,10 @@ import {
   type RNestMemoState,
   type RNestRecordState,
 } from "@/lib/notebook";
-import { defaultSettings, emptyState, type AppSettings, type AppState, type BioInputs, type EmotionEntry } from "@/lib/model";
+import { defaultSettings, emptyState, type AppSettings, type AppState, type BioInputs, type CustomShiftDef, type EmotionEntry } from "@/lib/model";
 import type { Shift } from "@/lib/types";
+
+const CORE_SHIFT_SET = new Set<string>(["D", "E", "N", "M", "OFF", "VAC"]);
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SHIFT_SET = new Set<Shift>(["D", "E", "N", "M", "OFF", "VAC"]);
@@ -259,6 +261,27 @@ function sanitizeSettings(raw: unknown): AppSettings {
   const chronotypeNum = asFiniteNumber(loadedProfile.chronotype);
   const sensitivityNum = asFiniteNumber(loadedProfile.caffeineSensitivity);
 
+  // customShiftTypes 검증
+  const rawCustomShifts = Array.isArray(loaded.customShiftTypes) ? loaded.customShiftTypes : [];
+  const customShiftTypes: CustomShiftDef[] = [];
+  for (const item of rawCustomShifts) {
+    if (!item || typeof item !== "object") continue;
+    const id = typeof item.id === "string" ? item.id.trim().slice(0, 64) : "";
+    const displayName = typeof item.displayName === "string" ? item.displayName.trim().slice(0, 20) : "";
+    const semanticType = typeof item.semanticType === "string" && CORE_SHIFT_SET.has(item.semanticType)
+      ? (item.semanticType as CustomShiftDef["semanticType"])
+      : null;
+    if (!id || !displayName || !semanticType) continue;
+    const aliases = Array.isArray(item.aliases)
+      ? item.aliases
+          .filter((a: unknown) => typeof a === "string" && a.trim())
+          .map((a: string) => a.trim().slice(0, 20))
+          .slice(0, 20)
+      : [];
+    customShiftTypes.push({ id, displayName, semanticType, aliases });
+    if (customShiftTypes.length >= 50) break;
+  }
+
   return {
     ...defaults,
     schedulePatternEnabled: Boolean(loaded.schedulePatternEnabled ?? defaults.schedulePatternEnabled),
@@ -281,6 +304,11 @@ function sanitizeSettings(raw: unknown): AppSettings {
       caffeineSensitivity:
         sensitivityNum == null ? defaults.profile?.caffeineSensitivity ?? 1 : clamp(sensitivityNum, 0.5, 1.5),
     },
+    customShiftTypes,
+    ocrLastUserName:
+      typeof loaded.ocrLastUserName === "string"
+        ? loaded.ocrLastUserName.trim().slice(0, 20)
+        : defaults.ocrLastUserName ?? "",
   };
 }
 

@@ -283,6 +283,15 @@ function clearShiftNameForDate(iso: ISODate) {
   setState({ shiftNames: next });
 }
 
+function batchSetShiftNames(patch: Record<ISODate, string>) {
+  setState({
+    shiftNames: {
+      ...(state.shiftNames ?? {}),
+      ...patch,
+    },
+  });
+}
+
 function setNoteForDate(iso: ISODate, note: string) {
   setState({
     notes: {
@@ -485,6 +494,7 @@ function buildStoreSnapshot(s: AppState): AppStore {
     batchSetSchedule,
     setShiftNameForDate,
     clearShiftNameForDate,
+    batchSetShiftNames,
 
     setNoteForDate,
     clearNoteForDate,

@@ -9,6 +9,29 @@ import {
 import type { Shift } from "@/lib/types";
 
 // =========================
+// 커스텀 근무 타입
+// =========================
+
+/** 의미 타입 — AI/회복 분석 + 통계 기반 */
+export type CoreShift = "D" | "E" | "N" | "M" | "OFF" | "VAC";
+
+/**
+ * 병원별 커스텀 근무 정의.
+ * schedule[date]에는 semanticType이 저장되고,
+ * shiftNames[date]에 displayName이 저장되므로 기존 코드 변경 없음.
+ */
+export type CustomShiftDef = {
+  /** crypto.randomUUID()로 생성된 고유 ID */
+  id: string;
+  /** 표시 이름: "낮번", "야간특", "PM" 등 */
+  displayName: string;
+  /** AI/회복 분석에 사용할 의미 타입 */
+  semanticType: CoreShift;
+  /** OCR 인식 별칭: ["낮", "AM", "오전", "D번"] */
+  aliases: string[];
+};
+
+// =========================
 // Domain types (UI에서 직접 사용)
 // =========================
 
@@ -90,6 +113,11 @@ export type AppSettings = {
   language?: "ko" | "en";
   // onboarding
   hasSeenOnboarding?: boolean;
+
+  // v3.1 커스텀 근무 타입 (병원별 이름 설정)
+  customShiftTypes?: CustomShiftDef[];
+  /** 다인 근무표 OCR 시 마지막으로 사용한 이름 */
+  ocrLastUserName?: string;
 };
 
 export type AppState = {
@@ -116,6 +144,8 @@ export type AppStore = AppState & {
   batchSetSchedule: (patch: Record<ISODate, Shift>) => void;
   setShiftNameForDate: (iso: ISODate, name: string) => void;
   clearShiftNameForDate: (iso: ISODate) => void;
+  /** OCR 결과 일괄 적용: shiftNames를 한 번에 병합 */
+  batchSetShiftNames: (patch: Record<ISODate, string>) => void;
 
   setNoteForDate: (iso: ISODate, note: string) => void;
   clearNoteForDate: (iso: ISODate) => void;
@@ -160,6 +190,8 @@ export function defaultSettings(): AppSettings {
     },
     language: "ko",
     hasSeenOnboarding: false,
+    customShiftTypes: [],
+    ocrLastUserName: "",
   };
 }
 

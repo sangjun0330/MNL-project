@@ -32,6 +32,9 @@ const daumScriptOrigin = "https://t1.daumcdn.net";
 const daumPostcodeOrigin = "https://postcode.map.daum.net";
 const daumWildcard = "https://*.daum.net";
 
+// tesseract.js v7 한국어 모델 다운로드 (첫 OCR 실행 시 1회, ~12MB)
+const tesseractCdn = "https://cdn.jsdelivr.net";
+
 const connectSources = [
   "'self'",
   "https://cloudflareinsights.com",
@@ -40,6 +43,7 @@ const connectSources = [
   tossLegacyPayOrigin,
   daumPostcodeOrigin,
   daumWildcard,
+  tesseractCdn,
 ];
 
 if (supabaseOrigin) {
@@ -61,6 +65,8 @@ const scriptSources = [
   daumWildcard,
 ];
 
+// WebAssembly 허용 (tesseract.js WASM 엔진 — 이미지 데이터는 브라우저 밖으로 나가지 않음)
+scriptSources.push("'wasm-unsafe-eval'");
 if (process.env.NODE_ENV === "development") {
   scriptSources.push("'unsafe-eval'");
 }
