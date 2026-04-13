@@ -8,10 +8,14 @@ import type {
   SocialGroupSummary,
   SocialPost,
   SocialPostVisibility,
+  SocialStory,
 } from "@/types/social";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
 import { SocialPostComposer } from "@/components/social/SocialPostComposer";
 import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentSheet";
+import { SocialStoryBar } from "@/components/social/SocialStoryBar";
+import { SocialStoryViewer } from "@/components/social/SocialStoryViewer";
+import { SocialStoryComposer } from "@/components/social/SocialStoryComposer";
 import { useAuthState } from "@/lib/auth";
 
 // ── 스켈레톤 카드 (edge-to-edge) ─────────────────────────────
@@ -55,6 +59,7 @@ type Props = {
   defaultVisibility?: SocialPostVisibility;
   externalComposerOpen?: boolean;
   onExternalComposerOpenChange?: (open: boolean) => void;
+  onTagClick?: (tag: string) => void;
 };
 
 function buildEmptyCopy(scope: FeedScope) {
@@ -94,6 +99,7 @@ export function SocialFeedTab({
   defaultVisibility = DEFAULT_SOCIAL_POST_VISIBILITY,
   externalComposerOpen = false,
   onExternalComposerOpenChange,
+  onTagClick,
 }: Props) {
   const { user } = useAuthState();
   const currentUserId = user?.userId;
@@ -105,8 +111,16 @@ export function SocialFeedTab({
   const [hasLoaded, setHasLoaded] = useState(false);
 
   const [composerOpen, setComposerOpen] = useState(false);
+  const [editingPost, setEditingPost] = useState<SocialPost | null>(null);
   const [commentPost, setCommentPost] = useState<SocialPost | null>(null);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
+
+  // 스토리 상태
+  const [storyComposerOpen, setStoryComposerOpen] = useState(false);
+  const [storyViewerOpen, setStoryViewerOpen] = useState(false);
+  const [viewerStories, setViewerStories] = useState<SocialStory[]>([]);
+  const [viewerStartIndex, setViewerStartIndex] = useState(0);
+  const [storyViewedIds, setStoryViewedIds] = useState<Set<number>>(new Set());
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -181,6 +195,16 @@ export function SocialFeedTab({
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }, []);
 
+  const handleEdit = useCallback((post: SocialPost) => {
+    setEditingPost(post);
+    setComposerOpen(true);
+  }, []);
+
+  const handleEdited = useCallback((updatedPost: SocialPost) => {
+    setPosts((prev) => prev.map((p) => p.id === updatedPost.id ? updatedPost : p));
+    setEditingPost(null);
+  }, []);
+
   const handlePostStatsChange = useCallback(
     (
       postId: number,
@@ -222,10 +246,27 @@ export function SocialFeedTab({
     setCommentSheetOpen(true);
   }, []);
 
+  const handleOpenViewer = useCallback((stories: SocialStory[], startIndex: number) => {
+    setViewerStories(stories);
+    setViewerStartIndex(startIndex);
+    setStoryViewerOpen(true);
+  }, []);
+
+  const handleStoryViewed = useCallback((storyId: number) => {
+    setStoryViewedIds((prev) => new Set([...prev, storyId]));
+  }, []);
+
   return (
     <div className="relative">
       {/* ── 피드 목록 (edge-to-edge, no px padding) ──────── */}
       <div className="flex flex-col pb-24">
+        {/* 스토리 바 (following 피드에서만 표시) */}
+        {scope === "following" && (
+          <SocialStoryBar
+            onOpenComposer={() => setStoryComposerOpen(true)}
+            onOpenViewer={handleOpenViewer}
+          />
+        )}
         {loading && !hasLoaded ? (
           <>
             <PostCardSkeleton />
@@ -267,6 +308,8 @@ export function SocialFeedTab({
                 post={post}
                 onCommentOpen={handleCommentOpen}
                 onDelete={handleDelete}
+                onEdit={handleEdit}
+                onTagClick={onTagClick}
                 currentUserId={currentUserId}
                 isAdmin={isAdmin}
                 onAuthorFollowChange={handleAuthorFollowChange}
@@ -325,8 +368,10 @@ export function SocialFeedTab({
 
       <SocialPostComposer
         open={composerOpen}
-        onClose={() => setComposerOpen(false)}
+        onClose={() => { setComposerOpen(false); setEditingPost(null); }}
         onPosted={handlePosted}
+        onEdited={handleEdited}
+        editPost={editingPost ?? undefined}
         userGroups={userGroups}
         defaultVisibility={defaultVisibility}
       />
@@ -344,6 +389,26 @@ export function SocialFeedTab({
           handlePostStatsChange(postId, { commentCount: count })
         }
       />
+
+      {/* 스토리 컴포저 */}
+      <SocialStoryComposer
+        open={storyComposerOpen}
+        onClose={() => setStoryComposerOpen(false)}
+        onPosted={() => setStoryComposerOpen(false)}
+      />
+
+      {/* 스토리 뷰어 */}
+      {storyViewerOpen && (
+        <SocialStoryViewer
+          stories={viewerStories}
+          startIndex={viewerStartIndex}
+          onClose={() => {
+            setStoryViewerOpen(false);
+            setViewerStories([]);
+          }}
+          onStoryViewed={handleStoryViewed}
+        />
+      )}
     </div>
   );
 }

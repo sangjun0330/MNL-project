@@ -13,6 +13,7 @@ import {
   getFeedPage,
   createPost,
 } from "@/lib/server/socialPosts";
+import type { SocialHealthBadge, RecoveryCardSnapshot } from "@/types/social";
 import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
   SocialPostVisibility,
@@ -105,12 +106,35 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
     }
 
+    const rawHealthBadge = body?.healthBadge;
+    const healthBadge: SocialHealthBadge | null =
+      rawHealthBadge && typeof rawHealthBadge === "object"
+        ? {
+            shiftType: typeof rawHealthBadge.shiftType === "string" ? rawHealthBadge.shiftType.slice(0, 8) : undefined,
+            batteryLevel: typeof rawHealthBadge.batteryLevel === "number" ? Math.max(0, Math.min(100, rawHealthBadge.batteryLevel)) : undefined,
+            burnoutLevel: ["ok", "warning", "danger"].includes(rawHealthBadge.burnoutLevel) ? rawHealthBadge.burnoutLevel : undefined,
+          }
+        : null;
+
+    const rawRecoveryCard = body?.recoveryCard;
+    const recoveryCard: RecoveryCardSnapshot | null =
+      rawRecoveryCard && typeof rawRecoveryCard === "object" && typeof rawRecoveryCard.headline === "string"
+        ? {
+            headline: String(rawRecoveryCard.headline).slice(0, 100),
+            batteryAvg: typeof rawRecoveryCard.batteryAvg === "number" ? Math.max(0, Math.min(100, rawRecoveryCard.batteryAvg)) : null,
+            sleepDebtHours: typeof rawRecoveryCard.sleepDebtHours === "number" ? rawRecoveryCard.sleepDebtHours : null,
+            weekDays: typeof rawRecoveryCard.weekDays === "number" ? rawRecoveryCard.weekDays : 7,
+          }
+        : null;
+
     const post = await createPost(admin, userId, postBody, {
       imagePath,
       imagePaths,
       tags,
       groupId,
       visibility,
+      healthBadge: healthBadge as unknown as Record<string, unknown> | null,
+      recoveryCard: recoveryCard as unknown as Record<string, unknown> | null,
     });
 
     await recordSocialActionAttempt({ req, userId, action: "post_create", success: true, detail: "ok" });

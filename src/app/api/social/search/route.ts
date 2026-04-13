@@ -5,7 +5,7 @@ import {
   listDiscoverableProfiles,
   searchSocialProfiles,
 } from "@/lib/server/socialHub";
-import { searchSocialPosts } from "@/lib/server/socialPosts";
+import { searchSocialPosts, getTrendingTags } from "@/lib/server/socialPosts";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -18,15 +18,22 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const query = String(url.searchParams.get("q") ?? "").trim();
+  const tag = String(url.searchParams.get("tag") ?? "").trim();
+  const wantTrending = url.searchParams.get("trending") === "1";
   const admin = getSupabaseAdmin();
 
   try {
+    if (wantTrending) {
+      const tags = await getTrendingTags(admin, 8, 7);
+      return jsonNoStore({ ok: true, data: { trending: tags } });
+    }
+
     const [profiles, posts] = await Promise.all([
       query ? searchSocialProfiles(admin, query) : listDiscoverableProfiles(admin),
-      searchSocialPosts(admin, userId, query),
+      searchSocialPosts(admin, userId, query, 8, tag || undefined),
     ]);
 
-    return jsonNoStore({ ok: true, data: { query, profiles, posts } });
+    return jsonNoStore({ ok: true, data: { query, tag, profiles, posts } });
   } catch (err: any) {
     console.error("[SocialSearch/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_search_social" }, { status: 500 });

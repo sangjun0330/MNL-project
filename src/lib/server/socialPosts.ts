@@ -39,6 +39,8 @@ type PostRow = {
   comment_count: number | null;
   created_at: string;
   updated_at: string | null;
+  health_badge: Record<string, unknown> | null;
+  recovery_card: Record<string, unknown> | null;
 };
 
 type PostAuthorRelationship = {
@@ -353,6 +355,8 @@ function buildSocialPost(
     isSaved: savedPostIds.has(Number(row.id)),
     createdAt: String(row.created_at ?? ""),
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
+    healthBadge: row.health_badge && typeof row.health_badge === "object" ? (row.health_badge as import("@/types/social").SocialHealthBadge) : null,
+    recoveryCard: row.recovery_card && typeof row.recovery_card === "object" ? (row.recovery_card as import("@/types/social").RecoveryCardSnapshot) : null,
   };
 }
 
@@ -462,7 +466,7 @@ export async function getFeedPage(
   const context = await buildViewerAccessContext(admin, userId);
 
   const selectColumns =
-    "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at";
+    "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at, health_badge, recovery_card";
   let rawRows: PostRow[] = [];
 
   if (scope === "saved" || scope === "liked") {
@@ -592,12 +596,13 @@ export async function searchSocialPosts(
   userId: string,
   query: string,
   limit = 8,
+  tag?: string,
 ) {
   const cleanedQuery = cleanPostBody(query).trim();
   let builder = (admin as any)
     .from("rnest_social_posts")
     .select(
-      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at",
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at, health_badge, recovery_card",
     )
     .eq("visibility", "public_internal")
     .order("created_at", { ascending: false })
@@ -610,6 +615,13 @@ export async function searchSocialPosts(
     );
   }
 
+  if (tag) {
+    const cleanedTag = String(tag).replace(/^#+/, "").trim().slice(0, 24);
+    if (cleanedTag) {
+      builder = builder.contains("tags", [cleanedTag]);
+    }
+  }
+
   const { data, error } = await builder;
   if (error) throw error;
 
@@ -619,11 +631,43 @@ export async function searchSocialPosts(
   return hydratePosts(admin, userId, filtered);
 }
 
+export async function getTrendingTags(
+  admin: any,
+  limit = 8,
+  days = 7,
+): Promise<Array<{ tag: string; count: number }>> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await (admin as any)
+    .from("rnest_social_posts")
+    .select("tags")
+    .eq("visibility", "public_internal")
+    .gte("created_at", since)
+    .not("tags", "is", null)
+    .limit(500);
+
+  if (error) throw error;
+
+  const counts = new Map<string, number>();
+  for (const row of data ?? []) {
+    if (!Array.isArray(row.tags)) continue;
+    for (const rawTag of row.tags) {
+      const t = String(rawTag ?? "").trim();
+      if (!t) continue;
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([tag, count]) => ({ tag, count }));
+}
+
 export async function getPostById(admin: any, postId: number, userId: string) {
   const { data, error } = await (admin as any)
     .from("rnest_social_posts")
     .select(
-      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at",
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at, health_badge, recovery_card",
     )
     .eq("id", postId)
     .maybeSingle();
@@ -690,6 +734,8 @@ export async function createPost(
     tags?: string[];
     groupId?: number | null;
     visibility?: SocialPostVisibility;
+    healthBadge?: Record<string, unknown> | null;
+    recoveryCard?: Record<string, unknown> | null;
   } = {},
 ): Promise<SocialPost> {
   const visibility = normalizeVisibility(
@@ -737,9 +783,11 @@ export async function createPost(
       tags: opts.tags ?? [],
       visibility,
       group_id: groupId,
+      health_badge: opts.healthBadge ?? null,
+      recovery_card: opts.recoveryCard ?? null,
     })
     .select(
-      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at",
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at, health_badge, recovery_card",
     )
     .single();
 
@@ -750,6 +798,75 @@ export async function createPost(
   if (!post) throw new Error("failed_to_hydrate_post");
 
   await notifyFollowersAboutPost(admin, userId, post);
+  return post;
+}
+
+export async function updatePost(
+  admin: any,
+  postId: number,
+  userId: string,
+  patch: {
+    body?: string;
+    tags?: string[];
+    visibility?: SocialPostVisibility;
+    groupId?: number | null;
+    addImagePaths?: string[];
+    removeImagePaths?: string[];
+    healthBadge?: Record<string, unknown> | null;
+    recoveryCard?: Record<string, unknown> | null;
+  },
+): Promise<SocialPost> {
+  const { data: existing, error: fetchErr } = await (admin as any)
+    .from("rnest_social_posts")
+    .select(
+      "id, author_user_id, body, image_path, image_paths, tags, visibility, group_id, like_count, comment_count, created_at, updated_at, health_badge, recovery_card",
+    )
+    .eq("id", postId)
+    .eq("author_user_id", userId)
+    .maybeSingle();
+
+  if (fetchErr) throw fetchErr;
+  if (!existing) throw Object.assign(new Error("not_found"), { code: "not_found" });
+
+  const currentPaths = normalizeStoredImagePaths(existing);
+  const removeSet = new Set(patch.removeImagePaths ?? []);
+  const keptPaths = currentPaths.filter((p) => !removeSet.has(p));
+
+  const addPaths = cleanPostImagePaths(patch.addImagePaths ?? []);
+  for (const p of addPaths) {
+    if (!isOwnedSocialPostImagePath(userId, p)) {
+      throw Object.assign(new Error("invalid_image_path"), { code: "invalid_image_path" });
+    }
+  }
+
+  const nextPaths = Array.from(new Set([...keptPaths, ...addPaths])).slice(0, 10);
+
+  const updates: Record<string, unknown> = {
+    image_paths: nextPaths,
+    image_path: nextPaths[0] ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (patch.body !== undefined) updates.body = patch.body;
+  if (patch.tags !== undefined) updates.tags = patch.tags;
+  if (patch.visibility !== undefined) {
+    const nextVisibility = normalizeVisibility(patch.visibility);
+    updates.visibility = nextVisibility;
+    updates.group_id = nextVisibility === "group" ? (patch.groupId ?? existing.group_id ?? null) : null;
+  }
+  if (patch.healthBadge !== undefined) updates.health_badge = patch.healthBadge;
+  if (patch.recoveryCard !== undefined) updates.recovery_card = patch.recoveryCard;
+
+  const { error: updateErr } = await (admin as any)
+    .from("rnest_social_posts")
+    .update(updates)
+    .eq("id", postId)
+    .eq("author_user_id", userId);
+
+  if (updateErr) throw updateErr;
+
+  const post = await getPostById(admin, postId, userId);
+  if (!post) throw new Error("failed_to_hydrate_post");
   return post;
 }
 

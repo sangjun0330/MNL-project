@@ -7,16 +7,22 @@ import { BOTTOM_SHEET_DURATION_MS, BottomSheet } from "@/components/ui/BottomShe
 import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
   SocialGroupSummary,
+  SocialHealthBadge,
+  RecoveryCardSnapshot,
   SocialPost,
   SocialPostVisibility,
 } from "@/types/social";
+import { useAppStoreSelector } from "@/lib/store";
+import { todayISO } from "@/lib/date";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onPosted: (post: SocialPost) => void;
+  onEdited?: (post: SocialPost) => void;
   userGroups?: Pick<SocialGroupSummary, "id" | "name">[];
   defaultVisibility?: SocialPostVisibility;
+  editPost?: SocialPost; // 수정 모드
 };
 
 type ComposerStep = "media" | "details";
@@ -90,20 +96,63 @@ export function SocialPostComposer({
   open,
   onClose,
   onPosted,
+  onEdited,
   userGroups = [],
   defaultVisibility = DEFAULT_SOCIAL_POST_VISIBILITY,
+  editPost,
 }: Props) {
-  const [step, setStep] = useState<ComposerStep>("media");
-  const [body, setBody] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const isEditMode = Boolean(editPost);
+  const today = todayISO();
+  const schedule = useAppStoreSelector((s) => s.schedule as Record<string, string>);
+  const bio = useAppStoreSelector((s) => s.bio as Record<string, any>);
+  const emotions = useAppStoreSelector((s) => s.emotions as Record<string, any>);
+
+  const todayShift: string | null = schedule[today] ?? null;
+  const todayBio = bio[today] ?? null;
+  const todayEmotion = emotions[today] ?? null;
+
+  // 오늘 배터리 추정 (수면, 스트레스, 기분 기반 간이 계산)
+  const estimatedBattery = useMemo<number | null>(() => {
+    if (!todayBio) return null;
+    const sleep = typeof todayBio.sleepHours === "number" ? todayBio.sleepHours : null;
+    const stress = typeof todayBio.stress === "number" ? todayBio.stress : null;
+    const mood = typeof todayBio.mood === "number" ? todayBio.mood : (typeof todayEmotion?.mood === "number" ? todayEmotion.mood : null);
+    if (sleep === null && stress === null && mood === null) return null;
+    const sleepScore = sleep !== null ? Math.min(100, (sleep / 8) * 100) : 70;
+    const stressScore = stress !== null ? Math.max(0, 100 - stress * 25) : 70;
+    const moodScore = mood !== null ? (mood / 5) * 100 : 70;
+    return Math.round((sleepScore * 0.4 + stressScore * 0.35 + moodScore * 0.25));
+  }, [todayBio, todayEmotion]);
+
+  // 번아웃 레벨 추정
+  const estimatedBurnout = useMemo<"ok" | "warning" | "danger">(() => {
+    const stress = typeof todayBio?.stress === "number" ? todayBio.stress : 0;
+    if (stress >= 3) return "danger";
+    if (stress >= 2) return "warning";
+    return "ok";
+  }, [todayBio]);
+
+  const [step, setStep] = useState<ComposerStep>(isEditMode ? "details" : "media");
+  const [body, setBody] = useState(editPost?.body ?? "");
+  const [selectedTags, setSelectedTags] = useState<string[]>(editPost?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
-  const [visibility, setVisibility] = useState<SocialPostVisibility>(defaultVisibility);
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [visibility, setVisibility] = useState<SocialPostVisibility>(editPost?.visibility ?? defaultVisibility);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(editPost?.groupId ?? null);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
+  // 수정 모드: 기존 이미지 경로 (제거 목록 추적)
+  const [existingImagePaths, setExistingImagePaths] = useState<string[]>(editPost?.imagePaths ?? []);
+  const [removedImagePaths, setRemovedImagePaths] = useState<string[]>([]);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [posting, setPosting] = useState(false);
   const [visibilityOpen, setVisibilityOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 건강 배지
+  const [badgeOpen, setBadgeOpen] = useState(false);
+  const [healthBadge, setHealthBadge] = useState<SocialHealthBadge | null>(editPost?.healthBadge ?? null);
+  // 회복 카드
+  const [recoveryCardOpen, setRecoveryCardOpen] = useState(false);
+  const [recoveryCard, setRecoveryCard] = useState<RecoveryCardSnapshot | null>(editPost?.recoveryCard ?? null);
+  const [recoveryHeadline, setRecoveryHeadline] = useState(editPost?.recoveryCard?.headline ?? "");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -126,16 +175,23 @@ export function SocialPostComposer({
     selectedImagesRef.current = [];
     setSelectedImages([]);
     setActiveImageIndex(0);
-    setStep("media");
-    setBody("");
-    setSelectedTags([]);
+    setStep(isEditMode ? "details" : "media");
+    setBody(editPost?.body ?? "");
+    setSelectedTags(editPost?.tags ?? []);
     setTagInput("");
-    setVisibility(defaultVisibility);
-    setSelectedGroupId(defaultVisibility === "group" ? userGroups[0]?.id ?? null : null);
+    setVisibility(editPost?.visibility ?? defaultVisibility);
+    setSelectedGroupId(editPost?.groupId ?? (defaultVisibility === "group" ? userGroups[0]?.id ?? null : null));
+    setExistingImagePaths(editPost?.imagePaths ?? []);
+    setRemovedImagePaths([]);
+    setHealthBadge(editPost?.healthBadge ?? null);
+    setRecoveryCard(editPost?.recoveryCard ?? null);
+    setRecoveryHeadline(editPost?.recoveryCard?.headline ?? "");
+    setBadgeOpen(false);
+    setRecoveryCardOpen(false);
     setPosting(false);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [defaultVisibility, userGroups]);
+  }, [defaultVisibility, editPost, isEditMode, userGroups]);
 
   useEffect(() => {
     const hadPendingReset = resetTimeoutRef.current !== null;
@@ -193,11 +249,49 @@ export function SocialPostComposer({
   const SelectedVisibilityIcon = selectedVisibility.icon;
   const charCount = Array.from(body).length;
   const outgoingTags = useMemo(() => mergeTags(selectedTags, tagInput), [selectedTags, tagInput]);
+  const totalImageCount = (isEditMode ? existingImagePaths.length - removedImagePaths.length : 0) + selectedImages.length;
   const canSubmit =
     !posting &&
     charCount <= 500 &&
-    (body.trim().length > 0 || selectedImages.length > 0) &&
+    (body.trim().length > 0 || totalImageCount > 0 || (!isEditMode && selectedImages.length > 0)) &&
     (visibility !== "group" || selectedGroupId !== null);
+
+  // 건강 배지 토글 핸들러
+  const handleToggleBadge = useCallback(() => {
+    if (healthBadge) {
+      setHealthBadge(null);
+      setBadgeOpen(false);
+    } else {
+      setHealthBadge({
+        shiftType: todayShift ?? undefined,
+        batteryLevel: estimatedBattery ?? undefined,
+        burnoutLevel: estimatedBurnout,
+      });
+      setBadgeOpen(true);
+    }
+  }, [estimatedBattery, estimatedBurnout, healthBadge, todayShift]);
+
+  // 회복 카드 토글 핸들러
+  const handleToggleRecoveryCard = useCallback(() => {
+    if (recoveryCard) {
+      setRecoveryCard(null);
+      setRecoveryCardOpen(false);
+      setRecoveryHeadline("");
+    } else {
+      const avgBattery = estimatedBattery;
+      const headline = avgBattery !== null
+        ? `이번 주 배터리 ${avgBattery}% — 기록 중`
+        : "이번 주 회복 기록";
+      setRecoveryHeadline(headline);
+      setRecoveryCard({
+        headline,
+        batteryAvg: avgBattery,
+        sleepDebtHours: null,
+        weekDays: 7,
+      });
+      setRecoveryCardOpen(true);
+    }
+  }, [estimatedBattery, recoveryCard]);
 
   const appendTags = useCallback((tags: string[]) => {
     setSelectedTags((prev) => {
@@ -377,7 +471,36 @@ export function SocialPostComposer({
     setError(null);
 
     try {
-      const imagePaths = await uploadImages();
+      const newImagePaths = await uploadImages();
+
+      if (isEditMode && editPost) {
+        // ── PATCH 모드 ─────────────────────────────────────
+        const res = await fetch(`/api/social/posts/${editPost.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            body: body.trim(),
+            tags: outgoingTags,
+            visibility,
+            groupId: visibility === "group" ? selectedGroupId : null,
+            addImagePaths: newImagePaths,
+            removeImagePaths: removedImagePaths,
+            healthBadge: healthBadge ?? null,
+            recoveryCard: recoveryCard ?? null,
+          }),
+        }).then((response) => response.json());
+
+        if (!res.ok) {
+          if (res.error === "not_found") throw new Error("게시글을 찾을 수 없어요.");
+          if (res.error === "invalid_image_path") throw new Error("이미지 정보가 올바르지 않아요.");
+          throw new Error("게시글을 수정하지 못했어요.");
+        }
+        onEdited?.(res.data.post as SocialPost);
+        onClose();
+        return;
+      }
+
+      // ── POST 모드 ────────────────────────────────────────
       const res = await fetch("/api/social/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -386,7 +509,9 @@ export function SocialPostComposer({
           tags: outgoingTags,
           visibility,
           groupId: visibility === "group" ? selectedGroupId : null,
-          imagePaths,
+          imagePaths: newImagePaths,
+          healthBadge: healthBadge ?? null,
+          recoveryCard: recoveryCard ?? null,
         }),
       }).then((response) => response.json());
 
@@ -405,7 +530,7 @@ export function SocialPostComposer({
     } finally {
       setPosting(false);
     }
-  }, [body, canSubmit, onClose, onPosted, outgoingTags, selectedGroupId, uploadImages, visibility]);
+  }, [body, canSubmit, editPost, healthBadge, isEditMode, onClose, onEdited, onPosted, outgoingTags, recoveryCard, removedImagePaths, selectedGroupId, uploadImages, visibility]);
 
   const activeImage = selectedImages[activeImageIndex] ?? null;
   const handleRequestClose = useCallback(() => {
@@ -639,7 +764,7 @@ export function SocialPostComposer({
                   <path d="m15 18-6-6 6-6" />
                 </svg>
               </button>
-              <p className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">새 게시글</p>
+              <p className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">{isEditMode ? "게시글 수정" : "새 게시글"}</p>
               <div className="w-9" />
             </div>
           </div>
@@ -886,6 +1011,145 @@ export function SocialPostComposer({
                   </div>
                 </section>
               ) : null}
+
+              {/* ── 오늘의 상태 배지 ─────────────────────────── */}
+              <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">오늘의 상태 배지</p>
+                    <p className="mt-0.5 text-[11px] text-[#9ca3af]">근무·배터리 상태를 게시글에 첨부할 수 있어요</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={posting}
+                    onClick={handleToggleBadge}
+                    className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
+                      healthBadge ? "bg-[color:var(--rnest-accent)]" : "bg-gray-200"
+                    }`}
+                    aria-label="오늘의 상태 배지 토글"
+                  >
+                    <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      healthBadge ? "translate-x-5" : "translate-x-0.5"
+                    }`} />
+                  </button>
+                </div>
+                {healthBadge && badgeOpen ? (
+                  <div className="mt-3 space-y-2.5">
+                    <div className="flex flex-wrap gap-2">
+                      {healthBadge.shiftType ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f0eeff] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)]">
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                            <path d="M10 2a8 8 0 1 0 0 16A8 8 0 0 0 10 2zm1 11H9V9h2v4zm0-6H9V5h2v2z" />
+                          </svg>
+                          {healthBadge.shiftType} 근무
+                          <button
+                            type="button"
+                            onClick={() => setHealthBadge((prev) => prev ? { ...prev, shiftType: undefined } : null)}
+                            className="ml-0.5 opacity-60 hover:opacity-100"
+                            aria-label="교대 배지 제거"
+                          >
+                            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+                            </svg>
+                          </button>
+                        </span>
+                      ) : null}
+                      {healthBadge.batteryLevel !== undefined ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f0eeff] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)]">
+                          <svg viewBox="0 0 20 10" className="h-3 w-4.5" aria-hidden>
+                            <rect x="0.5" y="0.5" width="15" height="9" rx="2" stroke="currentColor" strokeWidth="1" fill="none" />
+                            <rect x="16" y="2.5" width="2.5" height="5" rx="0.8" fill="currentColor" />
+                            <rect x="1.5" y="1.5" width={Math.round((healthBadge.batteryLevel / 100) * 12)} height="7" rx="1" fill="currentColor" />
+                          </svg>
+                          배터리 {healthBadge.batteryLevel}%
+                          <button
+                            type="button"
+                            onClick={() => setHealthBadge((prev) => prev ? { ...prev, batteryLevel: undefined } : null)}
+                            className="ml-0.5 opacity-60 hover:opacity-100"
+                            aria-label="배터리 배지 제거"
+                          >
+                            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+                            </svg>
+                          </button>
+                        </span>
+                      ) : null}
+                      {healthBadge.burnoutLevel ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f0eeff] px-3 py-1.5 text-[12px] font-medium text-[color:var(--rnest-accent)]">
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                            <path fillRule="evenodd" d="M12.395 2.553a1 1 0 0 0-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 0 0-.613 3.58 2.64 2.64 0 0 1-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 0 0 5.05 6.05 6.981 6.981 0 0 0 3 11a7 7 0 1 0 11.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03z" clipRule="evenodd" />
+                          </svg>
+                          {healthBadge.burnoutLevel === "ok" ? "안정" : healthBadge.burnoutLevel === "warning" ? "주의" : "위험"}
+                          <button
+                            type="button"
+                            onClick={() => setHealthBadge((prev) => prev ? { ...prev, burnoutLevel: undefined } : null)}
+                            className="ml-0.5 opacity-60 hover:opacity-100"
+                            aria-label="번아웃 배지 제거"
+                          >
+                            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+                            </svg>
+                          </button>
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-[11px] text-[#9ca3af]">
+                      {todayShift ? `오늘 근무: ${todayShift}` : "오늘 일정 미입력"}{estimatedBattery !== null ? ` · 추정 배터리 ${estimatedBattery}%` : ""}
+                    </p>
+                  </div>
+                ) : null}
+              </section>
+
+              {/* ── 회복 카드 첨부 ───────────────────────────── */}
+              <section className="rounded-2xl border border-black/[0.05] bg-white px-4 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[12px] font-semibold tracking-[0.02em] text-[#6b7280]">회복 카드 첨부</p>
+                    <p className="mt-0.5 text-[11px] text-[#9ca3af]">이번 주 회복 현황을 카드로 공유할 수 있어요</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={posting}
+                    onClick={handleToggleRecoveryCard}
+                    className={`relative h-7 w-12 rounded-full transition-colors duration-200 ${
+                      recoveryCard ? "bg-[color:var(--rnest-accent)]" : "bg-gray-200"
+                    }`}
+                    aria-label="회복 카드 토글"
+                  >
+                    <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      recoveryCard ? "translate-x-5" : "translate-x-0.5"
+                    }`} />
+                  </button>
+                </div>
+                {recoveryCard && recoveryCardOpen ? (
+                  <div className="mt-3 overflow-hidden rounded-[14px] bg-gradient-to-r from-[#f0eeff] to-[#e8f5e9] px-3.5 py-3">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-[color:var(--rnest-accent)] shrink-0">
+                        <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0 1 12 2v5h4a1 1 0 0 1 .82 1.573l-7 10A1 1 0 0 1 8 18v-5H4a1 1 0 0 1-.82-1.573l7-10a1 1 0 0 1 1.12-.38z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-[11px] font-semibold uppercase tracking-widest text-[color:var(--rnest-accent)]">회복 카드</span>
+                    </div>
+                    <input
+                      value={recoveryHeadline}
+                      disabled={posting}
+                      onChange={(e) => {
+                        const v = e.target.value.slice(0, 100);
+                        setRecoveryHeadline(v);
+                        setRecoveryCard((prev) => prev ? { ...prev, headline: v } : prev);
+                      }}
+                      placeholder="예: 이번 주 배터리 72% — 나이트 이후 회복 완료"
+                      className="w-full bg-transparent text-[13px] font-semibold text-gray-800 outline-none placeholder:text-gray-400 placeholder:font-normal"
+                    />
+                    <div className="mt-1.5 flex flex-wrap gap-2.5 text-[11px] text-gray-500">
+                      {recoveryCard.batteryAvg !== null && recoveryCard.batteryAvg !== undefined ? (
+                        <span>주간 평균 {recoveryCard.batteryAvg}%</span>
+                      ) : null}
+                      <span className="text-gray-400">7일 기준</span>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
             </div>
           </div>
         </div>
