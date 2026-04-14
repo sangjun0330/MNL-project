@@ -18,6 +18,8 @@ type ImportScheduleArgs = {
   yearMonthHint?: string;
   locale?: "ko" | "en";
   customShiftTypes?: unknown;
+  userId?: string;
+  traceId?: string;
   signal: AbortSignal;
 };
 
@@ -99,6 +101,14 @@ function trimEnv(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function isTruthyFlag(raw: string) {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -131,6 +141,12 @@ function resolveUpstreamTimeoutMs() {
   return Math.max(MIN_UPSTREAM_TIMEOUT_MS, Math.min(MAX_UPSTREAM_TIMEOUT_MS, Math.round(raw)));
 }
 
+function resolveStoreResponses() {
+  const explicit = isTruthyFlag(trimEnv(process.env.OPENAI_SCHEDULE_STORE_RESPONSES));
+  if (explicit != null) return explicit;
+  return false;
+}
+
 function truncateError(raw: string, size = 220) {
   const clean = String(raw ?? "")
     .replace(/\s+/g, " ")
@@ -149,6 +165,55 @@ function safeJsonParse(raw: string) {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+function createTraceId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `schedule-import-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function summarizeUserId(userId?: string) {
+  const normalized = String(userId ?? "").trim();
+  return normalized ? normalized.slice(0, 8) : null;
+}
+
+function responseDebugHeaders(response: Response) {
+  return {
+    requestId: readString(response.headers.get("x-request-id")),
+    cfAigRequestId: readString(response.headers.get("cf-aig-request-id")),
+    cfRay: readString(response.headers.get("cf-ray")),
+  };
+}
+
+function readUsage(value: any) {
+  if (!value || typeof value !== "object") return null;
+  const inputTokens = Number(value.input_tokens ?? value.prompt_tokens ?? 0);
+  const outputTokens = Number(value.output_tokens ?? value.completion_tokens ?? 0);
+  const totalTokens = Number(value.total_tokens ?? inputTokens + outputTokens);
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : null,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : null,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : null,
+  };
+}
+
+function buildRequestMetadata(args: {
+  traceId: string;
+  mode: ScheduleAIImportMode;
+  yearMonthHint: string | null;
+  selectedPerson: string;
+  customShiftCount: number;
+}) {
+  return {
+    feature: "schedule_import",
+    trace_id: args.traceId,
+    mode: args.mode,
+    year_month_hint: args.yearMonthHint ?? "",
+    has_selected_person: args.selectedPerson ? "1" : "0",
+    custom_shift_count: String(args.customShiftCount),
+  };
 }
 
 function appendText(parts: string[], seen: Set<string>, value: unknown) {
@@ -319,6 +384,8 @@ async function requestStructuredScheduleImageAnalysis(args: {
   yearMonthHint: string | null;
   locale: "ko" | "en";
   customShiftPrompt: string;
+  customShiftCount: number;
+  traceId: string;
   signal: AbortSignal;
 }) {
   const requestConfig = resolveOpenAIResponsesRequestConfig({
@@ -336,8 +403,19 @@ async function requestStructuredScheduleImageAnalysis(args: {
   const timeout = setTimeout(() => controller.abort("schedule_import_upstream_timeout"), resolveUpstreamTimeoutMs());
   const onAbort = () => controller.abort("schedule_import_caller_aborted");
   args.signal.addEventListener("abort", onAbort, { once: true });
+  const storeResponses = resolveStoreResponses();
 
   try {
+    console.info("[ScheduleAIImport] openai_request_start", {
+      traceId: args.traceId,
+      model: requestConfig.model,
+      url: requestConfig.requestUrl,
+      authMode: requestConfig.authMode,
+      usesCloudflareGateway: requestConfig.usesCloudflareGateway,
+      mode: args.mode,
+      storeResponses,
+    });
+
     const response = await fetch(requestConfig.requestUrl, {
       method: "POST",
       headers: requestConfig.headers,
@@ -390,18 +468,39 @@ async function requestStructuredScheduleImageAnalysis(args: {
           effort: "low",
         },
         max_output_tokens: 2200,
-        store: false,
+        metadata: buildRequestMetadata({
+          traceId: args.traceId,
+          mode: args.mode,
+          yearMonthHint: args.yearMonthHint,
+          selectedPerson: args.selectedPerson,
+          customShiftCount: args.customShiftCount,
+        }),
+        store: storeResponses,
         tools: [],
       }),
     });
 
     const raw = await response.text();
     const payload = safeJsonParse(raw);
+    const headerDebug = responseDebugHeaders(response);
     if (!payload) {
+      console.error("[ScheduleAIImport] openai_request_invalid_json", {
+        traceId: args.traceId,
+        model: requestConfig.model,
+        status: response.status,
+        ...headerDebug,
+      });
       throw new Error(response.ok ? "schedule_ai_parse_failed" : `openai_responses_${response.status}_invalid_json`);
     }
 
     if (!response.ok) {
+      console.error("[ScheduleAIImport] openai_request_failed", {
+        traceId: args.traceId,
+        model: requestConfig.model,
+        status: response.status,
+        ...headerDebug,
+        errorPreview: truncateError(raw || "schedule_ai_failed", 160),
+      });
       throw new Error(`openai_responses_${response.status}_${truncateError(raw || "schedule_ai_failed")}`);
     }
 
@@ -409,6 +508,17 @@ async function requestStructuredScheduleImageAnalysis(args: {
     if (!text) throw new Error("schedule_ai_parse_failed");
     const parsed = parseAIResponse(text);
     if (!parsed) throw new Error("invalid_schedule_ai_response");
+
+    console.info("[ScheduleAIImport] openai_request_success", {
+      traceId: args.traceId,
+      model: requestConfig.model,
+      responseId: readString(payload?.id),
+      ...headerDebug,
+      usage: readUsage(payload?.usage),
+      tableType: parsed.tableType,
+      peopleCount: parsed.people.length,
+      scheduleCount: parsed.schedule.length,
+    });
 
     return {
       parsed,
@@ -459,6 +569,8 @@ function normalizeScheduleEntries(args: {
 }
 
 export async function importScheduleFromImageWithAI(args: ImportScheduleArgs): Promise<ScheduleAIImportResponse> {
+  const traceId = args.traceId ?? createTraceId();
+  const userTag = summarizeUserId(args.userId);
   const imageDataUrl = String(args.imageDataUrl ?? "").trim();
   const imageBytes = estimateDataUrlBytes(imageDataUrl);
   if (!imageDataUrl.startsWith("data:image/") || imageBytes == null) {
@@ -473,66 +585,118 @@ export async function importScheduleFromImageWithAI(args: ImportScheduleArgs): P
   const yearMonthHint = normalizeYearMonth(args.yearMonthHint);
   const locale = args.locale === "en" ? "en" : "ko";
 
-  if (args.mode === "resolve_person" && !selectedPerson) {
-    throw new Error("selected_person_required");
-  }
-
-  const { parsed, model } = await requestStructuredScheduleImageAnalysis({
-    imageDataUrl,
+  console.info("[ScheduleAIImport] import_start", {
+    traceId,
+    userTag,
     mode: args.mode,
-    selectedPerson,
-    yearMonthHint,
     locale,
-    customShiftPrompt: formatCustomShiftPrompt(customShiftTypes),
-    signal: args.signal,
+    imageBytes,
+    yearMonthHint,
+    customShiftCount: customShiftTypes.length,
+    hasSelectedPerson: Boolean(selectedPerson),
   });
 
-  const normalizedYearMonth = parsed.yearMonth ?? yearMonthHint;
-  const warnings = [...parsed.warnings];
+  try {
+    if (args.mode === "resolve_person" && !selectedPerson) {
+      throw new Error("selected_person_required");
+    }
 
-  if (parsed.tableType === "multi_person" && args.mode === "detect") {
-    return {
-      status: "person_required",
+    const { parsed, model } = await requestStructuredScheduleImageAnalysis({
+      imageDataUrl,
+      mode: args.mode,
+      selectedPerson,
+      yearMonthHint,
+      locale,
+      customShiftPrompt: formatCustomShiftPrompt(customShiftTypes),
+      customShiftCount: customShiftTypes.length,
+      traceId,
+      signal: args.signal,
+    });
+
+    const normalizedYearMonth = parsed.yearMonth ?? yearMonthHint;
+    const warnings = [...parsed.warnings];
+
+    if (parsed.tableType === "multi_person" && args.mode === "detect") {
+      const result = {
+        status: "person_required" as const,
+        yearMonth: normalizedYearMonth,
+        people: parsed.people,
+        selectedPerson: null,
+        schedule: {},
+        unresolved: [],
+        warnings,
+        model,
+      };
+      console.info("[ScheduleAIImport] import_ready", {
+        traceId,
+        userTag,
+        status: result.status,
+        tableType: parsed.tableType,
+        yearMonth: result.yearMonth,
+        peopleCount: result.people.length,
+        scheduleCount: 0,
+        unresolvedCount: 0,
+        warningCount: result.warnings.length,
+        model: result.model,
+      });
+      return result;
+    }
+
+    if (!normalizedYearMonth) {
+      throw new Error("invalid_schedule_ai_response");
+    }
+
+    const { schedule, unresolved } = normalizeScheduleEntries({
+      yearMonth: normalizedYearMonth,
+      rawSchedule: parsed.schedule,
+      customShiftTypes,
+    });
+
+    if (args.mode === "resolve_person" && !Object.keys(schedule).length && !unresolved.length) {
+      throw new Error("person_not_found");
+    }
+
+    if (!Object.keys(schedule).length && !unresolved.length) {
+      throw new Error("schedule_ai_parse_failed");
+    }
+
+    if (unresolved.length > 0) {
+      warnings.push("일부 근무 표기는 자동 분류하지 못해 수동 확인이 필요합니다.");
+    }
+
+    const result = {
+      status: "review_ready" as const,
       yearMonth: normalizedYearMonth,
       people: parsed.people,
-      selectedPerson: null,
-      schedule: {},
-      unresolved: [],
-      warnings,
+      selectedPerson: parsed.person ?? (selectedPerson || null),
+      schedule,
+      unresolved,
+      warnings: normalizeList(warnings, 12, 140),
       model,
     };
+
+    console.info("[ScheduleAIImport] import_ready", {
+      traceId,
+      userTag,
+      status: result.status,
+      tableType: parsed.tableType,
+      yearMonth: result.yearMonth,
+      peopleCount: result.people.length,
+      scheduleCount: Object.keys(result.schedule).length,
+      unresolvedCount: result.unresolved.length,
+      warningCount: result.warnings.length,
+      model: result.model,
+    });
+
+    return result;
+  } catch (error) {
+    const message = String((error as Error)?.message ?? error ?? "");
+    console.error("[ScheduleAIImport] import_failed", {
+      traceId,
+      userTag,
+      mode: args.mode,
+      error: truncateError(message || "schedule_ai_import_failed", 160),
+    });
+    throw error instanceof Error ? error : new Error(message);
   }
-
-  if (!normalizedYearMonth) {
-    throw new Error("invalid_schedule_ai_response");
-  }
-
-  const { schedule, unresolved } = normalizeScheduleEntries({
-    yearMonth: normalizedYearMonth,
-    rawSchedule: parsed.schedule,
-    customShiftTypes,
-  });
-
-  if (args.mode === "resolve_person" && !Object.keys(schedule).length && !unresolved.length) {
-    throw new Error("person_not_found");
-  }
-
-  if (!Object.keys(schedule).length && !unresolved.length) {
-    throw new Error("schedule_ai_parse_failed");
-  }
-
-  if (unresolved.length > 0) {
-    warnings.push("일부 근무 표기는 자동 분류하지 못해 수동 확인이 필요합니다.");
-  }
-
-  return {
-    status: "review_ready",
-    yearMonth: normalizedYearMonth,
-    people: parsed.people,
-    selectedPerson: parsed.person ?? (selectedPerson || null),
-    schedule,
-    unresolved,
-    warnings: normalizeList(warnings, 12, 140),
-    model,
-  };
 }
