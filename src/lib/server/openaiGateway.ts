@@ -1,4 +1,4 @@
-export type OpenAIRequestScope = "recovery" | "med_safety" | "social_group_brief";
+export type OpenAIRequestScope = "recovery" | "med_safety" | "social_group_brief" | "schedule_import";
 
 export type OpenAIResponsesRequestConfig = {
   requestUrl: string;
@@ -79,6 +79,15 @@ function resolveGatewayToken(scope: OpenAIRequestScope) {
             process.env.OPENAI_GATEWAY_TOKEN,
             process.env.OPENAI_GATEWAY_API_KEY,
           ]
+        : scope === "schedule_import"
+          ? [
+              process.env.OPENAI_SCHEDULE_GATEWAY_TOKEN,
+              process.env.OPENAI_SCHEDULE_CF_AIG_TOKEN,
+              process.env.CF_AIG_TOKEN,
+              process.env.CLOUDFLARE_AI_GATEWAY_TOKEN,
+              process.env.OPENAI_GATEWAY_TOKEN,
+              process.env.OPENAI_GATEWAY_API_KEY,
+            ]
         : [
             process.env.OPENAI_RECOVERY_GATEWAY_TOKEN,
             process.env.OPENAI_RECOVERY_CF_AIG_TOKEN,
@@ -104,6 +113,11 @@ function resolveStoredKeyFlag(scope: OpenAIRequestScope) {
             process.env.OPENAI_SOCIAL_GROUP_BRIEF_GATEWAY_USE_STORED_KEY,
             process.env.OPENAI_GATEWAY_USE_STORED_KEY,
           ]
+        : scope === "schedule_import"
+          ? [
+              process.env.OPENAI_SCHEDULE_GATEWAY_USE_STORED_KEY,
+              process.env.OPENAI_GATEWAY_USE_STORED_KEY,
+            ]
         : [
             process.env.OPENAI_RECOVERY_GATEWAY_USE_STORED_KEY,
             process.env.OPENAI_MED_SAFETY_GATEWAY_USE_STORED_KEY,
@@ -128,6 +142,11 @@ function resolveGatewayAuthMode(scope: OpenAIRequestScope, openAIApiKey: string,
             process.env.OPENAI_SOCIAL_GROUP_BRIEF_GATEWAY_AUTH_MODE,
             process.env.OPENAI_GATEWAY_AUTH_MODE,
           ]
+        : scope === "schedule_import"
+          ? [
+              process.env.OPENAI_SCHEDULE_GATEWAY_AUTH_MODE,
+              process.env.OPENAI_GATEWAY_AUTH_MODE,
+            ]
         : [
             process.env.OPENAI_RECOVERY_GATEWAY_AUTH_MODE,
             process.env.OPENAI_MED_SAFETY_GATEWAY_AUTH_MODE,

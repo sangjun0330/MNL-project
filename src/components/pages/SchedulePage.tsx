@@ -509,6 +509,25 @@ export function SchedulePage() {
       >
         <div className="pb-4">
           <ShiftPatternQuickApplyCard selectedISO={selected} />
+          <button
+            type="button"
+            onClick={() => router.push("/schedule/pattern-settings")}
+            className="mt-4 flex w-full items-center justify-between rounded-2xl border border-ios-sep bg-white px-4 py-3 text-left transition-colors hover:bg-ios-fill active:opacity-70"
+          >
+            <div className="flex items-center gap-3">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ios-label">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              <div>
+                <div className="text-[14px] font-semibold text-ios-label">{t("근무표 이미지 스캔 · 근무 이름 설정")}</div>
+                <div className="mt-0.5 text-[12px] text-ios-muted">{t("AI 이미지 등록과 병원별 근무 이름 설정")}</div>
+              </div>
+            </div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ios-muted">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
         </div>
       </BottomSheet>
 

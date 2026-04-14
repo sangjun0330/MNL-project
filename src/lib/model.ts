@@ -8,6 +8,15 @@ import {
 } from "@/lib/notebook";
 import type { Shift } from "@/lib/types";
 
+export type CoreShift = Shift;
+
+export type CustomShiftDef = {
+  id: string;
+  displayName: string;
+  semanticType: CoreShift;
+  aliases: string[];
+};
+
 // =========================
 // Domain types (UI에서 직접 사용)
 // =========================
@@ -90,6 +99,8 @@ export type AppSettings = {
   language?: "ko" | "en";
   // onboarding
   hasSeenOnboarding?: boolean;
+  customShiftTypes?: CustomShiftDef[];
+  ocrLastUserName?: string;
 };
 
 export type AppState = {
@@ -116,6 +127,7 @@ export type AppStore = AppState & {
   batchSetSchedule: (patch: Record<ISODate, Shift>) => void;
   setShiftNameForDate: (iso: ISODate, name: string) => void;
   clearShiftNameForDate: (iso: ISODate) => void;
+  batchSetShiftNames: (patch: Record<ISODate, string>) => void;
 
   setNoteForDate: (iso: ISODate, note: string) => void;
   clearNoteForDate: (iso: ISODate) => void;
@@ -160,6 +172,8 @@ export function defaultSettings(): AppSettings {
     },
     language: "ko",
     hasSeenOnboarding: false,
+    customShiftTypes: [],
+    ocrLastUserName: "",
   };
 }
 

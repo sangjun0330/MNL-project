@@ -4,6 +4,7 @@ import type { AppSettings, AppState, BioInputs, EmotionEntry } from "@/lib/model
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 import type { Shift } from "@/lib/types";
 import type { Json } from "@/types/supabase";
+import { sanitizeCustomShiftTypes, sanitizeOcrLastUserName } from "@/lib/customShiftTypes";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -225,6 +226,8 @@ function defaultSettings(): AppSettings {
     },
     language: "ko",
     hasSeenOnboarding: false,
+    customShiftTypes: [],
+    ocrLastUserName: "",
   };
 }
 
@@ -263,6 +266,8 @@ function sanitizeSettings(raw: unknown): AppSettings {
       caffeineSensitivity:
         sensitivityNum == null ? defaults.profile?.caffeineSensitivity ?? 1 : clamp(sensitivityNum, 0.5, 1.5),
     },
+    customShiftTypes: sanitizeCustomShiftTypes(loaded.customShiftTypes),
+    ocrLastUserName: sanitizeOcrLastUserName(loaded.ocrLastUserName),
   };
 }
 

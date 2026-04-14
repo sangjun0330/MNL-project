@@ -6,6 +6,7 @@ import {
   type RNestRecordState,
 } from "@/lib/notebook";
 import { defaultSettings, emptyState, type AppSettings, type AppState, type BioInputs, type EmotionEntry } from "@/lib/model";
+import { sanitizeCustomShiftTypes, sanitizeOcrLastUserName } from "@/lib/customShiftTypes";
 import type { Shift } from "@/lib/types";
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -281,6 +282,8 @@ function sanitizeSettings(raw: unknown): AppSettings {
       caffeineSensitivity:
         sensitivityNum == null ? defaults.profile?.caffeineSensitivity ?? 1 : clamp(sensitivityNum, 0.5, 1.5),
     },
+    customShiftTypes: sanitizeCustomShiftTypes(loaded.customShiftTypes),
+    ocrLastUserName: sanitizeOcrLastUserName(loaded.ocrLastUserName),
   };
 }
 

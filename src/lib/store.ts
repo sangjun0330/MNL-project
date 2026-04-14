@@ -11,6 +11,7 @@ import type { Shift } from "@/lib/types";
 import { autoAdjustMenstrualSettings } from "@/lib/menstrual";
 import { sanitizeStatePayload } from "@/lib/stateSanitizer";
 import { purgeAllAppStateDrafts } from "@/lib/appStateDraft";
+import { sanitizeCustomShiftTypes, sanitizeOcrLastUserName } from "@/lib/customShiftTypes";
 import {
   CLIENT_DATA_SCOPE_APP_STATE,
   CLIENT_DATA_SCOPE_HOME_PREVIEW,
@@ -128,6 +129,8 @@ function normalizeSettings(raw: any): AppSettings {
       ),
     },
     language: loaded?.language === "en" ? "en" : "ko",
+    customShiftTypes: sanitizeCustomShiftTypes(loaded?.customShiftTypes),
+    ocrLastUserName: sanitizeOcrLastUserName(loaded?.ocrLastUserName),
   };
 }
 
@@ -281,6 +284,15 @@ function clearShiftNameForDate(iso: ISODate) {
   const next = { ...(state.shiftNames ?? {}) };
   delete next[iso];
   setState({ shiftNames: next });
+}
+
+function batchSetShiftNames(patch: Record<ISODate, string>) {
+  setState({
+    shiftNames: {
+      ...(state.shiftNames ?? {}),
+      ...patch,
+    },
+  });
 }
 
 function setNoteForDate(iso: ISODate, note: string) {
@@ -453,6 +465,9 @@ function registerDebugBridge() {
       setSettings,
       setShiftForDate,
       batchSetSchedule,
+      setShiftNameForDate,
+      clearShiftNameForDate,
+      batchSetShiftNames,
       setNoteForDate,
       setEmotionForDate,
       setBioForDate,
@@ -485,6 +500,7 @@ function buildStoreSnapshot(s: AppState): AppStore {
     batchSetSchedule,
     setShiftNameForDate,
     clearShiftNameForDate,
+    batchSetShiftNames,
 
     setNoteForDate,
     clearNoteForDate,
