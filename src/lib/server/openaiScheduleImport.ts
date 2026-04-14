@@ -37,7 +37,7 @@ type AIScheduleImageResponse = {
 
 const DEFAULT_SCHEDULE_GATEWAY_BASE_URL =
   "https://gateway.ai.cloudflare.com/v1/ef26198060fbc15df2aa56b10360ee41/rnest-openai/compat";
-const DEFAULT_SCHEDULE_MODEL = "gpt-5.4-mini";
+const DEFAULT_SCHEDULE_MODEL = "gpt-5-mini";
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 90_000;
 const MIN_UPSTREAM_TIMEOUT_MS = 20_000;
 const MAX_UPSTREAM_TIMEOUT_MS = 180_000;
@@ -472,6 +472,10 @@ export async function importScheduleFromImageWithAI(args: ImportScheduleArgs): P
   const selectedPerson = sanitizeOcrLastUserName(args.selectedPerson, 24);
   const yearMonthHint = normalizeYearMonth(args.yearMonthHint);
   const locale = args.locale === "en" ? "en" : "ko";
+
+  if (args.mode === "resolve_person" && !selectedPerson) {
+    throw new Error("selected_person_required");
+  }
 
   const { parsed, model } = await requestStructuredScheduleImageAnalysis({
     imageDataUrl,

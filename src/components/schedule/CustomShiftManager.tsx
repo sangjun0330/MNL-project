@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import type { CoreShift, CustomShiftDef } from "@/lib/model";
 import { cn } from "@/lib/cn";
@@ -8,38 +9,44 @@ import { SHIFT_LABELS, shiftColor } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
-const SEMANTIC_OPTIONS: { value: CoreShift; label: string; hint: string }[] = [
-  { value: "D", label: "주간 (D)", hint: "낮번·오전·AM" },
-  { value: "E", label: "이브닝 (E)", hint: "저녁·PM" },
-  { value: "N", label: "나이트 (N)", hint: "야간·밤번" },
+const SEMANTIC_OPTIONS: Array<{ value: CoreShift; label: string; hint: string }> = [
+  { value: "D", label: "주간 (D)", hint: "낮번 · 오전 · AM" },
+  { value: "E", label: "이브닝 (E)", hint: "저녁 · PM" },
+  { value: "N", label: "나이트 (N)", hint: "야간 · 밤번" },
   { value: "M", label: "미들 (M)", hint: "중간번" },
-  { value: "OFF", label: "오프 (OFF)", hint: "쉬는날·비번" },
-  { value: "VAC", label: "휴가 (VAC)", hint: "연차·반차" },
+  { value: "OFF", label: "오프 (OFF)", hint: "비번 · 쉬는날" },
+  { value: "VAC", label: "휴가 (VAC)", hint: "연차 · 반차" },
 ];
+
+function Surface({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("rounded-[26px] border border-black/5 bg-white/90 p-5 shadow-[0_16px_36px_rgba(15,23,42,0.04)] backdrop-blur-xl", className)}>
+      {children}
+    </div>
+  );
+}
 
 function ShiftDefRow({ def, onDelete }: { def: CustomShiftDef; onDelete: (id: string) => void }) {
   const semanticLabel = SHIFT_LABELS.find((item) => item.id === def.semanticType)?.hint ?? def.semanticType;
 
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <span className={cn("inline-flex shrink-0 items-center rounded-lg border px-2.5 py-0.5 text-[12px] font-semibold", shiftColor(def.semanticType))}>
+    <div className="flex items-center gap-3 py-3">
+      <span className={cn("inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-[12px] font-semibold", shiftColor(def.semanticType))}>
         {def.displayName}
       </span>
 
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium leading-snug">
+        <div className="text-[13px] font-medium tracking-[-0.01em] text-[#111827]">
           {def.displayName}
-          <span className="ml-1.5 text-[11px] text-ios-muted">→ {semanticLabel}</span>
+          <span className="ml-1.5 text-[11px] text-[#6B7280]">→ {semanticLabel}</span>
         </div>
-        {def.aliases.length > 0 && (
-          <div className="mt-0.5 text-[11px] text-ios-muted">인식 별칭: {def.aliases.join(", ")}</div>
-        )}
+        {def.aliases.length > 0 && <div className="mt-1 text-[11.5px] text-[#6B7280]">인식 별칭: {def.aliases.join(", ")}</div>}
       </div>
 
       <button
         type="button"
         onClick={() => onDelete(def.id)}
-        className="shrink-0 rounded-lg p-1.5 text-ios-muted hover:bg-red-50 hover:text-red-500 active:opacity-70"
+        className="shrink-0 rounded-full border border-black/6 bg-[#F7F7F8] p-2 text-[#6B7280] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500"
         aria-label={`${def.displayName} 삭제`}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -84,7 +91,7 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-2 rounded-xl border border-dashed border-ios-sep px-4 py-3 text-[13px] text-ios-muted hover:bg-ios-fill active:opacity-70"
+        className="flex w-full items-center justify-center gap-2 rounded-[24px] border border-dashed border-black/10 bg-[#FAFAFA] px-4 py-4 text-[13px] font-medium text-[#4B5563] transition-colors hover:bg-[#F6F7F8]"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -96,47 +103,45 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-ios-sep bg-ios-fill p-4">
-      <div className="text-[13px] font-semibold">새 근무 이름 등록</div>
+    <Surface className="space-y-4 bg-[#FAFAFA]">
+      <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#111827]">새 근무 이름 등록</div>
 
       <div>
-        <label className="mb-1 block text-[11.5px] text-ios-muted">
+        <label className="mb-1.5 block text-[11.5px] font-medium text-[#6B7280]">
           근무 이름 <span className="text-red-500">*</span>
         </label>
         <input
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value.slice(0, 20))}
           placeholder="예: 낮번, 야간특, PM"
-          className="w-full rounded-xl border border-ios-sep bg-white px-3 py-2 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+          className="w-full rounded-2xl border border-black/6 bg-white px-4 py-3 text-[14px] font-medium text-[#111827] outline-none focus:border-black/12"
         />
       </div>
 
       <div>
-        <label className="mb-1 block text-[11.5px] text-ios-muted">
+        <label className="mb-1.5 block text-[11.5px] font-medium text-[#6B7280]">
           어떤 종류 근무인가요? <span className="text-red-500">*</span>
         </label>
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
           {SEMANTIC_OPTIONS.map((option) => (
             <button
               key={option.value}
               type="button"
               onClick={() => setSemanticType(option.value)}
               className={cn(
-                "rounded-xl border px-2 py-2 text-left text-[12px] font-medium transition-colors",
-                semanticType === option.value
-                  ? "border-black/20 bg-black text-white"
-                  : "border-ios-sep bg-white text-ios-label hover:bg-ios-fill"
+                "rounded-2xl border px-3 py-3 text-left transition-colors",
+                semanticType === option.value ? "border-black bg-black text-white" : "border-black/6 bg-white text-[#111827]"
               )}
             >
-              <div>{option.label}</div>
-              <div className="mt-0.5 text-[10px] opacity-60">{option.hint}</div>
+              <div className="text-[12.5px] font-semibold">{option.label}</div>
+              <div className="mt-1 text-[11px] opacity-70">{option.hint}</div>
             </button>
           ))}
         </div>
       </div>
 
       <div>
-        <label className="mb-1 block text-[11.5px] text-ios-muted">
+        <label className="mb-1.5 block text-[11.5px] font-medium text-[#6B7280]">
           AI 인식 별칭 <span className="text-[10px] opacity-60">(근무표에 적힌 다른 표현)</span>
         </label>
         <div className="flex gap-2">
@@ -149,28 +154,23 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
               addAlias();
             }}
             placeholder="예: 낮, D번, day"
-            className="flex-1 rounded-xl border border-ios-sep bg-white px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-black/10"
+            className="flex-1 rounded-2xl border border-black/6 bg-white px-4 py-3 text-[13px] font-medium text-[#111827] outline-none focus:border-black/12"
           />
           <button
             type="button"
             onClick={addAlias}
-            className="rounded-xl border border-ios-sep bg-white px-3 py-2 text-[12px] font-medium hover:bg-ios-fill active:opacity-70"
+            className="rounded-2xl border border-black/6 bg-white px-4 py-3 text-[12px] font-semibold text-[#111827] transition-colors hover:bg-[#F7F7F8]"
           >
             추가
           </button>
         </div>
 
         {aliases.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-2">
             {aliases.map((alias) => (
-              <span key={alias} className="inline-flex items-center gap-1 rounded-full border border-ios-sep bg-white px-2.5 py-0.5 text-[12px]">
+              <span key={alias} className="inline-flex items-center gap-1 rounded-full border border-black/6 bg-white px-2.5 py-1 text-[12px] text-[#374151]">
                 {alias}
-                <button
-                  type="button"
-                  onClick={() => setAliases((prev) => prev.filter((item) => item !== alias))}
-                  className="text-ios-muted hover:text-red-500"
-                  aria-label={`${alias} 제거`}
-                >
+                <button type="button" onClick={() => setAliases((prev) => prev.filter((item) => item !== alias))} className="text-[#6B7280] hover:text-red-500" aria-label={`${alias} 제거`}>
                   ×
                 </button>
               </span>
@@ -179,21 +179,21 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
         )}
       </div>
 
-      <div className="flex gap-2 pt-1">
-        <Button variant="secondary" onClick={() => setOpen(false)} className="flex-1 justify-center text-[13px]">
+      <div className="flex gap-2">
+        <Button variant="secondary" onClick={() => setOpen(false)} className="flex-1 justify-center rounded-2xl bg-white text-[13px] text-[#111827]">
           취소
         </Button>
-        <Button onClick={handleSubmit} disabled={!displayName.trim()} className="flex-1 justify-center bg-black text-[13px] text-white disabled:opacity-40">
+        <Button onClick={handleSubmit} disabled={!displayName.trim()} className="flex-1 justify-center rounded-2xl bg-black text-[13px] text-white disabled:opacity-40">
           저장
         </Button>
       </div>
-    </div>
+    </Surface>
   );
 }
 
 export function CustomShiftManager() {
   const store = useAppStore();
-  const customShiftTypes = store.settings.customShiftTypes ?? [];
+  const customShiftTypes = useMemo(() => store.settings.customShiftTypes ?? [], [store.settings.customShiftTypes]);
 
   const handleAdd = (defWithoutId: Omit<CustomShiftDef, "id">) => {
     store.setSettings({
@@ -214,43 +214,37 @@ export function CustomShiftManager() {
   };
 
   return (
-    <Card className="p-5">
-      <div className="mb-4">
-        <div className="text-[14px] font-semibold">우리 병원 근무 이름</div>
-        <div className="mt-1 text-[12.5px] text-ios-muted">
-          병원마다 다른 근무 명칭을 등록하세요. AI 이미지 스캔과 달력 표시에 자동 적용됩니다.
-        </div>
+    <Card className="overflow-hidden border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(250,250,251,0.98)_100%)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.06)]">
+      <div className="mb-5">
+        <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">병원별 근무 이름</div>
+        <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">병원에서 쓰는 이름을 등록하면 AI 스캔 결과와 달력 표시가 더 자연스럽게 맞춰집니다.</div>
       </div>
 
-      <div className="mb-4 rounded-xl bg-ios-fill p-3">
-        <div className="mb-2 text-[11.5px] font-medium text-ios-muted">기본 근무 (변경 불가)</div>
-        <div className="flex flex-wrap gap-1.5">
+      <Surface className="mb-4 space-y-3 bg-[#FAFAFA]">
+        <div className="text-[12.5px] font-medium text-[#6B7280]">기본 근무</div>
+        <div className="flex flex-wrap gap-2">
           {SHIFT_LABELS.map((label) => (
-            <span
-              key={label.id}
-              className={cn("inline-flex items-center rounded-lg border px-2.5 py-0.5 text-[12px] font-semibold", shiftColor(label.id))}
-            >
+            <span key={label.id} className={cn("inline-flex items-center rounded-full border px-3 py-1 text-[12px] font-semibold", shiftColor(label.id))}>
               {label.hint}
             </span>
           ))}
         </div>
-      </div>
+      </Surface>
 
-      <div className="space-y-1.5">
+      <div className="space-y-4">
         {customShiftTypes.length > 0 ? (
-          <div className="divide-y divide-ios-sep">
+          <Surface className="divide-y divide-black/5">
             {customShiftTypes.map((item) => (
               <ShiftDefRow key={item.id} def={item} onDelete={handleDelete} />
             ))}
-          </div>
+          </Surface>
         ) : (
-          <div className="rounded-xl border border-dashed border-ios-sep px-4 py-6 text-center text-[12.5px] text-ios-muted">
-            아직 등록된 커스텀 근무 이름이 없습니다.
-          </div>
+          <Surface className="bg-[#FAFAFA] text-center">
+            <div className="text-[13px] font-medium text-[#111827]">아직 등록된 커스텀 근무 이름이 없습니다.</div>
+            <div className="mt-1.5 text-[12px] leading-6 text-[#6B7280]">필요한 이름만 추가하면 다음 스캔부터 자동으로 재사용됩니다.</div>
+          </Surface>
         )}
-      </div>
 
-      <div className="mt-4">
         <AddShiftForm onAdd={handleAdd} />
       </div>
     </Card>

@@ -1,24 +1,23 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
+import { useCurrentAccountResources } from "@/lib/currentAccountResourceStore";
 import type { ISODate } from "@/lib/date";
 import type { CoreShift, CustomShiftDef } from "@/lib/model";
-import {
-  MAX_SCHEDULE_IMPORT_IMAGE_BYTES,
-  type ScheduleAIEntry,
-  type ScheduleAIImportRequest,
-  type ScheduleAIImportResponse,
-} from "@/lib/scheduleAiImport";
-import { cn } from "@/lib/cn";
-import { useAppStore } from "@/lib/store";
 import { withReturnTo } from "@/lib/navigation";
+import { MAX_SCHEDULE_IMPORT_IMAGE_BYTES, type ScheduleAIImportRequest, type ScheduleAIImportResponse } from "@/lib/scheduleAiImport";
+import { useAppStore } from "@/lib/store";
+import { cn } from "@/lib/cn";
 import { shiftColor } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 const CLIENT_TIMEOUT_MS = 180_000;
+const SHOW_DEBUG_DETAIL = process.env.NODE_ENV === "development";
+const KNOWN_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
 
 const SEMANTIC_OPTIONS: Array<{ value: CoreShift; label: string }> = [
   { value: "D", label: "주간 (D)" },
@@ -56,8 +55,11 @@ function describeImportError(raw: string) {
   if (value.includes("consent_required")) return "서비스 동의 후 사용할 수 있습니다.";
   if (value.includes("image_too_large_max_6mb")) return "이미지는 6MB 이하만 업로드할 수 있습니다.";
   if (value.includes("invalid_image_data_url")) return "지원되지 않는 이미지 형식입니다.";
+  if (value.includes("selected_person_required")) return "이름을 먼저 선택해 주세요.";
   if (value.includes("person_not_found")) return "선택한 이름의 근무를 찾지 못했습니다.";
-  if (value.includes("schedule_ai_timeout")) return "AI 처리 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.";
+  if (value.includes("schedule_ai_timeout") || value.includes("client_timeout")) {
+    return "응답 대기 시간이 길어져 요청을 종료했습니다. 다시 시도해 주세요.";
+  }
   if (value.includes("openai_network")) return "네트워크 오류로 AI 요청에 실패했습니다.";
   if (value.includes("openai_responses_403")) return "AI Gateway 또는 모델 권한 설정을 확인해 주세요.";
   if (value.includes("openai_responses_400")) return "AI 요청 형식이 올바르지 않습니다. 서버 설정을 확인해 주세요.";
@@ -77,6 +79,13 @@ async function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error("invalid_image_data_url"));
     reader.readAsDataURL(file);
   });
+}
+
+function isAcceptedImageFile(file: File) {
+  const fileType = String(file.type ?? "").toLowerCase();
+  if (fileType.startsWith("image/")) return true;
+  const fileName = String(file.name ?? "").toLowerCase();
+  return KNOWN_IMAGE_EXTENSIONS.some((extension) => fileName.endsWith(extension));
 }
 
 async function fetchImportWithTimeout(body: ScheduleAIImportRequest, timeoutMs: number) {
@@ -112,6 +121,7 @@ async function fetchImportWithTimeout(body: ScheduleAIImportRequest, timeoutMs: 
 function buildUniqueCustomShiftTypes(existing: CustomShiftDef[], additions: Array<{ rawText: string; semanticType: CoreShift }>) {
   const seen = new Set(existing.map((item) => `${item.displayName.toLowerCase()}::${item.semanticType}`));
   const next = [...existing];
+
   for (const addition of additions) {
     const displayName = addition.rawText.trim().slice(0, 20);
     if (!displayName) continue;
@@ -125,35 +135,68 @@ function buildUniqueCustomShiftTypes(existing: CustomShiftDef[], additions: Arra
       aliases: [],
     });
   }
+
   return next;
 }
 
+function AccentPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "primary" }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[-0.01em]",
+        tone === "primary"
+          ? "border-[#DBEAFE] bg-[#EFF6FF] text-[#2563EB]"
+          : "border-black/5 bg-[#F7F7F8] text-[#4B5563]"
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Surface({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("rounded-[28px] border border-black/5 bg-white/90 p-5 shadow-[0_18px_40px_rgba(15,23,42,0.05)] backdrop-blur-xl", className)}>
+      {children}
+    </div>
+  );
+}
+
 function ProcessingView({ title, detail }: { title: string; detail: string }) {
-  const steps = [
-    { label: "이미지 준비", active: true },
-    { label: "표 읽는 중", active: true },
-    { label: "일정 정리 중", active: true },
-  ];
+  const phases = ["이미지 준비", "표 읽는 중", "일정 정리 중"];
 
   return (
-    <div className="space-y-4 py-2">
-      <div className="flex items-center gap-2">
-        <svg className="h-4 w-4 animate-spin text-violet-600" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        <span className="text-[13px] font-medium">{title}</span>
+    <div className="space-y-4 py-1">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F3F4F6]">
+          <svg className="h-4 w-4 animate-spin text-[#111827]" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </div>
+        <div>
+          <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#111827]">{title}</div>
+          <div className="mt-0.5 text-[12.5px] leading-6 text-[#6B7280]">{detail}</div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        {steps.map((step) => (
-          <div key={step.label} className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-center text-[11.5px] font-medium text-violet-700">
-            {step.label}
-          </div>
-        ))}
-      </div>
-
-      <p className="text-[12px] text-ios-muted">{detail}</p>
+      <Surface className="space-y-3 bg-[#FAFAFA]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {phases.map((phase, index) => (
+            <div key={phase} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-[11px] font-semibold text-[#111827] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+                  {index + 1}
+                </div>
+                <div className="text-[11.5px] font-medium text-[#4B5563]">{phase}</div>
+              </div>
+              <div className="h-1.5 rounded-full bg-white">
+                <div className="h-full rounded-full bg-[#111827]" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Surface>
     </div>
   );
 }
@@ -189,37 +232,46 @@ function DropZone({
 
   return (
     <div className="space-y-4">
-      <div
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragOver(false);
-          const file = event.dataTransfer.files[0];
-          if (file) onFile(file);
-        }}
-        onClick={() => inputRef.current?.click()}
+      <Surface
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-8 transition-colors",
-          dragOver ? "border-violet-400 bg-violet-50" : "border-ios-sep bg-ios-fill hover:bg-violet-50/40"
+          "cursor-pointer border border-dashed p-7 transition-colors",
+          dragOver ? "border-[#111827]/15 bg-[#F3F4F6]" : "border-black/10 bg-[#FAFAFA] hover:bg-[#F6F7F8]"
         )}
       >
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-violet-500">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <polyline points="21 15 16 10 5 21" />
-          </svg>
-        </div>
-
-        <div className="text-center">
-          <p className="text-[14px] font-semibold">근무표 이미지 선택</p>
-          <p className="mt-1 text-[12px] text-ios-muted">드래그, 탭, 또는 복사한 이미지를 붙여넣으세요</p>
-          <p className="mt-0.5 text-[11px] text-ios-muted">JPG · PNG · HEIC · WebP (최대 6MB)</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragOver(false);
+            const file = event.dataTransfer.files[0];
+            if (file) onFile(file);
+          }}
+          className="w-full"
+        >
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-[#111827]">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div>
+              <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">근무표 이미지 선택</div>
+              <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">드래그, 탭, 또는 복사한 이미지를 붙여넣으세요.</div>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <AccentPill>JPG · PNG · HEIC · WebP</AccentPill>
+              <AccentPill>최대 6MB</AccentPill>
+            </div>
+          </div>
+        </button>
 
         <input
           ref={inputRef}
@@ -232,43 +284,58 @@ function DropZone({
             event.currentTarget.value = "";
           }}
         />
-      </div>
+      </Surface>
 
-      <div className="rounded-xl border border-ios-sep bg-white p-3.5">
-        <label className="mb-1.5 block text-[12px] font-medium text-ios-muted">
-          근무표 연월 <span className="text-[11px] opacity-60">(없으면 이미지에서 자동 추론)</span>
-        </label>
+      <Surface className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[13px] font-semibold tracking-[-0.01em] text-[#111827]">근무표 연월</div>
+            <div className="mt-1 text-[12px] text-[#6B7280]">없으면 이미지에서 자동 추론합니다.</div>
+          </div>
+          <AccentPill>선택 사항</AccentPill>
+        </div>
         <input
           type="month"
           value={yearMonthHint}
           onChange={(event) => onYearMonthChange(event.target.value)}
-          className="w-full appearance-none bg-transparent text-[14px] font-semibold outline-none"
+          className="w-full rounded-2xl border border-black/6 bg-[#F7F7F8] px-4 py-3 text-[14px] font-semibold tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
         />
-      </div>
+      </Surface>
 
-      <div className="rounded-xl bg-violet-50 p-3">
-        <p className="text-[12px] font-medium text-violet-700">업로드 팁</p>
-        <ul className="mt-1 list-disc list-inside space-y-0.5 text-[11.5px] text-violet-600">
-          <li>표 전체가 잘 보이도록 정면에서 촬영해 주세요.</li>
-          <li>한 장짜리 월간 근무표가 가장 정확합니다.</li>
-          <li>여러 명 표는 내 이름 선택 단계가 한 번 더 나옵니다.</li>
-        </ul>
-      </div>
+      <Surface className="space-y-2 bg-[#FAFAFA]">
+        <div className="text-[13px] font-semibold tracking-[-0.01em] text-[#111827]">업로드 팁</div>
+        <div className="text-[12.5px] leading-6 text-[#6B7280]">
+          표 전체가 보이는 정면 이미지가 가장 정확합니다. 여러 명이 함께 있는 표는 다음 단계에서 이름을 고르면 됩니다.
+        </div>
+        <div className="text-[12px] leading-6 text-[#6B7280]">
+          업로드 이미지는 저장하지 않고 요청 처리 중에만 사용하며, AI 분석을 위해 외부 모델 API로 전송됩니다.
+        </div>
+      </Surface>
     </div>
   );
 }
 
-function LoginRequiredCard({ onLogin }: { onLogin: () => void }) {
+function AccessRequiredCard({
+  title,
+  detail,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  detail: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
   return (
-    <div className="space-y-3">
-      <div className="rounded-xl bg-ios-fill p-4">
-        <p className="text-[13px] font-semibold">로그인이 필요합니다</p>
-        <p className="mt-1 text-[12.5px] text-ios-muted">AI 이미지 스캔은 계정 단위 기능이라 로그인 후 사용할 수 있습니다.</p>
+    <Surface className="space-y-4">
+      <div>
+        <div className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">{title}</div>
+        <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">{detail}</div>
       </div>
-      <Button onClick={onLogin} className="w-full justify-center bg-black text-[13px] text-white">
-        로그인/계정 설정
+      <Button onClick={onAction} className="w-full justify-center rounded-2xl bg-black text-[13px] text-white">
+        {actionLabel}
       </Button>
-    </div>
+    </Surface>
   );
 }
 
@@ -285,31 +352,31 @@ function NameSelectStep({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl bg-amber-50 p-3.5">
-        <p className="text-[13px] font-semibold text-amber-800">여러 명의 근무표가 감지됐습니다</p>
-        <p className="mt-1 text-[12px] text-amber-700">내 이름을 선택하거나 직접 입력하면 해당 일정만 다시 정리합니다.</p>
-      </div>
+      <Surface className="space-y-2 bg-[#FAFAFA]">
+        <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#111827]">여러 명의 근무표가 감지됐습니다</div>
+        <div className="text-[12.5px] leading-6 text-[#6B7280]">내 이름을 선택하거나 직접 입력하면 그 일정만 다시 정리합니다.</div>
+      </Surface>
 
       {data.people.length > 0 && (
-        <div>
-          <p className="mb-2 text-[12px] font-medium text-ios-muted">근무표에서 발견된 이름</p>
+        <Surface className="space-y-3">
+          <div className="text-[12.5px] font-medium text-[#6B7280]">근무표에서 발견된 이름</div>
           <div className="flex flex-wrap gap-2">
             {data.people.map((name) => (
               <button
                 key={name}
                 type="button"
                 onClick={() => onSelect(name)}
-                className="rounded-full border border-ios-sep bg-white px-3.5 py-1.5 text-[13px] font-medium transition-colors hover:border-violet-300 hover:bg-violet-50 active:opacity-70"
+                className="rounded-full border border-black/8 bg-[#FAFAFA] px-3.5 py-1.5 text-[13px] font-medium tracking-[-0.01em] text-[#111827] transition-colors hover:border-black/15 hover:bg-[#F3F4F6]"
               >
                 {name}
               </button>
             ))}
           </div>
-        </div>
+        </Surface>
       )}
 
-      <div>
-        <p className="mb-1.5 text-[12px] font-medium text-ios-muted">이름이 없으면 직접 입력</p>
+      <Surface className="space-y-3">
+        <div className="text-[12.5px] font-medium text-[#6B7280]">직접 입력</div>
         <div className="flex gap-2">
           <input
             value={input}
@@ -320,15 +387,15 @@ function NameSelectStep({
               onSelect(input.trim());
             }}
             placeholder="이름 입력 (예: 김OO)"
-            className="flex-1 rounded-xl border border-ios-sep bg-white px-3 py-2 text-[14px] outline-none focus:ring-2 focus:ring-violet-300"
+            className="flex-1 rounded-2xl border border-black/6 bg-[#F7F7F8] px-4 py-3 text-[14px] font-medium tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
           />
           <Button onClick={() => input.trim() && onSelect(input.trim())} disabled={!input.trim()} className="bg-black px-4 text-white disabled:opacity-40">
             확인
           </Button>
         </div>
-      </div>
+      </Surface>
 
-      <Button variant="secondary" onClick={onBack} className="w-full justify-center text-[13px]">
+      <Button variant="secondary" onClick={onBack} className="w-full justify-center rounded-2xl bg-[#F3F4F6] text-[13px] text-[#111827]">
         다시 선택
       </Button>
     </div>
@@ -350,9 +417,7 @@ function ReviewStep({
   onSaveAsCustomChange: (next: boolean) => void;
   onApplyModeChange: (next: ReviewStepState["applyMode"]) => void;
 }) {
-  const entries = useMemo(() => {
-    return Object.values(step.data.schedule).sort((a, b) => (a.isoDate < b.isoDate ? -1 : 1));
-  }, [step.data.schedule]);
+  const entries = useMemo(() => Object.values(step.data.schedule).sort((a, b) => (a.isoDate < b.isoDate ? -1 : 1)), [step.data.schedule]);
 
   const groupedUnknowns = useMemo(() => {
     const map = new Map<string, { rawText: string; dates: ISODate[] }>();
@@ -360,9 +425,9 @@ function ReviewStep({
       const existing = map.get(item.rawText);
       if (existing) {
         existing.dates.push(item.isoDate);
-        continue;
+      } else {
+        map.set(item.rawText, { rawText: item.rawText, dates: [item.isoDate] });
       }
-      map.set(item.rawText, { rawText: item.rawText, dates: [item.isoDate] });
     }
     return Array.from(map.values()).sort((a, b) => a.rawText.localeCompare(b.rawText, "ko"));
   }, [step.data.unresolved]);
@@ -370,107 +435,112 @@ function ReviewStep({
   const unresolvedRemaining = groupedUnknowns.filter((item) => !step.resolvedMappings[item.rawText]).length;
   const stats = useMemo(() => {
     const out: Record<string, number> = {};
-    for (const entry of entries) {
-      out[entry.displayName] = (out[entry.displayName] ?? 0) + 1;
-    }
+    for (const entry of entries) out[entry.displayName] = (out[entry.displayName] ?? 0) + 1;
     return out;
   }, [entries]);
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl bg-emerald-50 p-3.5">
-        <p className="text-[13px] font-semibold text-emerald-800">
-          {step.data.yearMonth ? `${step.data.yearMonth} 근무 인식 완료` : "근무 인식 완료"}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+      <Surface className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">
+              {step.data.yearMonth ? `${step.data.yearMonth} 근무 검토` : "근무 검토"}
+            </div>
+            <div className="mt-1.5 text-[12.5px] leading-6 text-[#6B7280]">
+              적용 전에 결과를 확인하고 필요한 근무 이름만 지정하면 됩니다.
+            </div>
+          </div>
+          <AccentPill tone="primary">{entries.length}일 인식</AccentPill>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
           {Object.entries(stats).map(([name, count]) => (
-            <span key={name} className="rounded-full border border-emerald-200 bg-white px-2.5 py-0.5 text-[12px] font-medium">
+            <span key={name} className="rounded-full border border-black/6 bg-[#FAFAFA] px-2.5 py-1 text-[12px] font-medium text-[#374151]">
               {name} {count}일
             </span>
           ))}
         </div>
-        {step.data.selectedPerson && (
-          <div className="mt-2 text-[11.5px] text-emerald-700">선택된 이름: {step.data.selectedPerson}</div>
-        )}
-      </div>
+
+        {step.data.selectedPerson && <div className="text-[12px] text-[#6B7280]">선택된 이름: {step.data.selectedPerson}</div>}
+      </Surface>
 
       {step.data.warnings.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="text-[12px] font-semibold text-amber-800">확인 필요</p>
-          <div className="mt-1 space-y-1 text-[11.5px] text-amber-700">
+        <Surface className="space-y-2 bg-[#FFF7ED]">
+          <div className="text-[12.5px] font-semibold text-[#9A3412]">확인 필요</div>
+          <div className="space-y-1 text-[12px] text-[#B45309]">
             {step.data.warnings.map((warning) => (
               <div key={warning}>• {warning}</div>
             ))}
           </div>
-        </div>
+        </Surface>
       )}
 
-      <div className="rounded-xl border border-ios-sep bg-white p-3.5">
-        <p className="mb-2 text-[12px] font-medium text-ios-muted">적용 방식</p>
+      <Surface className="space-y-3">
+        <div className="text-[12.5px] font-medium text-[#6B7280]">적용 방식</div>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => onApplyModeChange("overwrite")}
             className={cn(
-              "rounded-xl border px-3 py-2 text-left text-[12px] transition-colors",
-              step.applyMode === "overwrite" ? "border-black/20 bg-black text-white" : "border-ios-sep bg-white text-ios-label"
+              "rounded-2xl border px-4 py-3 text-left transition-colors",
+              step.applyMode === "overwrite" ? "border-black bg-black text-white" : "border-black/6 bg-[#F7F7F8] text-[#111827]"
             )}
           >
-            <div className="font-semibold">덮어쓰기</div>
-            <div className="mt-0.5 text-[11px] opacity-70">해당 날짜 기존 근무를 새 결과로 바꿉니다.</div>
+            <div className="text-[12.5px] font-semibold">덮어쓰기</div>
+            <div className="mt-1 text-[11px] opacity-75">해당 날짜 기존 근무를 새 결과로 바꿉니다.</div>
           </button>
           <button
             type="button"
             onClick={() => onApplyModeChange("fill_empty")}
             className={cn(
-              "rounded-xl border px-3 py-2 text-left text-[12px] transition-colors",
-              step.applyMode === "fill_empty" ? "border-black/20 bg-black text-white" : "border-ios-sep bg-white text-ios-label"
+              "rounded-2xl border px-4 py-3 text-left transition-colors",
+              step.applyMode === "fill_empty" ? "border-black bg-black text-white" : "border-black/6 bg-[#F7F7F8] text-[#111827]"
             )}
           >
-            <div className="font-semibold">빈칸만 적용</div>
-            <div className="mt-0.5 text-[11px] opacity-70">이미 입력된 날짜는 건너뜁니다.</div>
+            <div className="text-[12.5px] font-semibold">빈칸만 적용</div>
+            <div className="mt-1 text-[11px] opacity-75">이미 입력된 날짜는 건너뜁니다.</div>
           </button>
         </div>
-      </div>
+      </Surface>
 
-      <div>
-        <p className="mb-2 text-[12px] font-medium text-ios-muted">인식된 근무 ({entries.length}일)</p>
-        <div className="grid max-h-56 grid-cols-2 gap-1 overflow-y-auto rounded-xl border border-ios-sep bg-white p-3">
+      <Surface className="space-y-3">
+        <div className="text-[12.5px] font-medium text-[#6B7280]">인식된 근무</div>
+        <div className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto rounded-2xl bg-[#FAFAFA] p-3">
           {entries.map((entry) => {
             const [, , day] = entry.isoDate.split("-");
             return (
-              <div key={entry.isoDate} className="flex items-center gap-1.5 text-[12px]">
-                <span className="w-8 shrink-0 text-ios-muted">{parseInt(day, 10)}일</span>
-                <span className={cn("rounded border px-1.5 py-0.5 text-[11px] font-semibold", shiftColor(entry.semanticType))}>
-                  {entry.displayName}
-                </span>
+              <div key={entry.isoDate} className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-[12px] text-[#111827]">
+                <span className="w-8 shrink-0 text-[#6B7280]">{parseInt(day, 10)}일</span>
+                <span className={cn("rounded-xl border px-2 py-0.5 text-[11px] font-semibold", shiftColor(entry.semanticType))}>{entry.displayName}</span>
               </div>
             );
           })}
         </div>
-      </div>
+      </Surface>
 
       {groupedUnknowns.length > 0 && (
-        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5">
-          <p className="text-[13px] font-semibold text-amber-800">
-            미확인 근무 표기 {unresolvedRemaining > 0 ? `${unresolvedRemaining}개 남음` : "매핑 완료"}
-          </p>
+        <Surface className="space-y-3 bg-[#FFF7ED]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[13px] font-semibold text-[#9A3412]">미확인 근무 표기</div>
+            <AccentPill>{unresolvedRemaining > 0 ? `${unresolvedRemaining}개 남음` : "매핑 완료"}</AccentPill>
+          </div>
 
           {groupedUnknowns.map((group) => (
-            <div key={group.rawText} className="flex items-center gap-2">
-              <span className="min-w-[64px] rounded bg-white px-2 py-0.5 text-[12px] font-semibold border">
-                {group.rawText}
-              </span>
-              <span className="text-[11px] text-ios-muted">{group.dates.map((iso) => Number(iso.slice(-2))).join(", ")}일</span>
+            <div key={group.rawText} className="flex flex-col gap-2 rounded-2xl bg-white/70 p-3 md:flex-row md:items-center">
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-black/6 bg-white px-2.5 py-1 text-[12px] font-semibold text-[#111827]">{group.rawText}</span>
+                <span className="text-[11.5px] text-[#6B7280]">{group.dates.map((iso) => Number(iso.slice(-2))).join(", ")}일</span>
+              </div>
               <select
                 value={step.resolvedMappings[group.rawText] ?? ""}
                 onChange={(event) => onMappingChange(group.rawText, event.target.value as CoreShift)}
                 className={cn(
-                  "ml-auto min-w-[130px] rounded-lg border px-2 py-1 text-[12px] outline-none",
-                  step.resolvedMappings[group.rawText] ? "border-emerald-300 bg-emerald-50" : "border-ios-sep bg-white"
+                  "md:ml-auto rounded-2xl border px-3 py-2 text-[12px] font-medium outline-none",
+                  step.resolvedMappings[group.rawText] ? "border-emerald-200 bg-emerald-50 text-[#065F46]" : "border-black/6 bg-white text-[#111827]"
                 )}
               >
-                <option value="">선택...</option>
+                <option value="">근무 선택</option>
                 {SEMANTIC_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -481,24 +551,24 @@ function ReviewStep({
           ))}
 
           {groupedUnknowns.some((group) => step.resolvedMappings[group.rawText]) && (
-            <label className="flex cursor-pointer items-center gap-2 pt-1">
+            <label className="flex cursor-pointer items-center gap-2 rounded-2xl bg-white/70 px-3 py-3">
               <input
                 type="checkbox"
                 checked={step.saveAsCustom}
                 onChange={(event) => onSaveAsCustomChange(event.target.checked)}
-                className="h-4 w-4 rounded border-ios-sep"
+                className="h-4 w-4 rounded border-black/10"
               />
-              <span className="text-[12px] text-ios-muted">이 매핑을 커스텀 근무 이름으로 저장</span>
+              <span className="text-[12.5px] text-[#6B7280]">이 매핑을 커스텀 근무 이름으로 저장</span>
             </label>
           )}
-        </div>
+        </Surface>
       )}
 
       <div className="flex gap-2 pt-1">
-        <Button variant="secondary" onClick={onBack} className="flex-1 justify-center text-[13px]">
+        <Button variant="secondary" onClick={onBack} className="flex-1 justify-center rounded-2xl bg-[#F3F4F6] text-[13px] text-[#111827]">
           다시 선택
         </Button>
-        <Button onClick={onConfirm} disabled={unresolvedRemaining > 0} className="flex-1 justify-center bg-black text-[13px] text-white disabled:opacity-40">
+        <Button onClick={onConfirm} disabled={unresolvedRemaining > 0} className="flex-1 justify-center rounded-2xl bg-black text-[13px] text-white disabled:opacity-40">
           {unresolvedRemaining > 0 ? `${unresolvedRemaining}개 지정 필요` : "일정에 적용하기"}
         </Button>
       </div>
@@ -508,21 +578,21 @@ function ReviewStep({
 
 function DoneStep({ count, skipped, yearMonth, onReset }: { count: number; skipped: number; yearMonth: string | null; onReset: () => void }) {
   return (
-    <div className="space-y-4 py-2 text-center">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600">
+    <Surface className="space-y-4 py-2 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#F3F4F6]">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-[#111827]">
           <polyline points="20 6 9 17 4 12" />
         </svg>
       </div>
       <div>
-        <p className="text-[15px] font-semibold">{yearMonth ? `${yearMonth} 일정 적용 완료` : "일정 적용 완료"}</p>
-        <p className="mt-1 text-[13px] text-ios-muted">{count}개 날짜에 근무가 등록됐습니다.</p>
-        {skipped > 0 && <p className="mt-1 text-[12px] text-ios-muted">기존 값이 있어 {skipped}개 날짜는 건너뛰었습니다.</p>}
+        <div className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">{yearMonth ? `${yearMonth} 일정 적용 완료` : "일정 적용 완료"}</div>
+        <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">{count}개 날짜에 근무가 등록됐습니다.</div>
+        {skipped > 0 && <div className="mt-1 text-[12px] text-[#6B7280]">기존 값이 있어 {skipped}개 날짜는 건너뛰었습니다.</div>}
       </div>
-      <Button variant="secondary" onClick={onReset} className="mx-auto justify-center text-[13px]">
+      <Button variant="secondary" onClick={onReset} className="mx-auto justify-center rounded-2xl bg-[#F3F4F6] text-[13px] text-[#111827]">
         다른 근무표 등록
       </Button>
-    </div>
+    </Surface>
   );
 }
 
@@ -530,7 +600,11 @@ export function ShiftOCRUpload() {
   const router = useRouter();
   const store = useAppStore();
   const { status: authStatus } = useAuthState();
+  const { bootstrap } = useCurrentAccountResources();
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
   const customShiftTypes = useMemo(() => store.settings.customShiftTypes ?? [], [store.settings.customShiftTypes]);
+  const consentCompleted = bootstrap?.consentCompleted ?? null;
 
   const today = new Date();
   const defaultYearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
@@ -538,23 +612,37 @@ export function ShiftOCRUpload() {
   const [sourceImageDataUrl, setSourceImageDataUrl] = useState("");
   const [step, setStep] = useState<Step>({ id: "idle" });
 
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
+
+  const beginRequest = useCallback(() => {
+    requestIdRef.current += 1;
+    return requestIdRef.current;
+  }, []);
+
+  const isStaleRequest = useCallback((requestId: number) => {
+    return !mountedRef.current || requestId !== requestIdRef.current;
+  }, []);
+
   const resetToIdle = useCallback(() => {
+    requestIdRef.current += 1;
     setSourceImageDataUrl("");
     setStep({ id: "idle" });
   }, []);
 
-  const runImport = useCallback(
-    async (request: ScheduleAIImportRequest) => {
-      const response = await fetchImportWithTimeout(request, CLIENT_TIMEOUT_MS);
-      const payload = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok || !isRecord(payload) || payload.ok !== true || !isRecord(payload.data)) {
-        const error = isRecord(payload) && typeof payload.error === "string" ? payload.error : "schedule_ai_import_failed";
-        throw new Error(error);
-      }
-      return payload.data as ScheduleAIImportResponse;
-    },
-    []
-  );
+  const runImport = useCallback(async (request: ScheduleAIImportRequest) => {
+    const response = await fetchImportWithTimeout(request, CLIENT_TIMEOUT_MS);
+    const payload = (await response.json().catch(() => null)) as unknown;
+    if (!response.ok || !isRecord(payload) || payload.ok !== true || !isRecord(payload.data)) {
+      const error = isRecord(payload) && typeof payload.error === "string" ? payload.error : "schedule_ai_import_failed";
+      throw new Error(error);
+    }
+    return payload.data as ScheduleAIImportResponse;
+  }, []);
 
   const handleResponse = useCallback((data: ScheduleAIImportResponse) => {
     if (data.status === "person_required") {
@@ -571,28 +659,31 @@ export function ShiftOCRUpload() {
     });
   }, []);
 
-  const handleApiError = useCallback(
-    (error: unknown) => {
-      const raw = String((error as Error)?.message ?? error ?? "");
-      const message = describeImportError(raw);
-      const actionHref =
-        raw.includes("login_required") || raw.includes("consent_required")
-          ? withReturnTo("/settings/account", "/schedule/pattern-settings")
-          : undefined;
-      setStep({
-        id: "error",
-        message,
-        detail: raw && !raw.includes("schedule_ai_import_failed") ? raw : undefined,
-        actionHref,
-        actionLabel: actionHref ? "계정 설정으로 이동" : undefined,
-      });
-    },
-    []
-  );
+  const handleApiError = useCallback((error: unknown) => {
+    const raw = String((error as Error)?.message ?? error ?? "");
+    const message = describeImportError(raw);
+    const actionHref =
+      raw.includes("login_required") || raw.includes("consent_required")
+        ? withReturnTo("/settings/account", "/schedule/pattern-settings")
+        : undefined;
+    setStep({
+      id: "error",
+      message,
+      detail: SHOW_DEBUG_DETAIL && raw && !raw.includes("schedule_ai_import_failed") ? raw : undefined,
+      actionHref,
+      actionLabel: actionHref ? "계정 설정으로 이동" : undefined,
+    });
+  }, []);
 
   const handleFile = useCallback(
     async (file: File) => {
+      const requestId = beginRequest();
+
       try {
+        if (!isAcceptedImageFile(file)) {
+          throw new Error("invalid_image_data_url");
+        }
+
         if (file.size > MAX_SCHEDULE_IMPORT_IMAGE_BYTES) {
           throw new Error("image_too_large_max_6mb");
         }
@@ -604,6 +695,8 @@ export function ShiftOCRUpload() {
         });
 
         const imageDataUrl = await readFileAsDataUrl(file);
+        if (isStaleRequest(requestId)) return;
+
         setSourceImageDataUrl(imageDataUrl);
         const data = await runImport({
           mode: "detect",
@@ -612,24 +705,31 @@ export function ShiftOCRUpload() {
           locale: "ko",
           customShiftTypes,
         });
+
+        if (isStaleRequest(requestId)) return;
         handleResponse(data);
       } catch (error) {
+        if (isStaleRequest(requestId)) return;
         handleApiError(error);
       }
     },
-    [customShiftTypes, handleApiError, handleResponse, runImport, yearMonthHint]
+    [beginRequest, customShiftTypes, handleApiError, handleResponse, isStaleRequest, runImport, yearMonthHint]
   );
 
   const handleNameSelect = useCallback(
     async (name: string) => {
+      const requestId = beginRequest();
+
       try {
         if (!sourceImageDataUrl) throw new Error("invalid_image_data_url");
+
         store.setSettings({ ocrLastUserName: name });
         setStep({
           id: "processing",
           title: `${name} 일정만 다시 정리하고 있습니다`,
           detail: "같은 이미지에서 선택한 이름의 행과 날짜 칸만 다시 확인하는 중입니다.",
         });
+
         const data = await runImport({
           mode: "resolve_person",
           imageDataUrl: sourceImageDataUrl,
@@ -638,12 +738,15 @@ export function ShiftOCRUpload() {
           locale: "ko",
           customShiftTypes,
         });
+
+        if (isStaleRequest(requestId)) return;
         handleResponse(data);
       } catch (error) {
+        if (isStaleRequest(requestId)) return;
         handleApiError(error);
       }
     },
-    [customShiftTypes, handleApiError, handleResponse, runImport, sourceImageDataUrl, store, yearMonthHint]
+    [beginRequest, customShiftTypes, handleApiError, handleResponse, isStaleRequest, runImport, sourceImageDataUrl, store, yearMonthHint]
   );
 
   const handleConfirm = useCallback(() => {
@@ -692,32 +795,46 @@ export function ShiftOCRUpload() {
   }, [customShiftTypes, step, store]);
 
   return (
-    <Card className="p-5">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <Card className="overflow-hidden border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(250,250,251,0.98)_100%)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.06)]">
+      <div className="mb-5 flex items-start justify-between gap-3">
         <div>
-          <div className="text-[14px] font-semibold">근무표 이미지 스캔</div>
-          <div className="mt-1 text-[12.5px] text-ios-muted">한 장의 이미지에서 월간 근무표를 읽고 적용 전 검토 화면까지 정리합니다.</div>
+          <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">근무표 이미지 등록</div>
+          <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">업로드, 이름 선택, 검토, 적용까지 한 화면에서 끝냅니다.</div>
         </div>
-        <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700">AI 처리</span>
+        <AccentPill tone="primary">AI Import</AccentPill>
       </div>
 
       {authStatus === "loading" && <ProcessingView title="계정 상태를 확인하고 있습니다" detail="AI 스캔 사용 가능 여부를 불러오는 중입니다." />}
 
       {authStatus !== "loading" && authStatus !== "authenticated" && (
-        <LoginRequiredCard onLogin={() => router.push(withReturnTo("/settings/account", "/schedule/pattern-settings"))} />
+        <AccessRequiredCard
+          title="로그인이 필요합니다"
+          detail="AI 이미지 등록은 계정 단위 기능입니다. 로그인 후 일정에 바로 반영할 수 있습니다."
+          actionLabel="로그인/계정 설정"
+          onAction={() => router.push(withReturnTo("/settings/account", "/schedule/pattern-settings"))}
+        />
       )}
 
-      {authStatus === "authenticated" && step.id === "idle" && (
+      {authStatus === "authenticated" && consentCompleted === false && (
+        <AccessRequiredCard
+          title="서비스 동의가 필요합니다"
+          detail="AI 이미지 등록을 사용하려면 계정 설정에서 서비스 동의를 먼저 완료해야 합니다."
+          actionLabel="계정 설정으로 이동"
+          onAction={() => router.push(withReturnTo("/settings/account", "/schedule/pattern-settings"))}
+        />
+      )}
+
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "idle" && (
         <DropZone onFile={handleFile} yearMonthHint={yearMonthHint} onYearMonthChange={setYearMonthHint} />
       )}
 
-      {authStatus === "authenticated" && step.id === "processing" && <ProcessingView title={step.title} detail={step.detail} />}
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "processing" && <ProcessingView title={step.title} detail={step.detail} />}
 
-      {authStatus === "authenticated" && step.id === "name_input" && (
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "name_input" && (
         <NameSelectStep data={step.data} onSelect={handleNameSelect} onBack={resetToIdle} />
       )}
 
-      {authStatus === "authenticated" && step.id === "review" && (
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "review" && (
         <ReviewStep
           step={step}
           onBack={resetToIdle}
@@ -740,27 +857,27 @@ export function ShiftOCRUpload() {
         />
       )}
 
-      {authStatus === "authenticated" && step.id === "done" && (
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "done" && (
         <DoneStep count={step.count} skipped={step.skipped} yearMonth={step.yearMonth} onReset={resetToIdle} />
       )}
 
-      {authStatus === "authenticated" && step.id === "error" && (
-        <div className="space-y-3">
-          <div className="rounded-xl bg-red-50 p-4">
-            <p className="text-[13px] font-semibold text-red-700">인식 실패</p>
-            <p className="mt-1 text-[12.5px] text-red-600">{step.message}</p>
-            {step.detail && <p className="mt-2 break-all text-[11px] text-red-500/80">{step.detail}</p>}
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "error" && (
+        <Surface className="space-y-4 bg-[#FFF5F5]">
+          <div>
+            <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#B91C1C]">인식 실패</div>
+            <div className="mt-1.5 text-[12.5px] leading-6 text-[#DC2626]">{step.message}</div>
+            {step.detail && <div className="mt-2 break-all text-[11px] text-[#DC2626]/80">{step.detail}</div>}
           </div>
           {step.actionHref ? (
-            <Button onClick={() => router.push(step.actionHref!)} className="w-full justify-center bg-black text-[13px] text-white">
+            <Button onClick={() => router.push(step.actionHref!)} className="w-full justify-center rounded-2xl bg-black text-[13px] text-white">
               {step.actionLabel ?? "이동"}
             </Button>
           ) : (
-            <Button variant="secondary" onClick={resetToIdle} className="w-full justify-center text-[13px]">
+            <Button variant="secondary" onClick={resetToIdle} className="w-full justify-center rounded-2xl bg-white text-[13px] text-[#111827]">
               다시 시도
             </Button>
           )}
-        </div>
+        </Surface>
       )}
     </Card>
   );

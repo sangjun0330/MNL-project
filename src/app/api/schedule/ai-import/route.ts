@@ -1,8 +1,11 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
+import { MAX_SCHEDULE_IMPORT_IMAGE_BYTES } from "@/lib/scheduleAiImport";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["iad1", "sfo1", "fra1"];
+
+const MAX_REQUEST_BODY_BYTES = Math.ceil(MAX_SCHEDULE_IMPORT_IMAGE_BYTES * 1.55);
 
 const EXACT_PUBLIC_ERRORS = new Set([
   "invalid_origin",
@@ -17,6 +20,7 @@ const EXACT_PUBLIC_ERRORS = new Set([
   "schedule_ai_timeout",
   "schedule_ai_parse_failed",
   "invalid_schedule_ai_response",
+  "selected_person_required",
   "missing_openai_api_key",
   "missing_cf_aig_token_and_openai_api_key",
 ]);
@@ -58,6 +62,16 @@ export async function POST(req: Request) {
     const originError = sameOriginRequestError(req);
     if (originError) return bad(403, originError);
 
+    const contentType = String(req.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.includes("application/json")) {
+      return bad(415, "invalid_image_data_url");
+    }
+
+    const contentLength = Number(req.headers.get("content-length") ?? "");
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
+      return bad(413, "image_too_large_max_6mb");
+    }
+
     const [{ readUserIdFromRequest }, { userHasCompletedServiceConsent }, { importScheduleFromImageWithAI }] =
       await Promise.all([
         import("@/lib/server/readUserId"),
@@ -94,12 +108,13 @@ export async function POST(req: Request) {
         ? 401
         : publicError === "consent_required"
           ? 403
-          : publicError === "invalid_image_data_url" ||
-              publicError === "image_too_large_max_6mb" ||
-              publicError === "person_not_found"
-            ? 400
-            : publicError === "schedule_ai_timeout"
-              ? 504
+        : publicError === "invalid_image_data_url" ||
+            publicError === "image_too_large_max_6mb" ||
+            publicError === "person_not_found" ||
+            publicError === "selected_person_required"
+          ? 400
+          : publicError === "schedule_ai_timeout"
+            ? 504
               : 500;
     return bad(status, publicError);
   }

@@ -520,8 +520,8 @@ export function SchedulePage() {
                 <circle cx="12" cy="13" r="4" />
               </svg>
               <div>
-                <div className="text-[14px] font-semibold text-ios-label">{t("근무표 이미지 스캔 · 근무 이름 설정")}</div>
-                <div className="mt-0.5 text-[12px] text-ios-muted">{t("AI 이미지 등록과 병원별 근무 이름 설정")}</div>
+                <div className="text-[14px] font-semibold text-ios-label">{t("이미지 등록 · 근무 이름 설정")}</div>
+                <div className="mt-0.5 text-[12px] text-ios-muted">{t("AI 일정 등록과 병원별 근무 이름 설정")}</div>
               </div>
             </div>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ios-muted">
