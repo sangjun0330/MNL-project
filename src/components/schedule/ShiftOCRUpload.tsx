@@ -245,10 +245,6 @@ function DropZone({
               <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">근무표 이미지 선택</div>
               <div className="mt-1.5 text-[13px] text-[#6B7280]">드래그, 탭, 또는 복사한 이미지를 붙여넣으세요.</div>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <AccentPill>JPG · PNG · HEIC · WebP</AccentPill>
-              <AccentPill>최대 6MB</AccentPill>
-            </div>
           </div>
         </button>
 
@@ -265,15 +261,11 @@ function DropZone({
         />
 
         <div className="border-t border-black/5 px-5 pb-4 pt-3">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="text-[12px] text-[#6B7280]">근무표 연월</span>
-            <span className="text-[11px] text-[#9CA3AF]">선택 사항</span>
-          </div>
           <input
             type="month"
             value={yearMonthHint}
             onChange={(event) => onYearMonthChange(event.target.value)}
-            className="w-full rounded-2xl border border-black/6 bg-white px-4 py-2.5 text-[14px] font-semibold tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
+            className="w-full rounded-2xl border border-black/6 bg-white px-4 py-2.5 text-center text-[14px] font-semibold tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
           />
         </div>
       </Surface>
