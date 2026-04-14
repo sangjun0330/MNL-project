@@ -120,7 +120,7 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
 
       <div>
         <label className="mb-1.5 block text-[11.5px] font-medium text-[#6B7280]">
-          어떤 종류 근무인가요? <span className="text-red-500">*</span>
+          근무 종류 <span className="text-red-500">*</span>
         </label>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
           {SEMANTIC_OPTIONS.map((option) => (
@@ -129,12 +129,11 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
               type="button"
               onClick={() => setSemanticType(option.value)}
               className={cn(
-                "rounded-2xl border px-3 py-3 text-left transition-colors",
+                "rounded-2xl border px-3 py-2 text-left transition-colors",
                 semanticType === option.value ? "border-black bg-black text-white" : "border-black/6 bg-white text-[#111827]"
               )}
             >
               <div className="text-[12.5px] font-semibold">{option.label}</div>
-              <div className="mt-1 text-[11px] opacity-70">{option.hint}</div>
             </button>
           ))}
         </div>
@@ -142,7 +141,7 @@ function AddShiftForm({ onAdd }: { onAdd: (def: Omit<CustomShiftDef, "id">) => v
 
       <div>
         <label className="mb-1.5 block text-[11.5px] font-medium text-[#6B7280]">
-          AI 인식 별칭 <span className="text-[10px] opacity-60">(근무표에 적힌 다른 표현)</span>
+          별칭
         </label>
         <div className="flex gap-2">
           <input
@@ -217,7 +216,6 @@ export function CustomShiftManager() {
     <Card className="overflow-hidden border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(250,250,251,0.98)_100%)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.06)]">
       <div className="mb-5">
         <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">병원별 근무 이름</div>
-        <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">병원에서 쓰는 이름을 등록하면 AI 스캔 결과와 달력 표시가 더 자연스럽게 맞춰집니다.</div>
       </div>
 
       <Surface className="mb-4 space-y-3 bg-[#FAFAFA]">
@@ -240,8 +238,7 @@ export function CustomShiftManager() {
           </Surface>
         ) : (
           <Surface className="bg-[#FAFAFA] text-center">
-            <div className="text-[13px] font-medium text-[#111827]">아직 등록된 커스텀 근무 이름이 없습니다.</div>
-            <div className="mt-1.5 text-[12px] leading-6 text-[#6B7280]">필요한 이름만 추가하면 다음 스캔부터 자동으로 재사용됩니다.</div>
+            <div className="text-[13px] text-[#6B7280]">커스텀 근무 없음</div>
           </Surface>
         )}
 

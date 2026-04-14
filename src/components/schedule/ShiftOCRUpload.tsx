@@ -28,20 +28,6 @@ const SEMANTIC_OPTIONS: Array<{ value: CoreShift; label: string }> = [
   { value: "VAC", label: "휴가 (VAC)" },
 ];
 
-const SUPPORTED_CODE_GROUPS = [
-  {
-    title: "기본 표기",
-    values: ["D", "E", "N", "O", "OF", "OFF", "/", "NO"],
-  },
-  {
-    title: "확장 표기",
-    values: ["M", "MD", "Mid", "10D", "11D", "DE", "EN", "ND", "EC", "NOD"],
-  },
-  {
-    title: "한글 표기",
-    values: ["데이", "낮번", "주간", "이브닝", "초번", "나이트", "야간", "오프", "휴무", "연차"],
-  },
-];
 
 type ReviewStepState = {
   id: "review";
@@ -53,7 +39,7 @@ type ReviewStepState = {
 
 type Step =
   | { id: "idle" }
-  | { id: "processing"; title: string; detail: string }
+  | { id: "processing"; title: string }
   | { id: "name_input"; data: ScheduleAIImportResponse }
   | ReviewStepState
   | { id: "done"; count: number; skipped: number; yearMonth: string | null }
@@ -177,41 +163,19 @@ function Surface({ children, className }: { children: ReactNode; className?: str
   );
 }
 
-function ProcessingView({ title, detail }: { title: string; detail: string }) {
-  const phases = ["이미지 준비", "표 읽는 중", "일정 정리 중"];
-
+function ProcessingView({ title }: { title: string }) {
   return (
-    <div className="space-y-4 py-1">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F3F4F6]">
-          <svg className="h-4 w-4 animate-spin text-[#111827]" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-            <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-        </div>
-        <div>
-          <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#111827]">{title}</div>
-          <div className="mt-0.5 text-[12.5px] leading-6 text-[#6B7280]">{detail}</div>
-        </div>
+    <div className="flex items-center justify-center gap-3 py-8">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F3F4F6]">
+        <svg className="h-4 w-4 animate-spin text-[#111827]" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
       </div>
-
-      <Surface className="space-y-3 bg-[#FAFAFA]">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {phases.map((phase, index) => (
-            <div key={phase} className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-[11px] font-semibold text-[#111827] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-                  {index + 1}
-                </div>
-                <div className="text-[11.5px] font-medium text-[#4B5563]">{phase}</div>
-              </div>
-              <div className="h-1.5 rounded-full bg-white">
-                <div className="h-full rounded-full bg-[#111827]" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Surface>
+      <div>
+        <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#111827]">{title}</div>
+        <div className="mt-0.5 text-[12.5px] text-[#6B7280]">잠시만 기다려 주세요</div>
+      </div>
     </div>
   );
 }
@@ -249,7 +213,7 @@ function DropZone({
     <div className="space-y-4">
       <Surface
         className={cn(
-          "cursor-pointer border border-dashed p-7 transition-colors",
+          "cursor-pointer border border-dashed transition-colors",
           dragOver ? "border-[#111827]/15 bg-[#F3F4F6]" : "border-black/10 bg-[#FAFAFA] hover:bg-[#F6F7F8]"
         )}
       >
@@ -267,7 +231,7 @@ function DropZone({
             const file = event.dataTransfer.files[0];
             if (file) onFile(file);
           }}
-          className="w-full"
+          className="w-full py-7"
         >
           <div className="flex flex-col items-center gap-4 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
@@ -279,7 +243,7 @@ function DropZone({
             </div>
             <div>
               <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">근무표 이미지 선택</div>
-              <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">드래그, 탭, 또는 복사한 이미지를 붙여넣으세요.</div>
+              <div className="mt-1.5 text-[13px] text-[#6B7280]">드래그, 탭, 또는 복사한 이미지를 붙여넣으세요.</div>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <AccentPill>JPG · PNG · HEIC · WebP</AccentPill>
@@ -299,45 +263,18 @@ function DropZone({
             event.currentTarget.value = "";
           }}
         />
-      </Surface>
 
-      <Surface className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[13px] font-semibold tracking-[-0.01em] text-[#111827]">근무표 연월</div>
-            <div className="mt-1 text-[12px] text-[#6B7280]">없으면 이미지에서 자동 추론합니다.</div>
+        <div className="border-t border-black/5 px-5 pb-4 pt-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-[12px] text-[#6B7280]">근무표 연월</span>
+            <span className="text-[11px] text-[#9CA3AF]">선택 사항</span>
           </div>
-          <AccentPill>선택 사항</AccentPill>
-        </div>
-        <input
-          type="month"
-          value={yearMonthHint}
-          onChange={(event) => onYearMonthChange(event.target.value)}
-          className="w-full rounded-2xl border border-black/6 bg-[#F7F7F8] px-4 py-3 text-[14px] font-semibold tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
-        />
-      </Surface>
-
-      <Surface className="space-y-2 bg-[#FAFAFA]">
-        <div className="text-[13px] font-semibold tracking-[-0.01em] text-[#111827]">업로드 팁</div>
-        <div className="text-[12.5px] leading-6 text-[#6B7280]">
-          표 전체가 보이는 정면 이미지가 가장 정확합니다. 여러 명이 함께 있는 표는 다음 단계에서 이름을 고르면 됩니다.
-        </div>
-        <div className="text-[12px] leading-6 text-[#6B7280]">
-          업로드 이미지는 저장하지 않고 요청 처리 중에만 사용하며, AI 분석을 위해 외부 모델 API로 전송됩니다.
-        </div>
-        <div className="space-y-2 pt-1">
-          {SUPPORTED_CODE_GROUPS.map((group) => (
-            <div key={group.title} className="space-y-1.5">
-              <div className="text-[11.5px] font-medium text-[#6B7280]">{group.title}</div>
-              <div className="flex flex-wrap gap-1.5">
-                {group.values.map((value) => (
-                  <span key={value} className="rounded-full border border-black/6 bg-white px-2.5 py-1 text-[11px] font-medium text-[#374151]">
-                    {value}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+          <input
+            type="month"
+            value={yearMonthHint}
+            onChange={(event) => onYearMonthChange(event.target.value)}
+            className="w-full rounded-2xl border border-black/6 bg-white px-4 py-2.5 text-[14px] font-semibold tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
+          />
         </div>
       </Surface>
     </div>
@@ -383,7 +320,6 @@ function NameSelectStep({
     <div className="space-y-4">
       <Surface className="space-y-2 bg-[#FAFAFA]">
         <div className="text-[14px] font-semibold tracking-[-0.01em] text-[#111827]">여러 명의 근무표가 감지됐습니다</div>
-        <div className="text-[12.5px] leading-6 text-[#6B7280]">내 이름을 선택하거나 직접 입력하면 그 일정만 다시 정리합니다.</div>
       </Surface>
 
       {data.people.length > 0 && (
@@ -472,13 +408,8 @@ function ReviewStep({
     <div className="space-y-4">
       <Surface className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">
-              {step.data.yearMonth ? `${step.data.yearMonth} 근무 검토` : "근무 검토"}
-            </div>
-            <div className="mt-1.5 text-[12.5px] leading-6 text-[#6B7280]">
-              적용 전에 결과를 확인하고 필요한 근무 이름만 지정하면 됩니다.
-            </div>
+          <div className="text-[16px] font-semibold tracking-[-0.02em] text-[#111827]">
+            {step.data.yearMonth ? `${step.data.yearMonth} 근무 검토` : "근무 검토"}
           </div>
           <AccentPill tone="primary">{entries.length}일 인식</AccentPill>
         </div>
@@ -720,7 +651,6 @@ export function ShiftOCRUpload() {
         setStep({
           id: "processing",
           title: "근무표 이미지를 분석하고 있습니다",
-          detail: "이미지를 업로드한 뒤 연월, 이름, 날짜별 근무 표기를 정리하는 중입니다.",
         });
 
         const imageDataUrl = await readFileAsDataUrl(file);
@@ -756,7 +686,6 @@ export function ShiftOCRUpload() {
         setStep({
           id: "processing",
           title: `${name} 일정만 다시 정리하고 있습니다`,
-          detail: "같은 이미지에서 선택한 이름의 행과 날짜 칸만 다시 확인하는 중입니다.",
         });
 
         const data = await runImport({
@@ -825,15 +754,7 @@ export function ShiftOCRUpload() {
 
   return (
     <Card className="overflow-hidden border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(250,250,251,0.98)_100%)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.06)]">
-      <div className="mb-5 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">근무표 이미지 등록</div>
-          <div className="mt-1.5 text-[13px] leading-6 text-[#6B7280]">업로드, 이름 선택, 검토, 적용까지 한 화면에서 끝냅니다.</div>
-        </div>
-        <AccentPill tone="primary">AI Import</AccentPill>
-      </div>
-
-      {authStatus === "loading" && <ProcessingView title="계정 상태를 확인하고 있습니다" detail="AI 스캔 사용 가능 여부를 불러오는 중입니다." />}
+      {authStatus === "loading" && <ProcessingView title="계정 상태를 확인하고 있습니다" />}
 
       {authStatus !== "loading" && authStatus !== "authenticated" && (
         <AccessRequiredCard
@@ -857,7 +778,7 @@ export function ShiftOCRUpload() {
         <DropZone onFile={handleFile} yearMonthHint={yearMonthHint} onYearMonthChange={setYearMonthHint} />
       )}
 
-      {authStatus === "authenticated" && consentCompleted !== false && step.id === "processing" && <ProcessingView title={step.title} detail={step.detail} />}
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "processing" && <ProcessingView title={step.title} />}
 
       {authStatus === "authenticated" && consentCompleted !== false && step.id === "name_input" && (
         <NameSelectStep data={step.data} onSelect={handleNameSelect} onBack={resetToIdle} />

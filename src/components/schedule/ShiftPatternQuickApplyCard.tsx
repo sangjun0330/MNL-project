@@ -76,11 +76,7 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
 
   return (
     <Card className="p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-[14px] font-semibold">{t("기본 패턴 빠른 적용")}</div>
-          <div className="mt-1 text-[12.5px] text-ios-muted">{t("선택한 날짜부터 자동 채우기")}</div>
-        </div>
+      <div className="flex items-center justify-end">
         <Button
           variant="secondary"
           onClick={() => store.setSettings({ schedulePatternEnabled: !patternEnabled })}
@@ -90,31 +86,16 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
         </Button>
       </div>
 
-      <div className="mt-2 text-[12.5px] text-ios-muted">
-        {patternEnabled
-          ? t("ON이면 선택한 날짜부터 패턴을 자동으로 채울 수 있어요.")
-          : t("OFF면 3교대 패턴 자동 채우기를 적용하지 않습니다.")}
-      </div>
-
       <div className={patternEnabled ? "mt-4" : "mt-4 pointer-events-none opacity-45"} aria-disabled={!patternEnabled}>
         <div className="rounded-2xl border border-ios-sep bg-white p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-[12.5px] text-ios-muted">{t("현재 패턴")}</div>
-            <div className="text-[12px] font-semibold text-ios-muted">{t("예: D, M, E, N, OFF")}</div>
-          </div>
-
           <input
             value={patternInput}
             onChange={(e) => setPatternInput(e.target.value)}
             placeholder={t("예: D2E2N2M2OFF2")}
-            className="mt-2 w-full rounded-xl border border-ios-sep bg-white px-3 py-2 text-[14px] font-semibold outline-none focus:ring-2 focus:ring-black/10"
+            className="w-full rounded-xl border border-ios-sep bg-white px-3 py-2 text-[14px] font-semibold outline-none focus:ring-2 focus:ring-black/10"
             inputMode="text"
             autoCapitalize="characters"
           />
-
-          {parsedPattern.length === 0 ? (
-            <div className="mt-2 text-[12.5px] text-ios-muted">{t("패턴 형식 예: D2E2N2M2OFF2")}</div>
-          ) : null}
         </div>
 
         <div className="mt-4 rounded-2xl border border-ios-sep bg-white p-4">
@@ -136,7 +117,6 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
               className="w-full min-w-0 appearance-none bg-transparent text-[14px] font-semibold outline-none"
             />
           </div>
-          <div className="mt-2 text-[12px] text-ios-muted">{t("이 날짜부터 패턴을 적용합니다.")}</div>
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -151,17 +131,14 @@ export function ShiftPatternQuickApplyCard({ selectedISO }: { selectedISO: ISODa
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4">
           <Button
             variant="secondary"
             onClick={apply}
             disabled={!patternEnabled || parsedPattern.length === 0}
             className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]"
           >
-            {t("선택 시작일 적용")}
-          </Button>
-          <Button variant="secondary" onClick={() => store.setSelected(selectedISO)} className="rnest-pill-photo w-full justify-center px-3 text-center text-[12.5px]">
-            {t("선택일 유지")}
+            {t("적용하기")}
           </Button>
         </div>
       </div>
