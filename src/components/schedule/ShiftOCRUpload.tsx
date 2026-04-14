@@ -263,7 +263,10 @@ function DropZone({
             </div>
             <div>
               <div className="text-[18px] font-semibold tracking-[-0.02em] text-[#111827]">근무표 이미지 선택</div>
-              <div className="mt-1.5 text-[13px] text-[#6B7280]">드래그, 탭, 또는 복사한 이미지를 붙여넣으세요.</div>
+              <div className="mt-1.5 space-y-1 text-[13px] text-[#6B7280]">
+                <div>드래그, 탭, 또는 복사한 이미지를 붙여넣으세요.</div>
+                <div>여러 명이 함께 있는 근무표도 올릴 수 있고, 다음 단계에서 이름을 고를 수 있어요.</div>
+              </div>
             </div>
           </div>
         </button>
@@ -359,7 +362,7 @@ function NameSelectStep({
 
       <Surface className="space-y-3">
         <div className="text-[12.5px] font-medium text-[#6B7280]">직접 입력</div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_56px] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_62px]">
           <input
             value={input}
             onChange={(event) => setInput(event.target.value.slice(0, 24))}
@@ -369,12 +372,12 @@ function NameSelectStep({
               onSelect(input.trim());
             }}
             placeholder="이름 입력 (예: 김OO)"
-            className="flex-1 rounded-2xl border border-black/6 bg-[#F7F7F8] px-4 py-3 text-[14px] font-medium tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
+            className="min-w-0 h-[42px] rounded-2xl border border-black/6 bg-[#F7F7F8] px-3.5 text-[13px] font-medium tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12 sm:h-[44px] sm:px-4 sm:text-[14px]"
           />
           <Button
             onClick={() => input.trim() && onSelect(input.trim())}
             disabled={!input.trim()}
-            className="min-h-[44px] min-w-[58px] self-center rounded-[18px] bg-black px-3 text-[12px] text-white disabled:opacity-40 sm:min-w-[64px] sm:px-3.5 sm:text-[12.5px]"
+            className="h-[42px] min-w-0 rounded-[16px] bg-black px-0 text-[11.5px] text-white disabled:opacity-40 sm:h-[44px] sm:text-[12px]"
           >
             확인
           </Button>
@@ -487,7 +490,7 @@ function ReviewStep({
 
       <Surface className="space-y-3">
         <div className="text-[12.5px] font-medium text-[#6B7280]">인식된 근무</div>
-        <div className="schedule-config-scroll grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto rounded-2xl bg-[#FAFAFA] p-3">
+        <div className="schedule-config-scroll grid max-h-56 min-h-0 grid-cols-2 gap-1.5 overflow-y-auto rounded-2xl bg-[#FAFAFA] p-3">
           {entries.map((entry) => {
             const [, , day] = entry.isoDate.split("-");
             return (

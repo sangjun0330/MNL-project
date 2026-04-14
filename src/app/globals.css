@@ -521,24 +521,23 @@ button:not([class*="rnest-nav"]):active {
   }
 }
 
-.schedule-config-page button,
-.schedule-config-page [role="button"],
-.schedule-config-page a,
-.schedule-config-page input,
-.schedule-config-page select,
-.schedule-config-page textarea {
+.schedule-config-page,
+.schedule-config-page *,
+.schedule-config-page *::before,
+.schedule-config-page *::after {
   animation: none !important;
   transition: none !important;
 }
 
-.schedule-config-page button:active,
-.schedule-config-page [role="button"]:active,
-.schedule-config-page a:active {
+.schedule-config-page *:active,
+.schedule-config-page .rounded-apple,
+.schedule-config-page .rounded-apple:active {
   transform: none !important;
 }
 
 .schedule-config-page button,
 .schedule-config-page [role="button"],
+.schedule-config-page .rounded-apple,
 .schedule-config-page input,
 .schedule-config-page select {
   touch-action: pan-y;
@@ -547,7 +546,11 @@ button:not([class*="rnest-nav"]):active {
 .schedule-config-page .schedule-config-scroll {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  touch-action: pan-y;
+  touch-action: pan-y !important;
+}
+
+.schedule-config-page .schedule-config-scroll * {
+  touch-action: pan-y !important;
 }
 
 /* ===================================
