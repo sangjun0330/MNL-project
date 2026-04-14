@@ -16,7 +16,6 @@ import { Card } from "@/components/ui/Card";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { MonthCalendar } from "@/components/home/MonthCalendar";
 import { ScheduleRecordSheet } from "@/components/schedule/ScheduleRecordSheet";
-import { ShiftPatternOcrCard } from "@/components/schedule/ShiftPatternOcrCard";
 import { ShiftPatternQuickApplyCard } from "@/components/schedule/ShiftPatternQuickApplyCard";
 import { MenstrualSettingsForm } from "@/components/settings/MenstrualSettingsForm";
 import { useI18n } from "@/lib/useI18n";
@@ -508,28 +507,8 @@ export function SchedulePage() {
         subtitle={t("선택한 날짜부터 자동 채우기")}
         variant="appstore"
       >
-        <div className="space-y-3 pb-4">
+        <div className="pb-4">
           <ShiftPatternQuickApplyCard selectedISO={selected} />
-          <ShiftPatternOcrCard selectedISO={selected} />
-          <button
-            type="button"
-            onClick={() => {
-              setOpenPattern(false);
-              router.push("/schedule/pattern-settings");
-            }}
-            className="flex w-full items-center justify-between rounded-2xl border border-ios-sep bg-white px-4 py-3 text-[13px] font-medium hover:bg-ios-fill active:opacity-70"
-          >
-            <span className="flex items-center gap-2 text-ios-label">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
-              근무표 이미지 스캔 · 근무 이름 설정
-            </span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ios-muted">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
         </div>
       </BottomSheet>
 

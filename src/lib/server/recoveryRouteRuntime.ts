@@ -208,8 +208,6 @@ function defaultSettings(): AppSettings {
     schedulePatternEnabled: true,
     defaultSchedulePattern: "D2E2N2M2OFF2",
     schedulePatternAppliedFrom: null,
-    customShiftTypes: [],
-    ocrLastUserName: "",
     emotionTagsPositive: [],
     emotionTagsNegative: [],
     menstrual: {
@@ -249,43 +247,6 @@ function sanitizeSettings(raw: unknown): AppSettings {
         ? loaded.defaultSchedulePattern.replace(/\s+/g, "").trim().slice(0, 80)
         : defaults.defaultSchedulePattern,
     schedulePatternAppliedFrom: asIso(loaded.schedulePatternAppliedFrom) ?? defaults.schedulePatternAppliedFrom ?? null,
-    customShiftTypes: Array.isArray(loaded.customShiftTypes)
-      ? loaded.customShiftTypes
-          .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-          .map((entry, index) => ({
-            id:
-              typeof entry.id === "string" && entry.id.trim()
-                ? entry.id.trim().slice(0, 80)
-                : `custom-shift-${index + 1}`,
-            displayName:
-              typeof entry.displayName === "string"
-                ? entry.displayName.replace(/\s+/g, " ").trim().slice(0, 40)
-                : "",
-            semanticType:
-              entry.semanticType === "D" ||
-              entry.semanticType === "E" ||
-              entry.semanticType === "N" ||
-              entry.semanticType === "M" ||
-              entry.semanticType === "OFF" ||
-              entry.semanticType === "VAC"
-                ? (entry.semanticType as Shift)
-                : "OFF",
-            aliases: Array.isArray(entry.aliases)
-              ? entry.aliases
-                  .map((alias) =>
-                    typeof alias === "string" ? alias.replace(/\s+/g, " ").trim().slice(0, 24) : ""
-                  )
-                  .filter(Boolean)
-                  .slice(0, 8)
-              : [],
-          }))
-          .filter((entry) => entry.displayName.length > 0)
-          .slice(0, 32)
-      : defaults.customShiftTypes ?? [],
-    ocrLastUserName:
-      typeof loaded.ocrLastUserName === "string"
-        ? loaded.ocrLastUserName.replace(/\s+/g, " ").trim().slice(0, 20)
-        : defaults.ocrLastUserName ?? "",
     language: loaded.language === "en" ? "en" : "ko",
     hasSeenOnboarding: Boolean(loaded.hasSeenOnboarding ?? defaults.hasSeenOnboarding),
     menstrual: {

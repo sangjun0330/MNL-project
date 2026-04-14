@@ -5,10 +5,8 @@ import {
   type RNestMemoState,
   type RNestRecordState,
 } from "@/lib/notebook";
-import { defaultSettings, emptyState, type AppSettings, type AppState, type BioInputs, type CustomShiftDef, type EmotionEntry } from "@/lib/model";
+import { defaultSettings, emptyState, type AppSettings, type AppState, type BioInputs, type EmotionEntry } from "@/lib/model";
 import type { Shift } from "@/lib/types";
-
-const CORE_SHIFT_SET = new Set<string>(["D", "E", "N", "M", "OFF", "VAC"]);
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SHIFT_SET = new Set<Shift>(["D", "E", "N", "M", "OFF", "VAC"]);
@@ -261,27 +259,6 @@ function sanitizeSettings(raw: unknown): AppSettings {
   const chronotypeNum = asFiniteNumber(loadedProfile.chronotype);
   const sensitivityNum = asFiniteNumber(loadedProfile.caffeineSensitivity);
 
-  // customShiftTypes 검증
-  const rawCustomShifts = Array.isArray(loaded.customShiftTypes) ? loaded.customShiftTypes : [];
-  const customShiftTypes: CustomShiftDef[] = [];
-  for (const item of rawCustomShifts) {
-    if (!item || typeof item !== "object") continue;
-    const id = typeof item.id === "string" ? item.id.trim().slice(0, 64) : "";
-    const displayName = typeof item.displayName === "string" ? item.displayName.trim().slice(0, 20) : "";
-    const semanticType = typeof item.semanticType === "string" && CORE_SHIFT_SET.has(item.semanticType)
-      ? (item.semanticType as CustomShiftDef["semanticType"])
-      : null;
-    if (!id || !displayName || !semanticType) continue;
-    const aliases = Array.isArray(item.aliases)
-      ? item.aliases
-          .filter((a: unknown) => typeof a === "string" && a.trim())
-          .map((a: string) => a.trim().slice(0, 20))
-          .slice(0, 20)
-      : [];
-    customShiftTypes.push({ id, displayName, semanticType, aliases });
-    if (customShiftTypes.length >= 50) break;
-  }
-
   return {
     ...defaults,
     schedulePatternEnabled: Boolean(loaded.schedulePatternEnabled ?? defaults.schedulePatternEnabled),
@@ -290,43 +267,6 @@ function sanitizeSettings(raw: unknown): AppSettings {
         ? loaded.defaultSchedulePattern.replace(/\s+/g, "").trim().slice(0, 80)
         : defaults.defaultSchedulePattern,
     schedulePatternAppliedFrom: asIso(loaded.schedulePatternAppliedFrom) ?? defaults.schedulePatternAppliedFrom ?? null,
-    customShiftTypes: Array.isArray(loaded.customShiftTypes)
-      ? loaded.customShiftTypes
-          .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-          .map((entry, index) => ({
-            id:
-              typeof entry.id === "string" && entry.id.trim()
-                ? entry.id.trim().slice(0, 80)
-                : `custom-shift-${index + 1}`,
-            displayName:
-              typeof entry.displayName === "string"
-                ? entry.displayName.replace(/\s+/g, " ").trim().slice(0, 40)
-                : "",
-            semanticType:
-              entry.semanticType === "D" ||
-              entry.semanticType === "E" ||
-              entry.semanticType === "N" ||
-              entry.semanticType === "M" ||
-              entry.semanticType === "OFF" ||
-              entry.semanticType === "VAC"
-                ? (entry.semanticType as Shift)
-                : "OFF",
-            aliases: Array.isArray(entry.aliases)
-              ? entry.aliases
-                  .map((alias) =>
-                    typeof alias === "string" ? alias.replace(/\s+/g, " ").trim().slice(0, 24) : ""
-                  )
-                  .filter(Boolean)
-                  .slice(0, 8)
-              : [],
-          }))
-          .filter((entry) => entry.displayName.length > 0)
-          .slice(0, 32)
-      : defaults.customShiftTypes ?? [],
-    ocrLastUserName:
-      typeof loaded.ocrLastUserName === "string"
-        ? loaded.ocrLastUserName.replace(/\s+/g, " ").trim().slice(0, 20)
-        : defaults.ocrLastUserName ?? "",
     language: loaded.language === "en" ? "en" : "ko",
     hasSeenOnboarding: Boolean(loaded.hasSeenOnboarding ?? defaults.hasSeenOnboarding),
     menstrual: {

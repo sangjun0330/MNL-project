@@ -101,43 +101,6 @@ function normalizeSettings(raw: any): AppSettings {
     typeof loaded?.defaultSchedulePattern === "string"
       ? loaded.defaultSchedulePattern.replace(/\s+/g, "").trim().slice(0, 80)
       : base.defaultSchedulePattern;
-  const customShiftTypes = Array.isArray(loaded?.customShiftTypes)
-    ? loaded.customShiftTypes
-        .filter((entry: any) => entry && typeof entry === "object")
-        .map((entry: any, index: number) => ({
-          id:
-            typeof entry.id === "string" && entry.id.trim()
-              ? entry.id.trim().slice(0, 80)
-              : `custom-shift-${index + 1}`,
-          displayName:
-            typeof entry.displayName === "string"
-              ? entry.displayName.replace(/\s+/g, " ").trim().slice(0, 40)
-              : "",
-          semanticType:
-            entry.semanticType === "D" ||
-            entry.semanticType === "E" ||
-            entry.semanticType === "N" ||
-            entry.semanticType === "M" ||
-            entry.semanticType === "OFF" ||
-            entry.semanticType === "VAC"
-              ? entry.semanticType
-              : "OFF",
-          aliases: Array.isArray(entry.aliases)
-            ? entry.aliases
-                .map((alias: unknown) =>
-                  typeof alias === "string" ? alias.replace(/\s+/g, " ").trim().slice(0, 24) : ""
-                )
-                .filter(Boolean)
-                .slice(0, 8)
-            : [],
-        }))
-        .filter((entry: { displayName: string }) => entry.displayName.length > 0)
-        .slice(0, 32)
-    : base.customShiftTypes ?? [];
-  const ocrLastUserName =
-    typeof loaded?.ocrLastUserName === "string"
-      ? loaded.ocrLastUserName.replace(/\s+/g, " ").trim().slice(0, 20)
-      : base.ocrLastUserName ?? "";
 
   // menstrual: 구버전(startISO) → 신버전(lastPeriodStart) 호환
   const menstrualLoaded = loaded?.menstrual ?? {};
@@ -149,8 +112,6 @@ function normalizeSettings(raw: any): AppSettings {
     schedulePatternEnabled: Boolean(loaded?.schedulePatternEnabled ?? base.schedulePatternEnabled),
     defaultSchedulePattern,
     schedulePatternAppliedFrom,
-    customShiftTypes,
-    ocrLastUserName,
     menstrual: {
       ...base.menstrual,
       ...menstrualLoaded,
@@ -312,15 +273,6 @@ function setShiftNameForDate(iso: ISODate, name: string) {
     shiftNames: {
       ...(state.shiftNames ?? {}),
       [iso]: name,
-    },
-  });
-}
-
-function batchSetShiftNames(patch: Record<ISODate, string>) {
-  setState({
-    shiftNames: {
-      ...(state.shiftNames ?? {}),
-      ...patch,
     },
   });
 }
@@ -501,7 +453,6 @@ function registerDebugBridge() {
       setSettings,
       setShiftForDate,
       batchSetSchedule,
-      batchSetShiftNames,
       setNoteForDate,
       setEmotionForDate,
       setBioForDate,
@@ -533,7 +484,6 @@ function buildStoreSnapshot(s: AppState): AppStore {
     setShiftForDate,
     batchSetSchedule,
     setShiftNameForDate,
-    batchSetShiftNames,
     clearShiftNameForDate,
 
     setNoteForDate,
