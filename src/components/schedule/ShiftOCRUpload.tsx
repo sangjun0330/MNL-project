@@ -163,6 +163,25 @@ function Surface({ children, className }: { children: ReactNode; className?: str
   );
 }
 
+function formatYearMonthLabel(value: string) {
+  const match = String(value ?? "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "연월 선택";
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+    return "연월 선택";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, monthIndex, 1)));
+}
+
 function ProcessingView({ title }: { title: string }) {
   return (
     <div className="flex items-center justify-center gap-3 py-8">
@@ -191,6 +210,7 @@ function DropZone({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const yearMonthLabel = useMemo(() => formatYearMonthLabel(yearMonthHint), [yearMonthHint]);
 
   const handlePaste = useCallback(
     (event: ClipboardEvent) => {
@@ -259,14 +279,19 @@ function DropZone({
             event.currentTarget.value = "";
           }}
         />
-
         <div className="border-t border-black/5 px-5 pb-4 pt-3">
-          <input
-            type="month"
-            value={yearMonthHint}
-            onChange={(event) => onYearMonthChange(event.target.value)}
-            className="w-full rounded-2xl border border-black/6 bg-white px-4 py-2.5 text-center text-[14px] font-semibold tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
-          />
+          <div className="relative">
+            <input
+              type="month"
+              value={yearMonthHint}
+              onChange={(event) => onYearMonthChange(event.target.value)}
+              className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+              aria-label="근무표 연월 선택"
+            />
+            <div className="pointer-events-none flex min-h-[46px] w-full items-center justify-center rounded-2xl border border-black/6 bg-white px-4 text-center text-[14px] font-semibold tracking-[-0.01em] text-[#111827] peer-focus:border-black/12">
+              <span className="block max-w-full truncate text-center">{yearMonthLabel}</span>
+            </div>
+          </div>
         </div>
       </Surface>
     </div>
@@ -346,7 +371,11 @@ function NameSelectStep({
             placeholder="이름 입력 (예: 김OO)"
             className="flex-1 rounded-2xl border border-black/6 bg-[#F7F7F8] px-4 py-3 text-[14px] font-medium tracking-[-0.01em] text-[#111827] outline-none focus:border-black/12"
           />
-          <Button onClick={() => input.trim() && onSelect(input.trim())} disabled={!input.trim()} className="bg-black px-4 text-white disabled:opacity-40">
+          <Button
+            onClick={() => input.trim() && onSelect(input.trim())}
+            disabled={!input.trim()}
+            className="min-h-[44px] min-w-[58px] self-center rounded-[18px] bg-black px-3 text-[12px] text-white disabled:opacity-40 sm:min-w-[64px] sm:px-3.5 sm:text-[12.5px]"
+          >
             확인
           </Button>
         </div>
@@ -458,7 +487,7 @@ function ReviewStep({
 
       <Surface className="space-y-3">
         <div className="text-[12.5px] font-medium text-[#6B7280]">인식된 근무</div>
-        <div className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto rounded-2xl bg-[#FAFAFA] p-3">
+        <div className="schedule-config-scroll grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto rounded-2xl bg-[#FAFAFA] p-3">
           {entries.map((entry) => {
             const [, , day] = entry.isoDate.split("-");
             return (

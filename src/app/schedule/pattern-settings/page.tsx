@@ -57,12 +57,12 @@ function TabBar({ activeTab, onChange }: { activeTab: TabId; onChange: (tab: Tab
             type="button"
             onClick={() => onChange(tab.id)}
             className={cn(
-              "flex items-center justify-center gap-2 rounded-[22px] px-3 py-3 text-[13px] font-medium tracking-[-0.01em] transition-colors",
+              "flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-[22px] px-2 py-3 text-center text-[12px] font-medium leading-[1.15] tracking-[-0.01em] transition-colors sm:min-h-[56px] sm:flex-row sm:gap-2 sm:px-3 sm:text-[13px] sm:leading-none",
               activeTab === tab.id ? "bg-white text-[#111827] shadow-[0_10px_24px_rgba(15,23,42,0.06)]" : "text-[#6B7280] hover:bg-white/60"
             )}
           >
             {tab.icon}
-            {tab.label}
+            <span className="break-keep text-center">{tab.label}</span>
           </button>
         ))}
       </div>
@@ -84,7 +84,7 @@ function PatternSettingsContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#F7F7FA_46%,#F2F3F6_100%)]">
+    <div className="schedule-config-page min-h-screen bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#F7F7FA_46%,#F2F3F6_100%)]">
       <div className="sticky top-0 z-20 border-b border-white/50 bg-white/70 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[980px] items-center gap-3 px-4 py-4">
           <button
