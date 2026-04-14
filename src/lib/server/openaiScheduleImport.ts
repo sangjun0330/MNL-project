@@ -1,5 +1,5 @@
 import type { ISODate } from "@/lib/date";
-import { buildAliasMap, normalizeShiftText } from "@/lib/shiftAliasMap";
+import { BUILTIN_SHIFT_PROMPT_GUIDE, buildAliasMap, normalizeShiftText } from "@/lib/shiftAliasMap";
 import {
   MAX_SCHEDULE_IMPORT_IMAGE_BYTES,
   estimateDataUrlBytes,
@@ -351,6 +351,8 @@ function buildDeveloperPrompt(args: {
     `출력 언어 기준: ${args.locale === "en" ? "영문 설명 가능" : "한국어 우선"}`,
     `연월 힌트: ${args.yearMonthHint ?? "없음"}`,
     selectedPersonInstruction,
+    "한국 병원 간호사 근무표에서 자주 보이는 표기 사전:",
+    BUILTIN_SHIFT_PROMPT_GUIDE,
     "등록된 병원별 근무 이름 힌트:",
     args.customShiftPrompt,
   ].join("\n");

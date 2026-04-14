@@ -28,6 +28,21 @@ const SEMANTIC_OPTIONS: Array<{ value: CoreShift; label: string }> = [
   { value: "VAC", label: "휴가 (VAC)" },
 ];
 
+const SUPPORTED_CODE_GROUPS = [
+  {
+    title: "기본 표기",
+    values: ["D", "E", "N", "O", "OF", "OFF", "/", "NO"],
+  },
+  {
+    title: "확장 표기",
+    values: ["M", "MD", "Mid", "10D", "11D", "DE", "EN", "ND", "EC", "NOD"],
+  },
+  {
+    title: "한글 표기",
+    values: ["데이", "낮번", "주간", "이브닝", "초번", "나이트", "야간", "오프", "휴무", "연차"],
+  },
+];
+
 type ReviewStepState = {
   id: "review";
   data: ScheduleAIImportResponse;
@@ -309,6 +324,20 @@ function DropZone({
         </div>
         <div className="text-[12px] leading-6 text-[#6B7280]">
           업로드 이미지는 저장하지 않고 요청 처리 중에만 사용하며, AI 분석을 위해 외부 모델 API로 전송됩니다.
+        </div>
+        <div className="space-y-2 pt-1">
+          {SUPPORTED_CODE_GROUPS.map((group) => (
+            <div key={group.title} className="space-y-1.5">
+              <div className="text-[11.5px] font-medium text-[#6B7280]">{group.title}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {group.values.map((value) => (
+                  <span key={value} className="rounded-full border border-black/6 bg-white px-2.5 py-1 text-[11px] font-medium text-[#374151]">
+                    {value}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </Surface>
     </div>
