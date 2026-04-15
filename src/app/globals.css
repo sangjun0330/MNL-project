@@ -553,6 +553,19 @@ button:not([class*="rnest-nav"]):active {
   touch-action: pan-y !important;
 }
 
+@keyframes scheduleConfigSpinner {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.schedule-config-page .schedule-config-spinner {
+  animation: scheduleConfigSpinner 0.9s linear infinite !important;
+}
+
 /* ===================================
    Reduced Motion
    =================================== */

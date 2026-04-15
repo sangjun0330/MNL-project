@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ISODate } from "@/lib/date";
@@ -9,9 +8,6 @@ import { useAppStoreSelector } from "@/lib/store";
 import { countHealthRecordedDays } from "@/lib/healthRecords";
 import { computeVitalsRange, vitalMapByISO } from "@/lib/vitals";
 import { useI18n } from "@/lib/useI18n";
-import { buildShopRecommendations, getShopImageSrc, formatShopPrice, SHOP_PRODUCTS } from "@/lib/shop";
-import type { ShopProduct } from "@/lib/shop";
-import { fetchShopCatalog } from "@/lib/shopClient";
 import { useRecoveryPlanner } from "@/components/insights/useRecoveryPlanner";
 import { BatteryGauge } from "@/components/home/BatteryGauge";
 import { WeekStrip } from "@/components/home/WeekStrip";
@@ -195,30 +191,6 @@ export default function Home() {
   }, [planner.focusFactor?.label, planner.state, t]);
   const plannerPreviewTitle = latestOrderTitle ?? (latestOrdersCompleted ? t("오늘 오더를 모두 완료했어요.") : t("오늘의 오더를 만들어 보세요!"));
   const selectedDateLabel = useMemo(() => formatKoreanDate(homeSelected), [homeSelected]);
-
-  // ── Shop catalog ──────────────────────────────────────────────
-  const [shopCatalog, setShopCatalog] = useState<ShopProduct[]>(SHOP_PRODUCTS);
-  useEffect(() => {
-    if (!deferredReady) return;
-    fetchShopCatalog()
-      .then((products) => {
-        if (products.length > 0) setShopCatalog(products);
-      })
-      .catch(() => {/* 실패 시 기본 SHOP_PRODUCTS 유지 */ });
-  }, [deferredReady]);
-
-  // ── Shop recommendations ──────────────────────────────────────
-  const topShopRecs = useMemo(() => {
-    if (!deferredReady) return [];
-    const recs = buildShopRecommendations({
-      selected: homeSelected,
-      schedule: store.schedule,
-      bio: store.bio,
-      settings: store.settings,
-      products: shopCatalog,
-    });
-    return recs.recommendations.slice(0, 6);
-  }, [deferredReady, homeSelected, store.schedule, store.bio, store.settings, shopCatalog]);
 
   return (
     <div className="flex flex-col gap-3.5 px-0 pb-4 pt-5">
@@ -523,89 +495,6 @@ export default function Home() {
         </Link>
       </div>
 
-      {/* ── AI 맞춤 쇼핑 (horizontal scroll, bottom) ── */}
-      {topShopRecs.length > 0 && (
-        <div>
-          <div className="mb-2.5 flex items-center justify-between px-1">
-            <span
-              className="text-[11px] font-semibold uppercase tracking-widest"
-              style={{ color: "var(--rnest-muted)" }}
-            >
-              {t("AI 맞춤 쇼핑")}
-            </span>
-            <Link
-              href="/shop"
-              className="text-[12px] font-medium active:opacity-60"
-              style={{ color: "var(--rnest-accent)" }}
-            >
-              {t("쇼핑 전체")} ›
-            </Link>
-          </div>
-          <div
-            className="shop-reco-scroll flex gap-2.5 overflow-x-auto pb-1"
-            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-          >
-            <style>{`.shop-reco-scroll::-webkit-scrollbar { display: none; }`}</style>
-            {topShopRecs.map((entry) => {
-              const imgSrc = getShopImageSrc(entry.product.imageUrls?.[0]);
-              return (
-                <Link
-                  key={entry.product.id}
-                  href={`/shop/${encodeURIComponent(entry.product.id)}`}
-                  className="shrink-0 w-[112px] rounded-[14px] shadow-apple-sm overflow-hidden active:opacity-75"
-                  style={{ background: "var(--rnest-card)" }}
-                >
-                  <div
-                    className="relative aspect-square w-full overflow-hidden"
-                    style={{ background: "var(--rnest-accent-soft)" }}
-                  >
-                    {imgSrc ? (
-                      <Image
-                        src={imgSrc}
-                        alt={entry.product.name}
-                        fill
-                        sizes="112px"
-                        unoptimized
-                        className="object-cover"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-2xl opacity-25">🛍️</div>
-                    )}
-                  </div>
-                  <div className="px-2 py-2">
-                    <p
-                      className="line-clamp-2 text-[11px] font-semibold leading-snug"
-                      style={{ color: "var(--rnest-text)" }}
-                    >
-                      {entry.product.name}
-                    </p>
-                    <p
-                      className="mt-1 text-[11px] font-bold"
-                      style={{ color: "var(--rnest-accent)" }}
-                    >
-                      {formatShopPrice(entry.product)}
-                    </p>
-                    {entry.primaryReason && (
-                      <span
-                        className="mt-1.5 inline-block max-w-full truncate rounded-full px-1.5 py-0.5 text-[9px] font-medium"
-                        style={{
-                          backgroundColor: "var(--rnest-lavender-soft)",
-                          color: "var(--rnest-lavender)",
-                        }}
-                      >
-                        {entry.primaryReason}
-                      </span>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

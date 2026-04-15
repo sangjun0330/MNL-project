@@ -182,11 +182,11 @@ function formatYearMonthLabel(value: string) {
   }).format(new Date(Date.UTC(year, monthIndex, 1)));
 }
 
-function ProcessingView({ title }: { title: string }) {
+function ProcessingView({ title, animated = false }: { title: string; animated?: boolean }) {
   return (
     <div className="flex items-center justify-center gap-3 py-8">
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F3F4F6]">
-        <svg className="h-4 w-4 animate-spin text-[#111827]" viewBox="0 0 24 24" fill="none">
+        <svg className={cn("h-4 w-4 text-[#111827]", animated && "schedule-config-spinner")} viewBox="0 0 24 24" fill="none">
           <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
           <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
@@ -802,7 +802,7 @@ export function ShiftOCRUpload() {
         <DropZone onFile={handleFile} yearMonthHint={yearMonthHint} onYearMonthChange={setYearMonthHint} />
       )}
 
-      {authStatus === "authenticated" && consentCompleted !== false && step.id === "processing" && <ProcessingView title={step.title} />}
+      {authStatus === "authenticated" && consentCompleted !== false && step.id === "processing" && <ProcessingView title={step.title} animated />}
 
       {authStatus === "authenticated" && consentCompleted !== false && step.id === "name_input" && (
         <NameSelectStep data={step.data} onSelect={handleNameSelect} onBack={resetToIdle} />
