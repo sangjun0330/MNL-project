@@ -57,6 +57,16 @@ export async function POST(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
+  const admin = getSupabaseAdmin();
+  const { data: profileCheck } = await (admin as any)
+    .from("rnest_social_profiles")
+    .select("is_suspended")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (profileCheck?.is_suspended) {
+    return jsonNoStore({ ok: false, error: "account_suspended" }, { status: 403 });
+  }
+
   let body: any = null;
   try {
     body = await req.json();
@@ -89,8 +99,6 @@ export async function POST(req: Request) {
   if (!postBody && imagePaths.length === 0) {
     return jsonNoStore({ ok: false, error: "content_required" }, { status: 400 });
   }
-
-  const admin = getSupabaseAdmin();
 
   try {
     const limited = await isSocialActionRateLimited({

@@ -19,6 +19,15 @@ export async function POST(
   const { handle } = await params;
   const admin = getSupabaseAdmin();
 
+  const { data: profileCheck } = await (admin as any)
+    .from("rnest_social_profiles")
+    .select("is_suspended")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (profileCheck?.is_suspended) {
+    return jsonNoStore({ ok: false, error: "account_suspended" }, { status: 403 });
+  }
+
   try {
     const profile = await getSocialProfileHeaderByHandle(admin, handle, userId);
     if (!profile) {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
+import { authHeaders } from "@/lib/billing/client";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
@@ -126,6 +127,7 @@ export function SocialPage() {
   const [openConnect, setOpenConnect] = useState(false);
   const [openGroupCreate, setOpenGroupCreate] = useState(false);
   const [openGroupJoin, setOpenGroupJoin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [openEventCenter, setOpenEventCenter] = useState(false);
   const [openCommonOffSelector, setOpenCommonOffSelector] = useState(false);
   const [unreadEventCount, setUnreadEventCount] = useState(0);
@@ -244,11 +246,26 @@ export function SocialPage() {
       setConnectionsLoading(true);
       setScheduleLoading(true);
       setGroupsLoading(true);
+      // 관리자 여부 확인
+      (async () => {
+        try {
+          const hdrs = await authHeaders();
+          const res = await fetch("/api/admin/billing/access", {
+            headers: { "content-type": "application/json", ...hdrs },
+            cache: "no-store",
+          });
+          const json = await res.json().catch(() => null);
+          setIsAdmin(Boolean(json?.ok && json?.data?.isAdmin));
+        } catch {
+          setIsAdmin(false);
+        }
+      })();
     } else {
       setProfileLoading(false);
       setConnectionsLoading(false);
       setScheduleLoading(false);
       setGroupsLoading(false);
+      setIsAdmin(false);
     }
   }, [currentUserId, status]);
 
@@ -1037,6 +1054,18 @@ export function SocialPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => router.push("/social/admin")}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[color:var(--rnest-accent)] transition hover:bg-[#f3f0ff] active:opacity-60"
+                aria-label="소셜 관리자"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setOpenEventCenter(true)}

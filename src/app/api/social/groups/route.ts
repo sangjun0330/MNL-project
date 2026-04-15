@@ -122,6 +122,16 @@ export async function POST(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
+  const adminForCheck = getSupabaseAdmin();
+  const { data: profileCheck } = await (adminForCheck as any)
+    .from("rnest_social_profiles")
+    .select("is_suspended")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (profileCheck?.is_suspended) {
+    return jsonNoStore({ ok: false, error: "account_suspended" }, { status: 403 });
+  }
+
   try {
     const { readSubscription } = await import("@/lib/server/billingReadStore");
     const subscription = await readSubscription(userId);

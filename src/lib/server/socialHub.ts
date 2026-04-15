@@ -1066,3 +1066,16 @@ export async function listDiscoverableProfiles(admin: any) {
     ),
   );
 }
+
+// ── 어드민: 소셜 계정 정지 여부 확인 ────────────────────────────────
+export async function checkSocialSuspension(
+  admin: any,
+  userId: string,
+): Promise<boolean> {
+  const { data } = await (admin as any)
+    .from("rnest_social_profiles")
+    .select("is_suspended")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data?.is_suspended === true;
+}
