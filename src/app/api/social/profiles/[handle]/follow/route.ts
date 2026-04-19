@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getSocialProfileHeaderByHandle, toggleFollow } from "@/lib/server/socialHub";
 
@@ -29,6 +33,7 @@ export async function POST(
   }
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     const profile = await getSocialProfileHeaderByHandle(admin, handle, userId);
     if (!profile) {
       return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
@@ -37,6 +42,8 @@ export async function POST(
     const result = await toggleFollow(admin, userId, profile.userId);
     return jsonNoStore({ ok: true, data: result });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     if (err?.code === "invalid_follow_target") {
       return jsonNoStore({ ok: false, error: "invalid_follow_target" }, { status: 400 });
     }

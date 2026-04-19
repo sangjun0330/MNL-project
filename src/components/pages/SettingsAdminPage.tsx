@@ -7,6 +7,7 @@ import { formatKrw } from "@/lib/billing/plans";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import type { SocialAdminOverview } from "@/types/socialAdmin";
 
 type AdminRefundRowLite = {
   status: "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "EXECUTING" | "REFUNDED" | "FAILED_RETRYABLE" | "FAILED_FINAL" | "WITHDRAWN";
@@ -47,6 +48,22 @@ type DashboardState = {
     canceledPayments: number;
     totalAttemptAmount: number;
   };
+  social: SocialAdminOverview;
+};
+
+const EMPTY_SOCIAL_OVERVIEW: SocialAdminOverview = {
+  totalUsers: 0,
+  totalPosts: 0,
+  totalComments: 0,
+  activeStories: 0,
+  totalGroups: 0,
+  pendingJoinRequests: 0,
+  activeChallenges: 0,
+  readOnlyUsers: 0,
+  suspendedUsers: 0,
+  postsLast24h: 0,
+  storiesLast24h: 0,
+  aiBriefsThisWeek: 0,
 };
 
 const EMPTY_DASHBOARD: DashboardState = {
@@ -70,6 +87,7 @@ const EMPTY_DASHBOARD: DashboardState = {
     canceledPayments: 0,
     totalAttemptAmount: 0,
   },
+  social: EMPTY_SOCIAL_OVERVIEW,
 };
 
 function parseErrorMessage(input: string | null) {
@@ -95,6 +113,22 @@ async function readAdminArray<T>(path: string, headers: Record<string, string>, 
     throw new Error(`failed_to_load:${key}`);
   }
   return json.data[key] as T[];
+}
+
+async function readAdminObject<T>(path: string, headers: Record<string, string>): Promise<T> {
+  const res = await fetch(path, {
+    method: "GET",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) {
+    throw new Error(`failed_to_load:${path}`);
+  }
+  return json.data as T;
 }
 
 function buildShopDashboard(orders: AdminShopOrderLite[], products: AdminShopProductLite[]): DashboardState["shop"] {
@@ -245,11 +279,12 @@ export function SettingsAdminPage() {
 
       setAccessState("granted");
 
-      const [refundsResult, billingOrdersResult, shopOrdersResult, catalogResult] = await Promise.allSettled([
+      const [refundsResult, billingOrdersResult, shopOrdersResult, catalogResult, socialOverviewResult] = await Promise.allSettled([
         readAdminArray<AdminRefundRowLite>("/api/admin/billing/refunds?limit=200", headers, "requests"),
         readAdminArray<AdminBillingOrderLite>("/api/admin/billing/orders?limit=200", headers, "orders"),
         readAdminArray<AdminShopOrderLite>("/api/admin/shop/orders?limit=200", headers, "orders"),
         readAdminArray<AdminShopProductLite>("/api/admin/shop/catalog", headers, "products"),
+        readAdminObject<SocialAdminOverview>("/api/admin/social/overview", headers),
       ]);
 
       const nextDashboard: DashboardState = {
@@ -261,12 +296,17 @@ export function SettingsAdminPage() {
           refundsResult.status === "fulfilled" && billingOrdersResult.status === "fulfilled"
             ? buildBillingDashboard(refundsResult.value, billingOrdersResult.value)
             : EMPTY_DASHBOARD.billing,
+        social:
+          socialOverviewResult.status === "fulfilled"
+            ? socialOverviewResult.value
+            : EMPTY_DASHBOARD.social,
       };
       setDashboard(nextDashboard);
 
       const partialFailures: string[] = [];
       if (shopOrdersResult.status === "rejected" || catalogResult.status === "rejected") partialFailures.push("쇼핑 운영");
       if (refundsResult.status === "rejected" || billingOrdersResult.status === "rejected") partialFailures.push("결제·환불 운영");
+      if (socialOverviewResult.status === "rejected") partialFailures.push("소셜 운영");
       setError(partialFailures.length > 0 ? `${partialFailures.join(", ")} 통계를 일부 불러오지 못했습니다.` : null);
     } catch (e: any) {
       setAccessState("denied");
@@ -313,6 +353,44 @@ export function SettingsAdminPage() {
 
   const workspaceCards = useMemo(
     () => [
+      {
+        title: "소셜 운영",
+        description: "사용자 상태 제어, 게시글·댓글·스토리 정리, 그룹·챌린지 관리까지 현재 소셜 기능을 통합 운영합니다.",
+        href: "/social/admin",
+        cta: "소셜 관리",
+        accent: "bg-[#eef4fb] text-[#17324d]",
+        metrics: [
+          {
+            label: "소셜 사용자",
+            value: dashboard.social.totalUsers,
+            hint: `읽기 전용 ${dashboard.social.readOnlyUsers}명`,
+            tone: "text-ios-text",
+          },
+          {
+            label: "활성 게시글",
+            value: dashboard.social.totalPosts,
+            hint: `댓글 ${dashboard.social.totalComments}개`,
+            tone: "text-[color:var(--rnest-accent)]",
+          },
+          {
+            label: "가입 대기",
+            value: dashboard.social.pendingJoinRequests,
+            hint: `그룹 ${dashboard.social.totalGroups}개`,
+            tone: dashboard.social.pendingJoinRequests > 0 ? "text-[#C2410C]" : "text-ios-text",
+          },
+          {
+            label: "활성 챌린지",
+            value: dashboard.social.activeChallenges,
+            hint: `스토리 ${dashboard.social.activeStories}개`,
+            tone: "text-ios-text",
+          },
+        ],
+        chips: [
+          `정지 ${dashboard.social.suspendedUsers}명`,
+          `24시간 게시글 ${dashboard.social.postsLast24h}건`,
+          `AI 브리프 ${dashboard.social.aiBriefsThisWeek}회`,
+        ],
+      },
       {
         title: "쇼핑 운영",
         description: "상품 관리, 주문 흐름, 배송 시작, 배송 이슈 대응까지 한 번에 관리합니다.",
@@ -472,7 +550,7 @@ export function SettingsAdminPage() {
         </Link>
         <div>
           <div className="text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">운영 관리자</div>
-          <div className="text-[12.5px] text-ios-sub">쇼핑과 결제 운영 상태를 한 화면에서 확인하고 바로 이동합니다.</div>
+          <div className="text-[12.5px] text-ios-sub">쇼핑, 결제, 소셜 운영 상태를 한 화면에서 확인하고 바로 이동합니다.</div>
         </div>
       </div>
 

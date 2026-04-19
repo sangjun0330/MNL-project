@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithProvider, useAuthState } from "@/lib/auth";
-import { authHeaders } from "@/lib/billing/client";
 import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { DEFAULT_SOCIAL_POST_VISIBILITY } from "@/types/social";
 import type {
@@ -50,6 +49,7 @@ import {
   haveSameIds,
   isOffOrVac,
 } from "@/lib/socialOverlap";
+import { useSocialAdminAccess } from "@/lib/socialAdminClient";
 import { withReturnTo } from "@/lib/navigation";
 
 const SOCIAL_BACKGROUND_REFRESH_MS = 60 * 60 * 1000;
@@ -84,6 +84,7 @@ export function SocialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
+  const { isAdmin: isSocialAdmin } = useSocialAdminAccess(status === "authenticated");
   const { loading: billingLoading, hasEntitlement, reload: reloadBillingAccess } = useBillingAccess();
   const currentUserId = user?.userId ?? null;
   const month = useMemo(() => currentMonth(), []);
@@ -127,7 +128,6 @@ export function SocialPage() {
   const [openConnect, setOpenConnect] = useState(false);
   const [openGroupCreate, setOpenGroupCreate] = useState(false);
   const [openGroupJoin, setOpenGroupJoin] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [openEventCenter, setOpenEventCenter] = useState(false);
   const [openCommonOffSelector, setOpenCommonOffSelector] = useState(false);
   const [unreadEventCount, setUnreadEventCount] = useState(0);
@@ -246,26 +246,11 @@ export function SocialPage() {
       setConnectionsLoading(true);
       setScheduleLoading(true);
       setGroupsLoading(true);
-      // 관리자 여부 확인
-      (async () => {
-        try {
-          const hdrs = await authHeaders();
-          const res = await fetch("/api/admin/billing/access", {
-            headers: { "content-type": "application/json", ...hdrs },
-            cache: "no-store",
-          });
-          const json = await res.json().catch(() => null);
-          setIsAdmin(Boolean(json?.ok && json?.data?.isAdmin));
-        } catch {
-          setIsAdmin(false);
-        }
-      })();
     } else {
       setProfileLoading(false);
       setConnectionsLoading(false);
       setScheduleLoading(false);
       setGroupsLoading(false);
-      setIsAdmin(false);
     }
   }, [currentUserId, status]);
 
@@ -1054,18 +1039,29 @@ export function SocialPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {isAdmin && (
+            {isSocialAdmin ? (
               <button
                 type="button"
                 onClick={() => router.push("/social/admin")}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-[color:var(--rnest-accent)] transition hover:bg-[#f3f0ff] active:opacity-60"
+                className="flex h-9 min-w-[42px] items-center justify-center gap-1 rounded-full border border-[#e5e7eb] bg-[#fafbfc] px-3 text-[11px] font-semibold text-[#17324D] transition hover:bg-white active:opacity-60"
                 aria-label="소셜 관리자"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                >
+                  <path d="M12 3l7 3v6c0 4.2-2.8 7.6-7 9-4.2-1.4-7-4.8-7-9V6l7-3Z" />
+                  <path d="m9.5 12 1.7 1.7 3.3-3.7" />
                 </svg>
+                관리
               </button>
-            )}
+            ) : null}
+
             <button
               type="button"
               onClick={() => setOpenEventCenter(true)}
@@ -1174,7 +1170,7 @@ export function SocialPage() {
         <SocialFeedTab
           scope="following"
           userGroups={groups.map((g) => ({ id: g.id, name: g.name }))}
-          isAdmin={false}
+          isAdmin={isSocialAdmin}
           defaultVisibility={profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY}
           onTagClick={(t) => {
             setExploreTag(t);
@@ -1189,6 +1185,7 @@ export function SocialPage() {
           defaultVisibility={profile?.defaultPostVisibility ?? DEFAULT_SOCIAL_POST_VISIBILITY}
           query={exploreQuery}
           tag={exploreTag}
+          isAdmin={isSocialAdmin}
           onTagChange={(t) => {
             setExploreTag(t);
             if (typeof window !== "undefined") {

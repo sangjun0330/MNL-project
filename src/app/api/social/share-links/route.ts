@@ -1,7 +1,12 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getOrCreateSocialCode } from "@/lib/server/socialCode";
 import { isSocialActionRateLimited, recordSocialActionAttempt, signSocialInviteToken } from "@/lib/server/socialSecurity";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -13,7 +18,10 @@ export async function POST(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: false, error: "login_required" }, { status: 401 });
 
+  const admin = getSupabaseAdmin();
+
   try {
+    await assertSocialWriteAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -45,6 +53,11 @@ export async function POST(req: Request) {
       },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      await recordSocialActionAttempt({ req, userId, action: "share_link_create", success: false, detail: accessCode });
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "share_link_create", success: false, detail: "failed" });
     console.error("[SocialShareLinks/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_create_share_link" }, { status: 500 });

@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { isSocialActionRateLimited, recordSocialActionAttempt } from "@/lib/server/socialSecurity";
 
@@ -45,6 +49,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -178,6 +183,11 @@ export async function POST(req: Request) {
       },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: accessCode });
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "connect_request", success: false, detail: "failed" });
     console.error("[SocialConnect/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_send_request" }, { status: 500 });

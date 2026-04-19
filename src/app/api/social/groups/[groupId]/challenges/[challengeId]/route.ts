@@ -4,6 +4,11 @@
  */
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   buildSocialGroupPermissions,
@@ -45,26 +50,28 @@ export async function GET(
   }
 
   const admin = getSupabaseAdmin();
-
-  // 멤버 확인
-  const { data: membership } = await (admin as any)
-    .from("rnest_social_group_members")
-    .select("role")
-    .eq("group_id", groupId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (!membership) {
-    return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
-  }
-
   try {
+    await assertSocialReadAccess(admin, userId);
+
+    const { data: membership } = await (admin as any)
+      .from("rnest_social_group_members")
+      .select("role")
+      .eq("group_id", groupId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!membership) {
+      return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
+    }
+
     const detail = await getGroupChallengeDetail(admin, challengeId, userId);
     if (!detail || detail.groupId !== groupId) {
       return jsonNoStore({ ok: false, error: "challenge_not_found" }, { status: 404 });
     }
     return jsonNoStore({ ok: true, data: detail });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[challenges/:id/GET] error:", err?.message);
     return jsonNoStore({ ok: false, error: "fetch_failed" }, { status: 500 });
   }
@@ -92,26 +99,29 @@ export async function DELETE(
   }
 
   const admin = getSupabaseAdmin();
-
-  const { data: membership } = await (admin as any)
-    .from("rnest_social_group_members")
-    .select("role")
-    .eq("group_id", groupId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (!membership) {
-    return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
-  }
-
-  const role = normalizeSocialGroupRole(membership.role);
-  const permissions = buildSocialGroupPermissions(role, false);
-  const isManager = permissions.canEditBasicInfo;
-
   try {
+    await assertSocialWriteAccess(admin, userId);
+
+    const { data: membership } = await (admin as any)
+      .from("rnest_social_group_members")
+      .select("role")
+      .eq("group_id", groupId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!membership) {
+      return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
+    }
+
+    const role = normalizeSocialGroupRole(membership.role);
+    const permissions = buildSocialGroupPermissions(role, false);
+    const isManager = permissions.canEditBasicInfo;
+
     await cancelChallenge(admin, challengeId, userId, isManager);
     return jsonNoStore({ ok: true });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     const msg = err?.message ?? "";
     if (msg === "challenge_not_found") {
       return jsonNoStore({ ok: false, error: "challenge_not_found" }, { status: 404 });

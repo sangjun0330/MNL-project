@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { sanitizeInternalPath } from "@/lib/navigation";
+import { useSocialAdminAccess } from "@/lib/socialAdminClient";
 import type { SocialPost } from "@/types/social";
 import { SocialPostCard } from "@/components/social/SocialPostCard";
 import { SocialPostCommentSheet } from "@/components/social/SocialPostCommentSheet";
@@ -16,6 +17,7 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
+  const { isAdmin: isSocialAdmin } = useSocialAdminAccess(status === "authenticated");
   const returnTo = sanitizeInternalPath(
     searchParams.get("returnTo"),
     "/social",
@@ -129,6 +131,7 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
                 prev && prev.id === postId ? { ...prev, ...patch } : prev,
               )
             }
+            isAdmin={isSocialAdmin}
           />
           <button
             type="button"
@@ -145,6 +148,7 @@ export function SocialPostDetailPage({ postId: rawPostId }: Props) {
         post={post}
         onClose={() => setCommentsOpen(false)}
         currentUserId={user?.userId}
+        isAdmin={isSocialAdmin}
         onCommentCountChange={(postId, count) =>
           setPost((prev) =>
             prev && prev.id === postId

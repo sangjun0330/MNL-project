@@ -1,5 +1,9 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   getSocialProfileHeaderByHandle,
@@ -20,6 +24,7 @@ export async function GET(
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     const profile = await getSocialProfileHeaderByHandle(admin, handle, userId);
     if (!profile) {
       return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
@@ -31,6 +36,8 @@ export async function GET(
     const items = await listFollowSummaries(admin, profile.userId, "following");
     return jsonNoStore({ ok: true, data: { items } });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialFollowing/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_following" }, { status: 500 });
   }

@@ -1,5 +1,9 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
@@ -18,6 +22,7 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     // 나와 관련된 모든 연결 조회
     const { data: rows, error } = await (admin as any)
       .from("rnest_connections")
@@ -102,6 +107,8 @@ export async function GET(req: Request) {
       data: { accepted, pendingIncoming, pendingSent },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialConnections/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_list_connections" }, { status: 500 });
   }

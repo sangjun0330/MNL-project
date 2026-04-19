@@ -1,5 +1,9 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { userHasSocialGroupAIBriefConsent } from "@/lib/server/socialGroupAIBriefAccess";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { parseSocialGroupId } from "@/lib/server/socialGroups";
@@ -22,6 +26,7 @@ export async function GET(
     if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
 
     const admin = getSupabaseAdmin();
+    await assertSocialReadAccess(admin, userId);
     if (!(await userHasSocialGroupAIBriefConsent(admin, userId))) {
       return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
     }
@@ -32,6 +37,8 @@ export async function GET(
     });
     return jsonNoStore({ ok: true, data: response });
   } catch (error: any) {
+    const accessCode = getSocialAccessErrorCode(error);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     const code = String(error?.code ?? error?.message ?? "");
     if (code === "not_group_member") {
       return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });

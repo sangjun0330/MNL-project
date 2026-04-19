@@ -1,7 +1,13 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getOrCreateSocialCode, regenerateSocialCode } from "@/lib/server/socialCode";
 import { isSocialActionRateLimited, recordSocialActionAttempt } from "@/lib/server/socialSecurity";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -11,13 +17,18 @@ export async function GET(req: Request) {
   const userId = await readUserIdFromRequest(req);
   if (!userId) return jsonNoStore({ ok: true, data: { code: null, createdAt: null } });
 
+  const admin = getSupabaseAdmin();
+
   try {
+    await assertSocialReadAccess(admin, userId);
     const socialCode = await getOrCreateSocialCode(userId);
     return jsonNoStore({
       ok: true,
       data: { code: socialCode.code, createdAt: socialCode.createdAt },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialCode/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_code" }, { status: 500 });
   }
@@ -42,7 +53,10 @@ export async function POST(req: Request) {
     return jsonNoStore({ ok: false, error: "invalid_payload" }, { status: 400 });
   }
 
+  const admin = getSupabaseAdmin();
+
   try {
+    await assertSocialWriteAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -63,6 +77,11 @@ export async function POST(req: Request) {
       data: { code: newCode.code, createdAt: newCode.createdAt },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      await recordSocialActionAttempt({ req, userId, action: "code_regenerate", success: false, detail: accessCode });
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "code_regenerate", success: false, detail: "failed" });
     console.error("[SocialCode/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_regenerate_code" }, { status: 500 });

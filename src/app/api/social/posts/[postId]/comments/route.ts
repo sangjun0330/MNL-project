@@ -3,6 +3,11 @@ import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
 import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
+import {
   isSocialActionRateLimited,
   recordSocialActionAttempt,
 } from "@/lib/server/socialSecurity";
@@ -35,26 +40,27 @@ export async function GET(
   const url = new URL(req.url);
   const cursor = url.searchParams.get("cursor") || null;
 
-  // 게시글 접근 권한 확인
-  const { data: postRow } = await (admin as any)
-    .from("rnest_social_posts")
-    .select("id, author_user_id, visibility, group_id")
-    .eq("id", postId)
-    .maybeSingle();
-
-  if (!postRow) {
-    return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
-  }
-
-  const canAccess = await canUserAccessPost(admin, postRow, userId);
-  if (!canAccess) {
-    return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
-  }
-
   try {
+    await assertSocialReadAccess(admin, userId);
+    const { data: postRow } = await (admin as any)
+      .from("rnest_social_posts")
+      .select("id, author_user_id, visibility, group_id")
+      .eq("id", postId)
+      .maybeSingle();
+
+    if (!postRow) {
+      return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
+    }
+
+    const canAccess = await canUserAccessPost(admin, postRow, userId);
+    if (!canAccess) {
+      return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
+    }
     const result = await getPostComments(admin, postId, userId, cursor);
     return jsonNoStore({ ok: true, data: result });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialPostComments/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_load_comments" }, { status: 500 });
   }
@@ -95,23 +101,22 @@ export async function POST(
 
   const admin = getSupabaseAdmin();
 
-  // 게시글 접근 권한 확인
-  const { data: postRow } = await (admin as any)
-    .from("rnest_social_posts")
-    .select("id, author_user_id, visibility, group_id")
-    .eq("id", postId)
-    .maybeSingle();
-
-  if (!postRow) {
-    return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
-  }
-
-  const canAccess = await canUserAccessPost(admin, postRow, userId);
-  if (!canAccess) {
-    return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
-  }
-
   try {
+    await assertSocialWriteAccess(admin, userId);
+    const { data: postRow } = await (admin as any)
+      .from("rnest_social_posts")
+      .select("id, author_user_id, visibility, group_id")
+      .eq("id", postId)
+      .maybeSingle();
+
+    if (!postRow) {
+      return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
+    }
+
+    const canAccess = await canUserAccessPost(admin, postRow, userId);
+    if (!canAccess) {
+      return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
+    }
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -129,6 +134,8 @@ export async function POST(
     await recordSocialActionAttempt({ req, userId, action: "post_comment", success: true, detail: "ok" });
     return jsonNoStore({ ok: true, data: { comment } }, { status: 201 });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     if (err?.code === "invalid_parent_comment") {
       return jsonNoStore({ ok: false, error: "invalid_parent_comment" }, { status: 400 });
     }
@@ -184,9 +191,12 @@ export async function DELETE(
   }
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     await deleteComment(admin, commentId, userId, isAdmin);
     return jsonNoStore({ ok: true });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialPostComments/DELETE] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_delete_comment" }, { status: 500 });
   }

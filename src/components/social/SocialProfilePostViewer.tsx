@@ -20,6 +20,7 @@ type Props = {
   initialNextCursor?: string | null;
   fallbackHandle?: string | null;
   currentUserId?: string;
+  isAdmin?: boolean;
   onClose: () => void;
 };
 
@@ -69,6 +70,7 @@ export function SocialProfilePostViewer({
   initialNextCursor,
   fallbackHandle = null,
   currentUserId,
+  isAdmin = false,
   onClose,
 }: Props) {
   const [posts, setPosts] = useState<SocialPost[]>([]);
@@ -340,6 +342,7 @@ export function SocialProfilePostViewer({
                   <SocialPostCard
                     post={item}
                     currentUserId={currentUserId}
+                    isAdmin={isAdmin}
                     onDelete={handleDelete}
                     onCommentOpen={setCommentPost}
                     onAuthorFollowChange={handleAuthorFollowChange}
@@ -369,6 +372,7 @@ export function SocialProfilePostViewer({
         post={commentPost}
         onClose={() => setCommentPost(null)}
         currentUserId={currentUserId}
+        isAdmin={isAdmin}
         onCommentCountChange={(postId, count) =>
           syncPostPatch(postId, { commentCount: count })
         }

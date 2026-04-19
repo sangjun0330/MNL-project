@@ -1,5 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   getOwnSocialProfile,
@@ -16,9 +21,12 @@ export async function GET(req: Request) {
 
   const admin = getSupabaseAdmin();
   try {
+    await assertSocialReadAccess(admin, userId);
     const profile = await getOwnSocialProfile(admin, userId);
     return jsonNoStore({ ok: true, data: profile });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialProfile/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_profile" }, { status: 500 });
   }
@@ -41,6 +49,7 @@ export async function POST(req: Request) {
 
   const admin = getSupabaseAdmin();
   try {
+    await assertSocialWriteAccess(admin, userId);
     const profile = await saveSocialProfile(admin, userId, {
       nickname: body?.nickname,
       avatarEmoji: body?.avatarEmoji,
@@ -54,6 +63,8 @@ export async function POST(req: Request) {
     });
     return jsonNoStore({ ok: true, data: profile });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     if (err?.code === "nickname_required") {
       return jsonNoStore({ ok: false, error: "nickname_required" }, { status: 400 });
     }

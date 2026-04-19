@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   canUserAccessPost,
@@ -26,25 +30,28 @@ export async function POST(
   }
 
   const admin = getSupabaseAdmin();
-  const { data: postRow } = await (admin as any)
-    .from("rnest_social_posts")
-    .select("id, author_user_id, visibility, group_id")
-    .eq("id", postId)
-    .maybeSingle();
-
-  if (!postRow) {
-    return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
-  }
-
-  const canAccess = await canUserAccessPost(admin, postRow, userId);
-  if (!canAccess) {
-    return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
-  }
-
   try {
+    await assertSocialWriteAccess(admin, userId);
+    const { data: postRow } = await (admin as any)
+      .from("rnest_social_posts")
+      .select("id, author_user_id, visibility, group_id")
+      .eq("id", postId)
+      .maybeSingle();
+
+    if (!postRow) {
+      return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
+    }
+
+    const canAccess = await canUserAccessPost(admin, postRow, userId);
+    if (!canAccess) {
+      return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
+    }
+
     const result = await togglePostSave(admin, postId, userId);
     return jsonNoStore({ ok: true, data: result });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialPostSave/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_toggle_save" }, { status: 500 });
   }

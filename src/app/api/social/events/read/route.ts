@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
@@ -25,6 +29,7 @@ export async function POST(req: Request) {
   const now = new Date().toISOString();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     if (body?.all === true) {
       // 모두 읽음 처리
       const { error } = await (admin as any)
@@ -51,6 +56,8 @@ export async function POST(req: Request) {
 
     return jsonNoStore({ ok: true });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialEvents/read/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_mark_read" }, { status: 500 });
   }

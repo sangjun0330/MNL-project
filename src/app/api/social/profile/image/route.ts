@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   uploadSocialProfileImage,
@@ -24,10 +28,13 @@ export async function POST(req: Request) {
 
   const admin = getSupabaseAdmin();
   try {
+    await assertSocialWriteAccess(admin, userId);
     const imagePath = await uploadSocialProfileImage(admin, userId, rawFile);
     const profile = await setSocialProfileImage(admin, userId, imagePath);
     return jsonNoStore({ ok: true, data: { imagePath, profile } }, { status: 201 });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     if (err?.code === "invalid_file_type") {
       return jsonNoStore({ ok: false, error: "invalid_file_type" }, { status: 400 });
     }

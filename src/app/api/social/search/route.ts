@@ -1,5 +1,9 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   listDiscoverableProfiles,
@@ -23,6 +27,7 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     if (wantTrending) {
       const tags = await getTrendingTags(admin, 8, 7);
       return jsonNoStore({ ok: true, data: { trending: tags } });
@@ -35,6 +40,8 @@ export async function GET(req: Request) {
 
     return jsonNoStore({ ok: true, data: { query, tag, profiles, posts } });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialSearch/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_search_social" }, { status: 500 });
   }

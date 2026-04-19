@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { userHasSocialGroupAIBriefConsent } from "@/lib/server/socialGroupAIBriefAccess";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { parseSocialGroupId } from "@/lib/server/socialGroups";
@@ -25,6 +29,7 @@ export async function POST(
     if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
 
     const admin = getSupabaseAdmin();
+    await assertSocialWriteAccess(admin, userId);
     if (!(await userHasSocialGroupAIBriefConsent(admin, userId))) {
       return jsonNoStore({ ok: false, error: "consent_required" }, { status: 403 });
     }
@@ -51,6 +56,8 @@ export async function POST(
     if (code === "group_ai_brief_generation_failed") {
       return jsonNoStore({ ok: false, error: "group_ai_brief_generation_failed" }, { status: 500 });
     }
+    const accessCode = getSocialAccessErrorCode(error);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialGroupAIBriefRefresh/POST] group=%d err=%s", groupId, String(error?.message ?? error));
     return jsonNoStore({ ok: false, error: "group_ai_brief_generation_failed" }, { status: 500 });
   }

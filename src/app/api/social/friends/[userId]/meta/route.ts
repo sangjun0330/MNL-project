@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { cleanSocialNickname } from "@/lib/server/socialSecurity";
 
@@ -32,6 +36,7 @@ export async function PATCH(
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialWriteAccess(admin, ownerId);
     // 현재 값 조회
     const { data: current } = await (admin as any)
       .from("rnest_social_friend_meta")
@@ -70,6 +75,8 @@ export async function PATCH(
       },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialFriendMeta/PATCH] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_update_friend_meta" }, { status: 500 });
   }

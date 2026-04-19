@@ -1,5 +1,9 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { checkSocialProfileAvailability } from "@/lib/server/socialHub";
 
@@ -16,9 +20,14 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     const result = await checkSocialProfileAvailability(admin, userId, { field, value });
     return jsonNoStore({ ok: true, data: result });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     if (err?.code === "invalid_field") {
       return jsonNoStore({ ok: false, error: "invalid_field" }, { status: 400 });
     }

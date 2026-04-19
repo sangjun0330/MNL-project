@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   cleanSocialGroupNoticeBody,
@@ -100,6 +104,7 @@ export async function POST(
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -699,6 +704,11 @@ export async function POST(
 
     return jsonNoStore({ ok: false, error: "invalid_action" }, { status: 400 });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      await recordSocialActionAttempt({ req, userId, action: `group_manage_${action}`, success: false, detail: accessCode });
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     await recordSocialActionAttempt({ req, userId, action: `group_manage_${action}`, success: false, detail: "failed" });
     console.error("[SocialGroupManage/POST] id=%d action=%s err=%s", groupId, action, String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_manage_group" }, { status: 500 });

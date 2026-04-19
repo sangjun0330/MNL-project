@@ -1,5 +1,9 @@
 import { jsonNoStore } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import type { SocialGroupBoardMember } from "@/types/social";
 import {
@@ -48,6 +52,7 @@ export async function GET(
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     const [group, { data: membership, error: membershipErr }, { data: memberRows, error: memberErr }] = await Promise.all([
       getSocialGroupById(admin, groupId),
       (admin as any)
@@ -233,6 +238,8 @@ export async function GET(
       },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialGroupBoard/GET] id=%d err=%s", groupId, String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_group_board" }, { status: 500 });
   }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthState } from "@/lib/auth";
 import { sanitizeInternalPath } from "@/lib/navigation";
+import { useSocialAdminAccess } from "@/lib/socialAdminClient";
 import type { FeedPage, SocialPost, SocialProfile, SocialProfileHeader } from "@/types/social";
 import { SocialAvatarBadge, SocialAvatarGlyph } from "@/components/social/SocialAvatar";
 import { SocialProfileSheet } from "@/components/social/SocialProfileSheet";
@@ -340,6 +341,7 @@ export function SocialProfilePage({ handle }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status, user } = useAuthState();
+  const { isAdmin: isSocialAdmin } = useSocialAdminAccess(status === "authenticated");
   const returnTo = useMemo(
     () => sanitizeInternalPath(searchParams.get("returnTo"), "/social"),
     [searchParams]
@@ -842,6 +844,7 @@ export function SocialProfilePage({ handle }: Props) {
         initialNextCursor={selectedPost?.initialNextCursor}
         fallbackHandle={selectedPost?.fallbackHandle ?? (visibleTab === "posts" ? activeProfileHandle : null)}
         currentUserId={user?.userId}
+        isAdmin={isSocialAdmin}
         onClose={() => setSelectedPost(null)}
       />
     </>

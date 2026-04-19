@@ -1,5 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import type { HealthVisibility, ScheduleVisibility } from "@/types/social";
 
@@ -39,6 +44,7 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     const { data: row, error } = await (admin as any)
       .from("rnest_social_preferences")
       .select("schedule_visibility, status_message_visible, accept_invites, notify_requests, health_visibility")
@@ -66,6 +72,8 @@ export async function GET(req: Request) {
         return jsonNoStore({ ok: true, data: DEFAULT_PREFS });
       }
     }
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialPreferences/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_preferences" }, { status: 500 });
   }
@@ -99,6 +107,7 @@ export async function POST(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     // 현재 값 조회 (부분 업데이트를 위해)
     let currentPrefs = DEFAULT_PREFS;
     try {
@@ -183,6 +192,8 @@ export async function POST(req: Request) {
 
     return jsonNoStore({ ok: true, data: rowToPrefs(upserted) });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialPreferences/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_save_preferences" }, { status: 500 });
   }

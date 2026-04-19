@@ -1,5 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   cleanSocialGroupNotice,
@@ -28,6 +33,7 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     const { data: memberships, error: membershipErr } = await (admin as any)
       .from("rnest_social_group_members")
       .select("group_id, role, joined_at")
@@ -110,6 +116,8 @@ export async function GET(req: Request) {
 
     return jsonNoStore({ ok: true, data: { groups: groupList } });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialGroups/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_groups" }, { status: 500 });
   }
@@ -160,6 +168,7 @@ export async function POST(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -249,6 +258,11 @@ export async function POST(req: Request) {
       }),
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      await recordSocialActionAttempt({ req, userId, action: "group_create", success: false, detail: accessCode });
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "group_create", success: false, detail: "failed" });
     console.error("[SocialGroups/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_create_group" }, { status: 500 });

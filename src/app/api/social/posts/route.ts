@@ -1,5 +1,10 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   isSocialActionRateLimited,
@@ -41,9 +46,14 @@ export async function GET(req: Request) {
   const handle = url.searchParams.get("handle") || null;
 
   try {
+    await assertSocialReadAccess(admin, userId);
     const feed = await getFeedPage(admin, userId, { scope, cursor, handle, limit: 20 });
     return jsonNoStore({ ok: true, data: feed });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     console.error("[SocialPosts/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_load_feed" }, { status: 500 });
   }
@@ -101,6 +111,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -148,6 +159,10 @@ export async function POST(req: Request) {
     await recordSocialActionAttempt({ req, userId, action: "post_create", success: true, detail: "ok" });
     return jsonNoStore({ ok: true, data: { post } }, { status: 201 });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     if (err?.code === "not_group_member") {
       return jsonNoStore({ ok: false, error: "not_group_member" }, { status: 403 });
     }

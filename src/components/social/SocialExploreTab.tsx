@@ -32,6 +32,7 @@ type Props = {
   defaultVisibility?: SocialPostVisibility;
   query?: string;
   tag?: string;
+  isAdmin?: boolean;
   onTagChange?: (tag: string) => void;
 };
 
@@ -197,7 +198,7 @@ function TrendingTagChip({
   );
 }
 
-export function SocialExploreTab({ query = "", tag = "", onTagChange }: Props) {
+export function SocialExploreTab({ query = "", tag = "", isAdmin = false, onTagChange }: Props) {
   const router = useRouter();
   const { user } = useAuthState();
   const currentUserId = user?.userId;
@@ -414,6 +415,7 @@ export function SocialExploreTab({ query = "", tag = "", onTagChange }: Props) {
                       key={post.id}
                       post={post}
                       currentUserId={currentUserId}
+                      isAdmin={isAdmin}
                       onCommentOpen={setCommentPost}
                       onAuthorFollowChange={handleAuthorFollowChange}
                       onTagClick={(t) => {
@@ -482,6 +484,7 @@ export function SocialExploreTab({ query = "", tag = "", onTagChange }: Props) {
         post={commentPost}
         onClose={() => setCommentPost(null)}
         currentUserId={currentUserId}
+        isAdmin={isAdmin}
         onCommentCountChange={(postId, count) =>
           setPosts((prev) =>
             prev.map((item) =>

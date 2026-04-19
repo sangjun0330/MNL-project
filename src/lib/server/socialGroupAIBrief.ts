@@ -2949,6 +2949,18 @@ async function autoGenerateGroupAIBriefForGroup(args: {
   return { status: "processed" as const, row: generated };
 }
 
+export async function generateGroupAIBriefForAdmin(args: {
+  admin: any;
+  groupId: number;
+}) {
+  const subscriptionCache = new Map<string, SocialGroupAIBriefSubscriptionSnapshot | null>();
+  return autoGenerateGroupAIBriefForGroup({
+    admin: args.admin,
+    groupId: args.groupId,
+    subscriptionCache,
+  });
+}
+
 export async function maybeAutoRefreshGroupAIBriefsForUserStateChange(args: {
   admin: any;
   userId: string;

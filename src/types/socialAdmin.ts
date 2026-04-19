@@ -1,85 +1,118 @@
-export type SocialAdminStats = {
+export type SocialAdminUserState = "active" | "read_only" | "suspended";
+
+export type SocialAdminOverview = {
   totalUsers: number;
   totalPosts: number;
-  activeToday: number;
-  totalLikes: number;
   totalComments: number;
-  newUsersThisWeek: number;
-  suspendedUsers: number;
   activeStories: number;
   totalGroups: number;
+  pendingJoinRequests: number;
+  activeChallenges: number;
+  readOnlyUsers: number;
+  suspendedUsers: number;
+  postsLast24h: number;
+  storiesLast24h: number;
+  aiBriefsThisWeek: number;
 };
 
-export type SocialAdminUser = {
+export type SocialAdminActorSummary = {
   userId: string;
   nickname: string;
-  handle: string;
   displayName: string;
+  handle: string | null;
   avatarEmoji: string;
-  accountVisibility: string;
-  isSuspended: boolean;
-  suspendedAt: string | null;
-  suspendedBy: string | null;
-  suspensionReason: string | null;
-  createdAt: string;
+  profileImageUrl: string | null;
 };
 
-export type SocialAdminUserDetail = SocialAdminUser & {
+export type SocialAdminUserListItem = SocialAdminActorSummary & {
+  bio: string;
+  state: SocialAdminUserState;
+  stateReason: string | null;
+  accountVisibility: "public" | "private";
+  defaultPostVisibility: "public_internal" | "followers" | "friends" | "group";
+  subscriptionTier: string;
+  lastSeenAt: string | null;
+  updatedAt: string;
   postCount: number;
+  storyCount: number;
   groupCount: number;
+};
+
+export type SocialAdminUserDetail = SocialAdminUserListItem & {
   followerCount: number;
+  followingCount: number;
+  friendCount: number;
+  pendingIncomingRequests: number;
+  pendingOutgoingRequests: number;
+  recentGroups: Array<{
+    groupId: number;
+    name: string;
+    role: "owner" | "admin" | "member";
+    joinedAt: string;
+  }>;
 };
 
-export type SocialAdminPost = {
+export type SocialAdminContentKind = "post" | "comment" | "story";
+
+export type SocialAdminContentItem = {
   id: number;
-  authorUserId: string;
-  authorNickname: string;
-  authorHandle: string;
-  bodyPreview: string;
-  visibility: string;
-  likeCount: number;
-  commentCount: number;
+  kind: SocialAdminContentKind;
+  author: SocialAdminActorSummary;
+  preview: string;
   createdAt: string;
+  groupId: number | null;
+  groupName: string | null;
+  postId: number | null;
+  visibility: string | null;
+  contentType: string | null;
+  imageUrl: string | null;
+  metricPrimary: number | null;
+  metricSecondary: number | null;
+  expiresAt: string | null;
 };
 
-export type SocialAdminGroupMember = {
-  userId: string;
-  nickname: string;
-  handle: string;
-  avatarEmoji: string;
-  role: string;
+export type SocialAdminGroupMember = SocialAdminActorSummary & {
+  role: "owner" | "admin" | "member";
   joinedAt: string;
 };
 
-export type SocialAdminGroup = {
+export type SocialAdminGroupJoinRequest = SocialAdminActorSummary & {
+  requestId: number;
+  createdAt: string;
+};
+
+export type SocialAdminGroupItem = {
   id: number;
   name: string;
-  descriptionPreview: string;
-  ownerUserId: string;
-  ownerNickname: string;
+  description: string;
+  notice: string;
+  owner: SocialAdminActorSummary | null;
+  joinMode: "open" | "approval";
+  allowMemberInvites: boolean;
+  maxMembers: number;
+  updatedAt: string;
   memberCount: number;
-  joinMode: string;
-  createdAt: string;
+  pendingJoinRequestCount: number;
+  activeChallengeCount: number;
+  latestBriefGeneratedAt: string | null;
 };
 
-export type SocialAdminStory = {
-  id: number;
-  authorUserId: string;
-  authorNickname: string;
-  authorHandle: string;
-  contentType: string;
-  textPreview: string;
-  expiresAt: string;
-  viewCount: number;
-  createdAt: string;
+export type SocialAdminGroupDetail = SocialAdminGroupItem & {
+  members: SocialAdminGroupMember[];
+  pendingRequests: SocialAdminGroupJoinRequest[];
 };
 
-export type SocialAdminSecurityLog = {
+export type SocialAdminChallengeItem = {
   id: number;
-  action: string;
-  actorUserId: string;
-  actorIp: string;
-  success: boolean;
-  detail: string | null;
+  groupId: number;
+  groupName: string;
+  title: string;
+  description: string | null;
+  metric: string;
+  challengeType: string;
+  status: string;
+  participantCount: number;
   createdAt: string;
+  startsAt: string;
+  endsAt: string;
 };

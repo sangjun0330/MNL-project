@@ -2,6 +2,11 @@ import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurit
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { deletePost, getPostById, updatePost, cleanPostBody, cleanPostTags, cleanPostImagePaths } from "@/lib/server/socialPosts";
 import type { SocialHealthBadge, RecoveryCardSnapshot, SocialPostVisibility } from "@/types/social";
 
@@ -23,12 +28,17 @@ export async function GET(
 
   const admin = getSupabaseAdmin();
   try {
+    await assertSocialReadAccess(admin, userId);
     const post = await getPostById(admin, postId, userId);
     if (!post) {
       return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
     }
     return jsonNoStore({ ok: true, data: { post } });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     console.error("[SocialPost/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_get_post" }, { status: 500 });
   }
@@ -105,9 +115,12 @@ export async function PATCH(
   }
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     const updatedPost = await updatePost(admin, postId, userId, patch);
     return jsonNoStore({ ok: true, data: { post: updatedPost } });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     if (err?.code === "not_found") return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
     if (err?.code === "invalid_image_path") return jsonNoStore({ ok: false, error: "invalid_image_path" }, { status: 400 });
     console.error("[SocialPost/PATCH] err=%s", String(err?.message ?? err));
@@ -160,9 +173,12 @@ export async function DELETE(
   }
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     await deletePost(admin, postId, userId, isAdmin);
     return jsonNoStore({ ok: true });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialPost/DELETE] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_delete_post" }, { status: 500 });
   }

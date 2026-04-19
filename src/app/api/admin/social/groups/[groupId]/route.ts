@@ -1,97 +1,87 @@
-import { NextResponse } from "next/server";
-import { requireBillingAdmin } from "@/lib/server/billingAdminAuth";
+import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import {
+  getSocialAdminGroupDetail,
+  requireSocialAdmin,
+  updateSocialAdminGroup,
+} from "@/lib/server/socialAdmin";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-function bad(status: number, message: string) {
-  return NextResponse.json({ ok: false, error: message }, { status });
+function parseGroupId(raw: string) {
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-export async function DELETE(
-  req: Request,
-  { params }: { params: Promise<{ groupId: string }> },
-) {
-  const auth = await requireBillingAdmin(req);
-  if (!auth.ok) return bad(auth.status, auth.error);
-
-  const { groupId } = await params;
-  const id = Number(groupId);
-  if (!Number.isFinite(id) || id <= 0) return bad(400, "invalid_group_id");
-
-  const admin = getSupabaseAdmin();
-
-  try {
-    const { error } = await (admin as any)
-      .from("rnest_social_groups")
-      .delete()
-      .eq("id", id);
-
-    if (error) throw error;
-
-    return NextResponse.json({ ok: true });
-  } catch {
-    return bad(500, "failed_to_delete_social_group");
-  }
-}
-
-// 그룹 멤버 목록 조회
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ groupId: string }> },
 ) {
-  const auth = await requireBillingAdmin(req);
-  if (!auth.ok) return bad(auth.status, auth.error);
-
-  const { groupId } = await params;
-  const id = Number(groupId);
-  if (!Number.isFinite(id) || id <= 0) return bad(400, "invalid_group_id");
-
-  const admin = getSupabaseAdmin();
+  const access = await requireSocialAdmin(req);
+  if (!access.ok) {
+    return jsonNoStore({ ok: false, error: access.error }, { status: access.status });
+  }
 
   try {
-    const { data: memberRows, error } = await (admin as any)
-      .from("rnest_social_group_members")
-      .select("user_id, role, joined_at")
-      .eq("group_id", id)
-      .order("joined_at", { ascending: true });
-
-    if (error) throw error;
-
-    const rows = (memberRows as any[]) ?? [];
-    const memberIds = rows.map((r) => String(r.user_id));
-    const profileMap: Record<string, { nickname: string; handle: string; avatarEmoji: string }> = {};
-
-    if (memberIds.length > 0) {
-      const { data: profiles } = await (admin as any)
-        .from("rnest_social_profiles")
-        .select("user_id, nickname, handle, avatar_emoji")
-        .in("user_id", memberIds);
-
-      for (const p of (profiles as any[]) ?? []) {
-        profileMap[String(p.user_id)] = {
-          nickname: String(p.nickname ?? ""),
-          handle: String(p.handle ?? ""),
-          avatarEmoji: String(p.avatar_emoji ?? "👤"),
-        };
-      }
+    const { groupId: rawGroupId } = await params;
+    const groupId = parseGroupId(rawGroupId);
+    if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
+    const data = await getSocialAdminGroupDetail(getSupabaseAdmin(), groupId);
+    if (!data) {
+      return jsonNoStore({ ok: false, error: "group_not_found" }, { status: 404 });
     }
+    return jsonNoStore({ ok: true, data: { group: data } });
+  } catch (error: any) {
+    console.error("[AdminSocialGroupDetail/GET] err=%s", String(error?.message ?? error));
+    return jsonNoStore({ ok: false, error: "failed_to_load_social_group" }, { status: 500 });
+  }
+}
 
-    const members = rows.map((row) => {
-      const profile = profileMap[String(row.user_id)] ?? { nickname: "", handle: "", avatarEmoji: "👤" };
-      return {
-        userId: String(row.user_id),
-        nickname: profile.nickname,
-        handle: profile.handle,
-        avatarEmoji: profile.avatarEmoji,
-        role: String(row.role ?? "member"),
-        joinedAt: String(row.joined_at ?? ""),
-      };
-    });
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ groupId: string }> },
+) {
+  const originError = sameOriginRequestError(req);
+  if (originError) return jsonNoStore({ ok: false, error: originError }, { status: 403 });
 
-    return NextResponse.json({ ok: true, data: { members } });
+  const access = await requireSocialAdmin(req);
+  if (!access.ok) {
+    return jsonNoStore({ ok: false, error: access.error }, { status: access.status });
+  }
+
+  let body: any = null;
+  try {
+    body = await req.json();
   } catch {
-    return bad(500, "failed_to_get_group_members");
+    return jsonNoStore({ ok: false, error: "invalid_json" }, { status: 400 });
+  }
+
+  try {
+    const { groupId: rawGroupId } = await params;
+    const groupId = parseGroupId(rawGroupId);
+    if (!groupId) return jsonNoStore({ ok: false, error: "invalid_group_id" }, { status: 400 });
+    await updateSocialAdminGroup({
+      admin: getSupabaseAdmin(),
+      adminUserId: access.identity.userId,
+      groupId,
+      action: body?.action,
+      payload: body,
+      reason: body?.reason,
+    });
+    return jsonNoStore({ ok: true });
+  } catch (error: any) {
+    const message = String(error?.message ?? error);
+    if (
+      message === "group_not_found" ||
+      message === "cannot_remove_owner" ||
+      message === "request_not_found" ||
+      message === "request_required" ||
+      message === "target_user_required"
+    ) {
+      return jsonNoStore({ ok: false, error: message }, { status: 409 });
+    }
+    console.error("[AdminSocialGroupDetail/PATCH] err=%s", message);
+    return jsonNoStore({ ok: false, error: "failed_to_update_social_group" }, { status: 500 });
   }
 }

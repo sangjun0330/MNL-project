@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialReadAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getSocialCode } from "@/lib/server/socialCode";
 import { isSocialActionRateLimited, recordSocialActionAttempt, verifySocialInviteToken } from "@/lib/server/socialSecurity";
@@ -31,6 +35,8 @@ export async function POST(req: Request) {
   }
 
   try {
+    const admin = getSupabaseAdmin();
+    await assertSocialReadAccess(admin, userId);
     const limited = await isSocialActionRateLimited({
       req,
       userId,
@@ -44,7 +50,6 @@ export async function POST(req: Request) {
       return jsonNoStore({ ok: false, error: "too_many_requests" }, { status: 429 });
     }
 
-    const admin = getSupabaseAdmin();
     const invite = await verifySocialInviteToken(token);
     if (!invite || invite.expiresAt < Date.now()) {
       await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: false, detail: "expired" });
@@ -107,6 +112,11 @@ export async function POST(req: Request) {
       },
     });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) {
+      await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: false, detail: accessCode });
+      return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
+    }
     await recordSocialActionAttempt({ req, userId, action: "share_link_resolve", success: false, detail: "failed" });
     console.error("[SocialShareLinks/Resolve] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_resolve_share_link" }, { status: 500 });

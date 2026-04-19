@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "edge";
@@ -39,6 +43,7 @@ export async function PATCH(
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialWriteAccess(admin, userId);
     // 연결 조회
     const { data: conn, error: fetchErr } = await (admin as any)
       .from("rnest_connections")
@@ -113,6 +118,8 @@ export async function PATCH(
 
     return jsonNoStore({ ok: true });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialConnections/PATCH] id=%d err=%s", connectionId, String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_update_connection" }, { status: 500 });
   }

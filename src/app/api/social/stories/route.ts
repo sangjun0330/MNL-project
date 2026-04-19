@@ -1,6 +1,11 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import {
+  assertSocialReadAccess,
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import type { SocialStory, SocialStoryContentType, SocialAuthorProfile } from "@/types/social";
 import { loadSocialHubProfileMap, buildSocialAuthorProfile } from "@/lib/server/socialHub";
 
@@ -74,6 +79,7 @@ export async function GET(req: Request) {
   const admin = getSupabaseAdmin();
 
   try {
+    await assertSocialReadAccess(admin, userId);
     // 팔로우, 친구, 본인의 user_id 집합
     const [followRows, connectionRows] = await Promise.all([
       (admin as any)
@@ -107,6 +113,8 @@ export async function GET(req: Request) {
     const stories = await hydrateStories(admin, userId, storyRows ?? []);
     return jsonNoStore({ ok: true, data: { stories } });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[Stories/GET] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_load_stories" }, { status: 500 });
   }
@@ -171,6 +179,7 @@ export async function POST(req: Request) {
 
   const admin = getSupabaseAdmin();
   try {
+    await assertSocialWriteAccess(admin, userId);
     const { data, error } = await (admin as any)
       .from("rnest_social_stories")
       .insert({
@@ -189,6 +198,8 @@ export async function POST(req: Request) {
     const stories = await hydrateStories(admin, userId, [data]);
     return jsonNoStore({ ok: true, data: { story: stories[0] } }, { status: 201 });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[Stories/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_create_story" }, { status: 500 });
   }

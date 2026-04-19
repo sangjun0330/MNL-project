@@ -1,5 +1,9 @@
 import { jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
 import { readUserIdFromRequest } from "@/lib/server/readUserId";
+import {
+  assertSocialWriteAccess,
+  getSocialAccessErrorCode,
+} from "@/lib/server/socialAdmin";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   canUserAccessPost,
@@ -27,32 +31,35 @@ export async function POST(
   }
 
   const admin = getSupabaseAdmin();
-  const [{ data: postRow }, { data: commentRow }] = await Promise.all([
-    (admin as any)
-      .from("rnest_social_posts")
-      .select("id, author_user_id, visibility, group_id")
-      .eq("id", postId)
-      .maybeSingle(),
-    (admin as any)
-      .from("rnest_social_post_comments")
-      .select("id, post_id")
-      .eq("id", commentId)
-      .maybeSingle(),
-  ]);
-
-  if (!postRow || !commentRow || Number(commentRow.post_id) !== postId) {
-    return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
-  }
-
-  const canAccess = await canUserAccessPost(admin, postRow, userId);
-  if (!canAccess) {
-    return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
-  }
-
   try {
+    await assertSocialWriteAccess(admin, userId);
+    const [{ data: postRow }, { data: commentRow }] = await Promise.all([
+      (admin as any)
+        .from("rnest_social_posts")
+        .select("id, author_user_id, visibility, group_id")
+        .eq("id", postId)
+        .maybeSingle(),
+      (admin as any)
+        .from("rnest_social_post_comments")
+        .select("id, post_id")
+        .eq("id", commentId)
+        .maybeSingle(),
+    ]);
+
+    if (!postRow || !commentRow || Number(commentRow.post_id) !== postId) {
+      return jsonNoStore({ ok: false, error: "not_found" }, { status: 404 });
+    }
+
+    const canAccess = await canUserAccessPost(admin, postRow, userId);
+    if (!canAccess) {
+      return jsonNoStore({ ok: false, error: "forbidden" }, { status: 403 });
+    }
+
     const result = await toggleCommentLike(admin, commentId, userId);
     return jsonNoStore({ ok: true, data: result });
   } catch (err: any) {
+    const accessCode = getSocialAccessErrorCode(err);
+    if (accessCode) return jsonNoStore({ ok: false, error: accessCode }, { status: 403 });
     console.error("[SocialCommentLike/POST] err=%s", String(err?.message ?? err));
     return jsonNoStore({ ok: false, error: "failed_to_toggle_comment_like" }, { status: 500 });
   }
