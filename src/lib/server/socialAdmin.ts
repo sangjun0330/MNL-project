@@ -25,6 +25,9 @@ import type {
 } from "@/types/socialAdmin";
 
 const ACTIVE_STATE: SocialAdminUserState = "active";
+const POST_MEDIA_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, "")}/storage/v1/object/public/social-post-images`
+  : "";
 const STORY_MEDIA_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL
   ? `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, "")}/storage/v1/object/public/social-story-images`
   : "";
@@ -87,6 +90,23 @@ function normalizeAccountVisibility(value: unknown): "public" | "private" {
 function storyMediaUrl(mediaPath: string | null | undefined) {
   if (!mediaPath || !STORY_MEDIA_BASE) return null;
   return `${STORY_MEDIA_BASE}/${String(mediaPath).replace(/^\/+/, "")}`;
+}
+
+function postMediaUrl(imagePath: string | null | undefined) {
+  if (!imagePath || !POST_MEDIA_BASE) return null;
+  return `${POST_MEDIA_BASE}/${String(imagePath).replace(/^\/+/, "")}`;
+}
+
+function normalizeStoredPostImagePath(value: unknown) {
+  if (Array.isArray(value)) {
+    for (const rawPath of value) {
+      const normalized = String(rawPath ?? "").replace(/^\/+/, "").trim();
+      if (normalized) return normalized;
+    }
+    return null;
+  }
+  const normalized = String(value ?? "").replace(/^\/+/, "").trim();
+  return normalized || null;
 }
 
 function cleanAdminReason(value: unknown) {
@@ -528,7 +548,7 @@ export async function updateSocialAdminUserState(args: {
 async function listPostContent(admin: any, limit: number, search: string) {
   let query = (admin as any)
     .from("rnest_social_posts")
-    .select("id, author_user_id, body, visibility, group_id, image_path, created_at, like_count, comment_count")
+    .select("id, author_user_id, body, visibility, group_id, image_path, image_paths, created_at, like_count, comment_count")
     .order("created_at", { ascending: false })
     .limit(limit);
   if (search) query = query.ilike("body", `%${search}%`);
@@ -540,13 +560,30 @@ async function listPostContent(admin: any, limit: number, search: string) {
 async function listCommentContent(admin: any, limit: number, search: string) {
   let query = (admin as any)
     .from("rnest_social_post_comments")
-    .select("id, post_id, author_user_id, body, created_at, like_count")
+    .select("id, post_id, author_user_id, body, created_at")
     .order("created_at", { ascending: false })
     .limit(limit);
   if (search) query = query.ilike("body", `%${search}%`);
   const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
+}
+
+async function loadCommentLikeCountMap(admin: any, commentIds: number[]) {
+  const unique = Array.from(new Set(commentIds.filter((value) => Number.isFinite(value) && value > 0)));
+  const map = new Map<number, number>();
+  if (unique.length === 0) return map;
+  const { data, error } = await (admin as any)
+    .from("rnest_social_comment_likes")
+    .select("comment_id")
+    .in("comment_id", unique);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const commentId = Number((row as any).comment_id);
+    if (!Number.isFinite(commentId) || commentId <= 0) continue;
+    map.set(commentId, Number(map.get(commentId) ?? 0) + 1);
+  }
+  return map;
 }
 
 async function listStoryContent(admin: any, limit: number, search: string) {
@@ -591,11 +628,13 @@ export async function listSocialAdminContent(args: {
   const groupIds = Array.from(
     new Set(posts.map((row: any) => Number(row.group_id)).filter((value: number) => Number.isFinite(value) && value > 0)),
   );
-  const [profileMap, { data: groupRows }] = await Promise.all([
+  const commentIds = comments.map((row: any) => Number(row.id)).filter((value: number) => Number.isFinite(value) && value > 0);
+  const [profileMap, { data: groupRows }, commentLikeCountMap] = await Promise.all([
     loadProfileMap(args.admin, authorIds),
     groupIds.length > 0
       ? (args.admin as any).from("rnest_social_groups").select("id, name").in("id", groupIds)
       : Promise.resolve({ data: [] }),
+    loadCommentLikeCountMap(args.admin, commentIds),
   ]);
   const groupNameMap = new Map<number, string>(
     (groupRows ?? []).map((row: any) => [Number(row.id), normalizeText(row.name, "그룹")]),
@@ -613,7 +652,9 @@ export async function listSocialAdminContent(args: {
       postId: Number(row.id),
       visibility: normalizeOptionalText(row.visibility),
       contentType: null,
-      imageUrl: normalizeOptionalText(row.image_path),
+      imageUrl: postMediaUrl(
+        normalizeStoredPostImagePath(Array.isArray(row.image_paths) ? row.image_paths : row.image_path),
+      ),
       metricPrimary: Number(row.like_count ?? 0),
       metricSecondary: Number(row.comment_count ?? 0),
       expiresAt: null,
@@ -630,7 +671,7 @@ export async function listSocialAdminContent(args: {
       visibility: null,
       contentType: null,
       imageUrl: null,
-      metricPrimary: Number(row.like_count ?? 0),
+      metricPrimary: Number(commentLikeCountMap.get(Number(row.id)) ?? 0),
       metricSecondary: null,
       expiresAt: null,
     })),
