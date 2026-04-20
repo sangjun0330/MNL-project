@@ -21,6 +21,7 @@ type ConsentRow = {
   consent_version: string;
   privacy_version: string;
   terms_version: string;
+  med_safety_consented_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -439,4 +440,46 @@ export async function loadUserBootstrap(userId: string): Promise<{
     updatedAt: stateRevision,
     recoverySummary,
   };
+}
+
+export async function loadMedSafetyConsentedAt(userId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("user_service_consents")
+    .select("med_safety_consented_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    if (isServiceConsentSchemaUnavailableError(error)) return null;
+    throw error;
+  }
+
+  const row = data as Pick<ConsentRow, "med_safety_consented_at"> | null;
+  return row?.med_safety_consented_at ?? null;
+}
+
+export async function completeMedSafetyConsent(userId: string): Promise<string> {
+  const admin = getSupabaseAdmin();
+  const now = new Date().toISOString();
+
+  const { error: upsertError } = await admin
+    .from("user_service_consents")
+    .update({ med_safety_consented_at: now, updated_at: now })
+    .eq("user_id", userId);
+
+  if (upsertError) {
+    throw upsertError;
+  }
+
+  void admin.from("user_service_consent_events").insert({
+    user_id: userId,
+    event_type: "med_safety_granted",
+    payload: {
+      ...buildServiceConsentEventPayload(),
+      med_safety_consented_at: now,
+    },
+  });
+
+  return now;
 }

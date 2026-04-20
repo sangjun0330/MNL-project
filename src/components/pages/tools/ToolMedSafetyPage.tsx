@@ -1092,7 +1092,8 @@ export function ToolMedSafetyPage() {
   const { user, status: authStatus } = useAuthState();
   const { loading: billingLoading, subscription, reload: reloadBilling } = useBillingAccess();
   const [mounted, setMounted] = useState(false);
-  const [medSafetyAcked, setMedSafetyAcked] = useState(true);
+  const [medSafetyConsentStatus, setMedSafetyConsentStatus] = useState<"idle" | "pending" | "consented">("idle");
+  const [medSafetyConsentSubmitting, setMedSafetyConsentSubmitting] = useState(false);
   const [didRestoreSession, setDidRestoreSession] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -1173,13 +1174,30 @@ export function ToolMedSafetyPage() {
   useEffect(() => {
     setMounted(true);
     purgeLegacyMedSafetySessionStorage();
-    try {
-      const acked = localStorage.getItem("rnest_med_safety_ack_v1");
-      setMedSafetyAcked(acked === "1");
-    } catch {
-      setMedSafetyAcked(true);
-    }
   }, []);
+
+  useEffect(() => {
+    if (!mounted || authStatus === "loading" || authStatus !== "authenticated") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const authHeaders = await getBrowserAuthHeaders();
+        const res = await fetch("/api/tools/med-safety/consent", {
+          method: "GET",
+          headers: { ...authHeaders },
+          cache: "no-store",
+        });
+        if (cancelled) return;
+        if (!res.ok) { setMedSafetyConsentStatus("pending"); return; }
+        const json = await res.json() as { ok?: boolean; consented?: boolean };
+        if (cancelled) return;
+        setMedSafetyConsentStatus(json.ok && json.consented ? "consented" : "pending");
+      } catch {
+        if (!cancelled) setMedSafetyConsentStatus("pending");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mounted, authStatus]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -1686,7 +1704,7 @@ export function ToolMedSafetyPage() {
 
   return (
     <>
-      {mounted && !medSafetyAcked ? (
+      {medSafetyConsentStatus === "pending" ? (
         <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/40 pb-[env(safe-area-inset-bottom)] sm:items-center sm:pb-0">
           <div className="w-full max-w-[480px] rounded-t-[32px] border border-[#E8E8EC] bg-white px-6 pb-10 pt-7 sm:rounded-[32px] sm:pb-8">
             <div className="mb-5 flex items-center gap-3">
@@ -1719,13 +1737,27 @@ export function ToolMedSafetyPage() {
             </ul>
             <button
               type="button"
-              className="mt-6 w-full rounded-full bg-[color:var(--rnest-accent)] py-3.5 text-[15px] font-semibold text-white"
-              onClick={() => {
-                try { localStorage.setItem("rnest_med_safety_ack_v1", "1") } catch {}
-                setMedSafetyAcked(true);
+              disabled={medSafetyConsentSubmitting}
+              className="mt-6 w-full rounded-full bg-[color:var(--rnest-accent)] py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
+              onClick={async () => {
+                if (medSafetyConsentSubmitting) return;
+                setMedSafetyConsentSubmitting(true);
+                try {
+                  const authHeaders = await getBrowserAuthHeaders();
+                  await fetch("/api/tools/med-safety/consent", {
+                    method: "POST",
+                    headers: { ...authHeaders },
+                    cache: "no-store",
+                  });
+                } catch {
+                  // 저장 실패해도 사용은 허용 (재방문 시 다시 확인)
+                } finally {
+                  setMedSafetyConsentSubmitting(false);
+                  setMedSafetyConsentStatus("consented");
+                }
               }}
             >
-              {t("이해했습니다, 참고용으로만 사용할게요")}
+              {medSafetyConsentSubmitting ? t("저장 중...") : t("이해했습니다, 참고용으로만 사용할게요")}
             </button>
           </div>
         </div>

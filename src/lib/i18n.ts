@@ -1325,6 +1325,7 @@ const EN_EXTRA: Record<string, string> = {
     "Do not make clinical decisions in emergencies based solely on these results.",
   "이해했습니다, 참고용으로만 사용할게요":
     "Understood — I will use this for reference only.",
+  "저장 중...": "Saving...",
   "오늘 수면 기록이 필요해요": "Today's sleep log is required.",
   "AI 맞춤회복 분석 전 필수": "Required before AI recovery analysis",
   "AI 회복 해설 분석 전 필수": "Required before AI recovery brief",
