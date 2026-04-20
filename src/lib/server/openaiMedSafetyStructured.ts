@@ -1217,7 +1217,11 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       });
       retrievalUsage = retrieval.usage;
       retrievalSources = retrieval.sources;
-      groundingStatus = retrieval.error ? "failed" : retrieval.sources.length ? "ok" : "failed";
+      const hasEvidencePackets =
+        !retrieval.error &&
+        Array.isArray((retrieval.data as Record<string, unknown> | null)?.evidence_packets) &&
+        ((retrieval.data as Record<string, unknown>).evidence_packets as unknown[]).length > 0;
+      groundingStatus = retrieval.error ? "failed" : (retrieval.sources.length > 0 || hasEvidencePackets) ? "ok" : "failed";
       groundingError = retrieval.error;
       evidence = normalizeEvidenceRetrieval(retrieval.data, retrieval.sources, decision);
       retrievalNote = evidence.grounding_note;
