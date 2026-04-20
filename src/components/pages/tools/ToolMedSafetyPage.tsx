@@ -10,11 +10,13 @@ import { useBillingAccess } from "@/components/billing/useBillingAccess";
 import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { cn } from "@/lib/cn";
 import { withReturnTo } from "@/lib/navigation";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
 import {
   buildMedSafetySourcesCopyLines,
+  extractMedSafetyInlineCitations,
   mergeMedSafetySources,
   type MedSafetyGroundingMode,
   type MedSafetyGroundingStatus,
@@ -23,6 +25,7 @@ import {
 import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import { MedSafetySourceRail } from "@/components/pages/tools/MedSafetySourceRail";
+import { MedSafetySourceButton } from "@/components/pages/tools/MedSafetySourceButton";
 import {
   buildMedSafetyDisplayLines,
   buildMedSafetySectionBodyText,
@@ -742,7 +745,44 @@ function connectorColor(tone: AnswerSectionTone) {
   return "border-[#DDDDE0]";
 }
 
-function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; bodyTextClass: string }) {
+function InlineAnswerText({
+  text,
+  sources,
+  className,
+  style,
+}: {
+  text: string;
+  sources: MedSafetySource[];
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const parsed = useMemo(() => extractMedSafetyInlineCitations(text, sources), [text, sources]);
+
+  if (!parsed.text && !parsed.citations.length) return null;
+
+  return (
+    <div className={cn("min-w-0 whitespace-pre-wrap break-words", className)} style={style}>
+      {parsed.text ? <span>{parsed.text}</span> : null}
+      {parsed.citations.length ? (
+        <span className={cn("inline-flex flex-wrap items-center gap-1 align-middle", parsed.text ? "ml-2" : "")}>
+          {parsed.citations.map((source) => (
+            <MedSafetySourceButton key={`${source.url}-inline`} source={source} variant="inline" />
+          ))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SectionBodyLines({
+  section,
+  sources,
+  bodyTextClass,
+}: {
+  section: AnswerSection;
+  sources: MedSafetySource[];
+  bodyTextClass: string;
+}) {
   if (!section.bodyLines.length) return null;
   const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
   return (
@@ -762,7 +802,7 @@ function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; 
               style={indentStyle}
             >
               <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
-              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+              <InlineAnswerText text={parsedLine.content} sources={sources} />
             </div>
           );
         }
@@ -775,7 +815,7 @@ function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; 
               style={indentStyle}
             >
               <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
-              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+              <InlineAnswerText text={parsedLine.content} sources={sources} />
             </div>
           );
         }
@@ -788,30 +828,30 @@ function SectionBodyLines({ section, bodyTextClass }: { section: AnswerSection; 
               style={indentStyle}
             >
               <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
-              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}</div>
+              <InlineAnswerText text={parsedLine.content} sources={sources} />
             </div>
           );
         }
 
         return (
-          <div
+          <InlineAnswerText
             key={`${section.title}-${lineIndex}`}
-            className={`whitespace-pre-wrap break-words ${bodyTextClass}`}
+            text={parsedLine.content}
+            sources={sources}
+            className={bodyTextClass}
             style={indentStyle}
-          >
-            {parsedLine.content}
-          </div>
+          />
         );
       })}
     </div>
   );
 }
 
-function AssistantAnswerSections({ content }: { content: string }) {
+function AssistantAnswerSections({ content, sources }: { content: string; sources: MedSafetySource[] }) {
   const rawSections = parseMedSafetyAnswerSections(content);
   const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
-    return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{content}</div>;
+    return <InlineAnswerText text={content} sources={sources} className="text-[15px] leading-7 text-ios-text" />;
   }
 
   const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text";
@@ -848,8 +888,8 @@ function AssistantAnswerSections({ content }: { content: string }) {
                 </div>
               )}
               <div className={isContinuation ? "mt-2.5" : "mt-3.5"}>
-                {section.lead ? <div className={leadTextClass}>{section.lead}</div> : null}
-                <SectionBodyLines section={section} bodyTextClass={bodyTextClass} />
+                {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} /> : null}
+                <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} />
               </div>
             </section>
           </div>
@@ -1949,7 +1989,7 @@ export function ToolMedSafetyPage() {
                           </div>
                         ) : (
                           <div className="space-y-4">
-                            <AssistantAnswerSections content={message.content} />
+                            <AssistantAnswerSections content={message.content} sources={message.sources ?? []} />
                             <MedSafetySourceRail
                               sources={message.sources ?? []}
                               groundingMode={message.groundingMode ?? "none"}

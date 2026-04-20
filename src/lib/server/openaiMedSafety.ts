@@ -170,7 +170,7 @@ const PREMIUM_WEB_SEARCH_ALLOWED_DOMAINS = [
   "mfds.go.kr",
 ] as const;
 
-const PREMIUM_WEB_SEARCH_MAX_TOOL_CALLS = 4;
+const PREMIUM_WEB_SEARCH_MAX_TOOL_CALLS = 3;
 const PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS = 4800;
 
 function normalizeApiKey() {
@@ -1092,7 +1092,7 @@ function buildUsageBreakdown(args: {
 function buildDefaultPromptProfile(): MedSafetyPromptProfile {
   return {
     reasoningEfforts: ["medium", "low"],
-    verbosity: "medium",
+    verbosity: "low",
     outputTokenCandidates: [5400, 4800, 4200],
     qualityLevel: "balanced",
   };
@@ -1727,7 +1727,7 @@ async function generateGroundedPremiumAnswer(args: {
     signal: args.signal,
     maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
     upstreamTimeoutMs: args.upstreamTimeoutMs,
-    verbosity: "medium",
+    verbosity: "low",
     reasoningEffort: "low",
     storeResponses: args.storeResponses,
     onTextDelta: args.allowStreaming ? args.onTextDelta : undefined,
@@ -1762,7 +1762,7 @@ async function generateGroundedPremiumAnswer(args: {
     signal: args.signal,
     maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
     upstreamTimeoutMs: args.upstreamTimeoutMs,
-    verbosity: "medium",
+    verbosity: "low",
     reasoningEffort: "low",
     storeResponses: args.storeResponses,
   });

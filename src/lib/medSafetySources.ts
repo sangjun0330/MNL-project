@@ -5,6 +5,11 @@ export type MedSafetySource = {
   cited: boolean;
 };
 
+export type MedSafetyInlineCitationParseResult = {
+  text: string;
+  citations: MedSafetySource[];
+};
+
 export type MedSafetyGroundingMode = "none" | "premium_web";
 export type MedSafetyGroundingStatus = "none" | "ok" | "failed";
 
@@ -48,6 +53,21 @@ export function normalizeMedSafetySourceUrl(value: unknown) {
     return url.toString();
   } catch {
     return "";
+  }
+}
+
+function normalizeMedSafetySourceLookupUrl(value: unknown) {
+  const url = normalizeMedSafetySourceUrl(value);
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    if (parsed.pathname !== "/") {
+      parsed.pathname = parsed.pathname.replace(/\/+$/g, "") || "/";
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace(/\/+$/g, "");
   }
 }
 
@@ -147,4 +167,117 @@ export function getMedSafetySourceLabel(source: Pick<MedSafetySource, "domain" |
 
 export function buildMedSafetySourcesCopyLines(sources: MedSafetySource[]) {
   return mergeMedSafetySources(sources).map((source, index) => `${index + 1}. ${source.title} — ${source.url}`);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function trimInlineCitationUrl(value: string) {
+  let output = normalizeText(value);
+  while (output && /[),.;\]]$/.test(output)) {
+    if (output.endsWith(")")) {
+      const openCount = (output.match(/\(/g) ?? []).length;
+      const closeCount = (output.match(/\)/g) ?? []).length;
+      if (openCount >= closeCount) break;
+    }
+    output = output.slice(0, -1).trimEnd();
+  }
+  return output;
+}
+
+function cleanupInlineCitationText(value: string) {
+  return normalizeText(
+    String(value ?? "")
+      .replace(/\[\s*\]\(\s*\)/g, " ")
+      .replace(/\(\s*\)/g, " ")
+      .replace(/\[\s*\]/g, " ")
+      .replace(/【\s*】/g, " ")
+      .replace(/\{\s*\}/g, " ")
+      .replace(/\s+([,.;:!?)\]])/g, "$1")
+      .replace(/([(［【])\s+/g, "$1")
+      .replace(/\s{2,}/g, " ")
+      .replace(/(?:\s*[-–,:;])+\s*$/g, "")
+      .replace(/[([{\s]+$/g, "")
+  );
+}
+
+function matchMedSafetySourceByUrl(url: string, sources: MedSafetySource[]) {
+  const normalizedUrl = normalizeMedSafetySourceLookupUrl(url);
+  if (!normalizedUrl) return null;
+  for (const source of sources) {
+    if (normalizeMedSafetySourceLookupUrl(source.url) === normalizedUrl) return source;
+  }
+  const domain = formatMedSafetySourceDomain(getMedSafetySourceDomain(normalizedUrl));
+  if (!domain) return null;
+  return sources.find((source) => formatMedSafetySourceDomain(source.domain) === domain) ?? null;
+}
+
+function stripBracketWrappedSourceToken(text: string, token: string) {
+  const normalizedToken = normalizeText(token);
+  if (!normalizedToken) return text;
+  const escapedToken = escapeRegExp(normalizedToken);
+  return text.replace(new RegExp(`(?:\\[\\s*${escapedToken}\\s*\\]|\\(\\s*${escapedToken}\\s*\\)|【\\s*${escapedToken}\\s*】)`, "gi"), " ");
+}
+
+export function extractMedSafetyInlineCitations(
+  value: unknown,
+  sources: MedSafetySource[]
+): MedSafetyInlineCitationParseResult {
+  const normalizedSources = mergeMedSafetySources(sources, 12);
+  let workingText = String(value ?? "").replace(/\r/g, "").replace(/\u0000/g, "").trim();
+  if (!workingText) return { text: "", citations: [] };
+
+  const citations: MedSafetySource[] = [];
+  const seen = new Set<string>();
+
+  const collectCitation = (source: MedSafetySource | null) => {
+    if (!source) return;
+    const key = normalizeMedSafetySourceLookupUrl(source.url) || source.url;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    citations.push(source);
+  };
+
+  workingText = workingText.replace(/https?:\/\/[^\s]+/gi, (match) => {
+    const trimmedUrl = trimInlineCitationUrl(match);
+    const matchedSource =
+      matchMedSafetySourceByUrl(trimmedUrl, normalizedSources) ??
+      buildMedSafetySource({
+        url: trimmedUrl,
+        title: getMedSafetySourceDomain(trimmedUrl),
+        cited: true,
+      });
+    collectCitation(matchedSource);
+    return " ";
+  });
+
+  for (const source of normalizedSources) {
+    const domain = formatMedSafetySourceDomain(source.domain);
+    const label = getMedSafetySourceLabel(source);
+    const domainPattern = domain
+      ? new RegExp(`(?:\\[\\s*${escapeRegExp(domain)}\\s*\\]|\\(\\s*${escapeRegExp(domain)}\\s*\\)|【\\s*${escapeRegExp(domain)}\\s*】)`, "i")
+      : null;
+    const labelPattern = label
+      ? new RegExp(`(?:\\[\\s*${escapeRegExp(label)}\\s*\\]|\\(\\s*${escapeRegExp(label)}\\s*\\)|【\\s*${escapeRegExp(label)}\\s*】)`, "i")
+      : null;
+
+    if ((domainPattern && domainPattern.test(workingText)) || (labelPattern && labelPattern.test(workingText))) {
+      collectCitation(source);
+      if (domain) workingText = stripBracketWrappedSourceToken(workingText, domain);
+      if (label) workingText = stripBracketWrappedSourceToken(workingText, label);
+      if (source.title) workingText = stripBracketWrappedSourceToken(workingText, source.title);
+    }
+  }
+
+  for (const source of citations) {
+    workingText = stripBracketWrappedSourceToken(workingText, source.domain);
+    workingText = stripBracketWrappedSourceToken(workingText, getMedSafetySourceLabel(source));
+    workingText = stripBracketWrappedSourceToken(workingText, source.title);
+  }
+
+  return {
+    text: cleanupInlineCitationText(workingText),
+    citations,
+  };
 }
