@@ -36,6 +36,8 @@ const COMMON_LABEL_MAP: Array<[RegExp, string]> = [
   [/(^|\.)kdca\.go\.kr$/i, "KDCA"],
 ];
 
+const MED_SAFETY_URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/gi;
+
 function normalizeText(value: unknown) {
   return String(value ?? "")
     .replace(/\r/g, "")
@@ -44,16 +46,34 @@ function normalizeText(value: unknown) {
     .trim();
 }
 
+function shouldStripMedSafetyTrackingParam(key: string, value: string) {
+  const normalizedKey = normalizeText(key).toLowerCase();
+  const normalizedValue = normalizeText(value).toLowerCase();
+  if (!normalizedKey) return false;
+  if (normalizedKey.startsWith("utm_")) return true;
+  if (normalizedKey === "source" && normalizedValue === "openai") return true;
+  return false;
+}
+
 export function normalizeMedSafetySourceUrl(value: unknown) {
   const trimmed = normalizeText(value);
   if (!trimmed) return "";
   try {
     const url = new URL(trimmed);
     if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    for (const [key, paramValue] of Array.from(url.searchParams.entries())) {
+      if (shouldStripMedSafetyTrackingParam(key, paramValue)) {
+        url.searchParams.delete(key);
+      }
+    }
     return url.toString();
   } catch {
     return "";
   }
+}
+
+export function sanitizeMedSafetyTextUrls(value: unknown) {
+  return String(value ?? "").replace(MED_SAFETY_URL_PATTERN, (match) => normalizeMedSafetySourceUrl(match) || match);
 }
 
 function normalizeMedSafetySourceLookupUrl(value: unknown) {

@@ -12,6 +12,7 @@ import {
   type MedSafetyAnswerDisplayLine as DisplayBodyLine,
   type MedSafetyAnswerSection as MedSafetySection,
 } from "@/lib/medSafetyAnswerSections"
+import { normalizeMedSafetySourceUrl, sanitizeMedSafetyTextUrls } from "@/lib/medSafetySources"
 
 type MedSafetyResultKind = "medication" | "device" | "scenario"
 type MedSafetyMemoLayout = "brief"
@@ -50,7 +51,7 @@ function extractUrls(...values: string[]) {
     const matches = text.match(URL_PATTERN)
     if (!matches) continue
     for (const match of matches) {
-      const url = sanitizeNotebookUrl(match)
+      const url = normalizeMedSafetySourceUrl(match) || sanitizeNotebookUrl(match)
       if (url) out.add(url)
     }
   }
@@ -212,8 +213,8 @@ function addBookmarks(blocks: RNestMemoBlock[], urls: string[]) {
 export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
   const layout = input.layout ?? "brief"
   const query = cleanLine(input.query)
-  const answer = String(input.answer ?? "").trim()
-  const summary = cleanLine(input.summary ?? "")
+  const answer = sanitizeMedSafetyTextUrls(String(input.answer ?? "").trim())
+  const summary = cleanLine(sanitizeMedSafetyTextUrls(input.summary ?? ""))
   const sections =
     answer.trim().length > 0 ? parseMedSafetyAnswerSections(answer) : summary ? parseMedSafetyAnswerSections(summary) : []
   const blocks: RNestMemoBlock[] = []

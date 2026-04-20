@@ -140,7 +140,7 @@ function normalizePersistedMessage(value: unknown): Message | null {
   return {
     id: typeof value.id === "string" && value.id ? value.id : `${role}-${timestamp.toString(36)}`,
     role,
-    content,
+    content: role === "assistant" ? normalizeMultilineText(content) : content,
     timestamp,
     model: typeof value.model === "string" ? value.model : undefined,
     source:

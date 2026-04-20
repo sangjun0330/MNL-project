@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { mergeMedSafetySources, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
+import { canonicalizeMedSafetyAnswerText, normalizeMedSafetyAnswerText } from "@/lib/medSafetyAnswerSections";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
@@ -132,8 +133,8 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
     if (savedAt < now - retentionMs) continue;
 
     const query = normalizeText(requestNode.query ?? resultNode.query);
-    const modernAnswer = normalizeText(resultNode.answer);
-    const legacyAnswer = normalizeText(resultNode.searchAnswer ?? resultNode.generatedText);
+    const modernAnswer = canonicalizeMedSafetyAnswerText(normalizeMedSafetyAnswerText(resultNode.answer));
+    const legacyAnswer = canonicalizeMedSafetyAnswerText(normalizeMedSafetyAnswerText(resultNode.searchAnswer ?? resultNode.generatedText));
     const answer = modernAnswer || legacyAnswer;
     if (!answer) continue;
 

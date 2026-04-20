@@ -1,3 +1,5 @@
+import { sanitizeMedSafetyTextUrls } from "@/lib/medSafetySources";
+
 export type MedSafetyAnswerSectionTone = "summary" | "action" | "warning" | "compare" | "neutral";
 
 export type MedSafetyAnswerSection = {
@@ -357,7 +359,7 @@ export function parseMedSafetyAnswerSections(value: string): MedSafetyAnswerSect
 }
 
 export function canonicalizeMedSafetyAnswerText(value: unknown) {
-  const normalized = normalizeMedSafetyAnswerText(value);
+  const normalized = sanitizeMedSafetyTextUrls(normalizeMedSafetyAnswerText(value));
   if (!normalized) return "";
 
   const sections = parseMedSafetyAnswerSections(normalized);
