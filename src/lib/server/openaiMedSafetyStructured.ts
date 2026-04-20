@@ -84,14 +84,13 @@ export type OpenAIMedSafetyStructuredOutput = {
   };
 };
 
-type WebSearchContextSize = "small" | "medium" | "large";
+type WebSearchContextSize = "low" | "medium" | "high";
 
 type MedSafetyWebSearchProfile = {
   allowedDomains: string[];
   searchContextSize: WebSearchContextSize;
   toolChoice: "required" | "auto";
   includeSourceList: boolean;
-  maxToolCalls: number;
 };
 
 const DEFAULT_STANDARD_MODEL = "gpt-5.2";
@@ -353,7 +352,7 @@ function normalizeApiKey() {
 }
 
 function resolveModel(searchType: SearchCreditType) {
-  const direct = String(searchType === "premium" ? process.env.OPENAI_MED_SAFETY_PREMIUM_MODEL : process.env.OPENAI_MED_SAFETY_STANDARD_MODEL).trim();
+  const direct = ((searchType === "premium" ? process.env.OPENAI_MED_SAFETY_PREMIUM_MODEL : process.env.OPENAI_MED_SAFETY_STANDARD_MODEL) ?? "").trim();
   if (direct) return direct;
   return searchType === "premium" ? DEFAULT_PREMIUM_MODEL : DEFAULT_STANDARD_MODEL;
 }
@@ -606,10 +605,9 @@ function buildGroundingDecision(query: string, imageDataUrl?: string): Grounding
 function buildWebSearchProfile(searchType: SearchCreditType): MedSafetyWebSearchProfile {
   return {
     allowedDomains: [...ALLOWED_DOMAINS],
-    searchContextSize: searchType === "premium" ? "large" : "medium",
+    searchContextSize: searchType === "premium" ? "high" : "medium",
     toolChoice: "required",
     includeSourceList: true,
-    maxToolCalls: searchType === "premium" ? 3 : 2,
   };
 }
 
@@ -1039,10 +1037,6 @@ async function callStructuredModel<T>(args: {
         schema: args.schema,
         strict: true,
       },
-      verbosity: "low",
-    },
-    reasoning: {
-      effort: args.reasoningEffort ?? "low",
     },
     max_output_tokens: args.maxOutputTokens,
     store: args.storeResponses,
@@ -1051,14 +1045,12 @@ async function callStructuredModel<T>(args: {
   if (args.webSearchProfile) {
     body.tools = [
       {
-        type: "web_search",
-        filters: { allowed_domains: args.webSearchProfile.allowedDomains },
-        external_web_access: true,
+        type: "web_search_preview",
+        allowed_domains: args.webSearchProfile.allowedDomains,
         search_context_size: args.webSearchProfile.searchContextSize,
       },
     ];
     body.tool_choice = args.webSearchProfile.toolChoice;
-    body.max_tool_calls = args.webSearchProfile.maxToolCalls;
     if (args.webSearchProfile.includeSourceList) {
       body.include = ["web_search_call.action.sources"];
     }
@@ -1260,7 +1252,7 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       await params.onStage?.("verifying");
       const verifyResult = await callStructuredModel<Record<string, unknown>>({
         apiKey,
-        model: DEFAULT_STANDARD_MODEL,
+        model: resolveModel("standard"),
         apiBaseUrl,
         developerPrompt: buildVerifierDeveloperPrompt(params.locale, decision),
         userPrompt: buildVerifierUserPrompt({
