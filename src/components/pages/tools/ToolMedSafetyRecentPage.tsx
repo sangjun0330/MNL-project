@@ -6,10 +6,12 @@ import { useRouter } from "next/navigation";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
+import { buildMedSafetySourcesCopyLines, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
 import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import { useAppStore } from "@/lib/store";
+import { MedSafetySourceRail } from "@/components/pages/tools/MedSafetySourceRail";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 
 /* ── Types ── */
@@ -32,6 +34,10 @@ type MedSafetyRecentItem = {
     resultKind: "medication" | "device" | "scenario";
     model?: string | null;
     source?: "openai_live" | "openai_fallback";
+    sources: MedSafetySource[];
+    groundingMode: MedSafetyGroundingMode;
+    groundingStatus: MedSafetyGroundingStatus;
+    groundingError?: string | null;
   };
 };
 
@@ -235,6 +241,7 @@ function buildRecentCopyText(item: MedSafetyRecentItem, t: TranslateFn) {
     sections: [
       { title: t("요약"), body: item.result.summary || "-" },
       { title: t("상세 결과"), body: item.result.answer || "-" },
+      ...(item.result.sources.length ? [{ title: t("출처"), body: buildMedSafetySourcesCopyLines(item.result.sources).join("\n") }] : []),
     ],
   });
 }
@@ -589,6 +596,14 @@ export function ToolMedSafetyRecentPage() {
                     {selected.result.answer}
                   </div>
                 )}
+
+                <MedSafetySourceRail
+                  className="mt-6"
+                  sources={selected.result.sources}
+                  groundingMode={selected.result.groundingMode}
+                  groundingStatus={selected.result.groundingStatus}
+                  groundingError={selected.result.groundingError ?? null}
+                />
               </div>
             </div>
           ) : null}

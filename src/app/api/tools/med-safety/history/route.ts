@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { mergeMedSafetySources, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
 import type { SubscriptionSnapshot } from "@/lib/server/billingStore";
 
 export const runtime = "edge";
@@ -28,6 +29,10 @@ type HistoryRecord = {
     resultKind: "medication" | "device" | "scenario";
     model?: string | null;
     source?: "openai_live" | "openai_fallback";
+    sources: MedSafetySource[];
+    groundingMode: MedSafetyGroundingMode;
+    groundingStatus: MedSafetyGroundingStatus;
+    groundingError?: string | null;
   };
 };
 
@@ -158,6 +163,11 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
         resultKind: normalizeResultKind(resultNode.resultKind),
         model: typeof resultNode.model === "string" ? resultNode.model : null,
         source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
+        sources: mergeMedSafetySources(Array.isArray(resultNode.sources) ? (resultNode.sources as MedSafetySource[]) : []),
+        groundingMode: resultNode.groundingMode === "premium_web" ? "premium_web" : "none",
+        groundingStatus:
+          resultNode.groundingStatus === "ok" || resultNode.groundingStatus === "failed" ? resultNode.groundingStatus : "none",
+        groundingError: typeof resultNode.groundingError === "string" ? resultNode.groundingError : null,
       },
     });
   }

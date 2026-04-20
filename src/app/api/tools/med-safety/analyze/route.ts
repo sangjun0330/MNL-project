@@ -9,6 +9,7 @@ import {
   readMedSafetyContinuationToken,
 } from "@/lib/server/medSafetyContinuation";
 import { shouldGenerateKoEnglishVariant } from "@/lib/server/medSafetyPrompting";
+import { mergeMedSafetySources, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
 import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
@@ -33,6 +34,7 @@ type RequestBody = {
   imageDataUrl?: unknown;
   stream?: unknown;
   searchType?: unknown;
+  continuationMemory?: unknown;
 };
 
 type MedSafetyResponseData = {
@@ -47,6 +49,10 @@ type MedSafetyResponseData = {
   startedFreshSession: boolean;
   searchType: SearchCreditType;
   creditBucket: "included" | "extra" | null;
+  sources: MedSafetySource[];
+  groundingMode: MedSafetyGroundingMode;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError: string | null;
 };
 
 type MedSafetyRecentRecord = {
@@ -314,6 +320,11 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         startedFreshSession: resultNode.startedFreshSession === true,
         searchType: resultNode.searchType === "premium" ? "premium" : "standard",
         creditBucket: resultNode.creditBucket === "included" || resultNode.creditBucket === "extra" ? resultNode.creditBucket : null,
+        sources: mergeMedSafetySources(Array.isArray(resultNode.sources) ? (resultNode.sources as MedSafetySource[]) : []),
+        groundingMode: resultNode.groundingMode === "premium_web" ? "premium_web" : "none",
+        groundingStatus:
+          resultNode.groundingStatus === "ok" || resultNode.groundingStatus === "failed" ? resultNode.groundingStatus : "none",
+        groundingError: resultNode.groundingError == null ? null : String(resultNode.groundingError),
       },
     });
   }
@@ -388,6 +399,14 @@ function pickSearchType(raw: unknown, fallback: SearchCreditType): SearchCreditT
   return fallback;
 }
 
+function pickContinuationMemory(raw: unknown) {
+  const value = String(raw ?? "")
+    .replace(/\u0000/g, "")
+    .trim();
+  if (!value) return undefined;
+  return value.slice(0, 2400);
+}
+
 function resolveMedSafetyModelForSearchType(searchType: SearchCreditType) {
   return searchType === "premium" ? "gpt-5.4" : "gpt-5.2";
 }
@@ -447,6 +466,10 @@ function buildResponseData(params: {
     startedFreshSession: false,
     searchType: params.searchType,
     creditBucket: params.creditBucket,
+    sources: params.analyzed.sources,
+    groundingMode: params.analyzed.groundingMode,
+    groundingStatus: params.analyzed.groundingStatus,
+    groundingError: params.analyzed.groundingError ? toPublicReason(params.analyzed.groundingError) ?? params.analyzed.groundingError : null,
   };
 }
 
@@ -476,6 +499,7 @@ export async function POST(req: NextRequest) {
     const locale = pickLocale(bodyRaw.locale);
     const streamMode = pickStreamMode(bodyRaw.stream);
     const continuationToken = pickContinuationToken(bodyRaw.continuationToken);
+    const continuationMemory = pickContinuationMemory(bodyRaw.continuationMemory);
     const query = String(bodyRaw.query ?? "")
       .replace(/\s+/g, " ")
       .trim()
@@ -524,10 +548,13 @@ export async function POST(req: NextRequest) {
     const timeoutMs = resolveAnalyzeTimeoutMs();
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const routeStartedAt = Date.now();
-    const continuationState = await readMedSafetyContinuationToken({
-      token: continuationToken,
-      userId,
-    });
+    const continuationState =
+      searchType === "standard"
+        ? await readMedSafetyContinuationToken({
+            token: continuationToken,
+            userId,
+          })
+        : null;
     const requestedModel = resolveMedSafetyModelForSearchType(searchType);
     const isCompatibleContinuation =
       continuationState?.searchType === searchType &&
@@ -549,6 +576,7 @@ export async function POST(req: NextRequest) {
         modelOverride: requestedModel,
         previousResponseId,
         conversationId,
+        continuationMemory,
         onTextDelta: effectiveOnTextDelta,
         signal: abort.signal,
       });
@@ -595,6 +623,7 @@ export async function POST(req: NextRequest) {
                   modelOverride: requestedModel,
                   previousResponseId,
                   conversationId,
+                  continuationMemory,
                   signal: abort.signal,
                 });
                 payloadEn = buildResponseData({
@@ -616,13 +645,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const nextContinuationToken = await createMedSafetyContinuationToken({
-        userId,
-        responseId: analyzedKo.openaiResponseId,
-        conversationId: analyzedKo.openaiConversationId,
-        model: requestedModel,
-        searchType,
-      });
+      const nextContinuationToken =
+        searchType === "standard"
+          ? await createMedSafetyContinuationToken({
+              userId,
+              responseId: analyzedKo.openaiResponseId,
+              conversationId: analyzedKo.openaiConversationId,
+              model: requestedModel,
+              searchType,
+            })
+          : null;
       payloadKo.continuationToken = nextContinuationToken;
       payloadKo.startedFreshSession = false;
       if (payloadEn) {

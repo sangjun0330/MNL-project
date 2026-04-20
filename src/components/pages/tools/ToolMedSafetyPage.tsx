@@ -13,8 +13,16 @@ import { Card } from "@/components/ui/Card";
 import { withReturnTo } from "@/lib/navigation";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
 import { useI18n } from "@/lib/useI18n";
+import {
+  buildMedSafetySourcesCopyLines,
+  mergeMedSafetySources,
+  type MedSafetyGroundingMode,
+  type MedSafetyGroundingStatus,
+  type MedSafetySource,
+} from "@/lib/medSafetySources";
 import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
+import { MedSafetySourceRail } from "@/components/pages/tools/MedSafetySourceRail";
 import {
   buildMedSafetyDisplayLines,
   buildMedSafetySectionBodyText,
@@ -61,6 +69,10 @@ type Message = {
   model?: string;
   source?: "openai_live" | "openai_fallback";
   imageDataUrl?: string | null;
+  sources?: MedSafetySource[];
+  groundingMode?: MedSafetyGroundingMode;
+  groundingStatus?: MedSafetyGroundingStatus;
+  groundingError?: string | null;
 };
 
 type AnalyzePayload = {
@@ -74,6 +86,10 @@ type AnalyzePayload = {
   startedFreshSession?: boolean;
   searchType: SearchCreditType;
   creditBucket: "included" | "extra" | null;
+  sources: MedSafetySource[];
+  groundingMode: MedSafetyGroundingMode;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError?: string | null;
 };
 
 type PersistedMedSafetySession = {
@@ -127,6 +143,10 @@ function normalizePersistedMessage(value: unknown): Message | null {
     source:
       value.source === "openai_fallback" ? "openai_fallback" : value.source === "openai_live" ? "openai_live" : undefined,
     imageDataUrl: null,
+    sources: mergeMedSafetySources(Array.isArray(value.sources) ? (value.sources as MedSafetySource[]) : []),
+    groundingMode: value.groundingMode === "premium_web" ? "premium_web" : "none",
+    groundingStatus: value.groundingStatus === "ok" || value.groundingStatus === "failed" ? value.groundingStatus : "none",
+    groundingError: typeof value.groundingError === "string" ? value.groundingError : null,
   };
 }
 
@@ -275,6 +295,10 @@ function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayl
       startedFreshSession: node.startedFreshSession === true,
       searchType: node.searchType === "premium" ? "premium" : "standard",
       creditBucket: node.creditBucket === "included" || node.creditBucket === "extra" ? node.creditBucket : null,
+      sources: mergeMedSafetySources(Array.isArray(node.sources) ? (node.sources as MedSafetySource[]) : []),
+      groundingMode: node.groundingMode === "premium_web" ? "premium_web" : "none",
+      groundingStatus: node.groundingStatus === "ok" || node.groundingStatus === "failed" ? node.groundingStatus : "none",
+      groundingError: node.groundingError == null ? null : String(node.groundingError),
     },
   };
 }
@@ -509,6 +533,16 @@ function normalizeQuestionInput(value: string) {
     .replace(/\u0000/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function buildPremiumContinuationMemory(lastUserMessage: Message | null, lastAssistantMessage: Message | null) {
+  const previousQuestion = normalizeQuestionInput(lastUserMessage?.content ?? "");
+  const previousAnswer = normalizeQuestionInput(lastAssistantMessage?.content ?? "");
+  if (!previousQuestion || !previousAnswer) return undefined;
+  return [
+    `이전 질문: ${previousQuestion.slice(0, 600)}`,
+    `이전 답변 요약: ${previousAnswer.slice(0, 1600)}`,
+  ].join("\n");
 }
 
 function trimSectionLines(lines: string[]) {
@@ -1162,12 +1196,17 @@ export function ToolMedSafetyPage() {
           `${t("분석 시각")}: ${formatCopyDateTime(lastAssistantMessage.timestamp)}`,
           `${t("유형")}: ${t("임상 질문")}`,
         ],
-        sections: latestParsedSections.length
-          ? latestParsedSections.map((section) => ({
-              title: section.title,
-              body: buildMedSafetySectionBodyText(section),
-            }))
-          : [{ title: t("결론"), body: lastAssistantMessage.content }],
+        sections: [
+          ...(latestParsedSections.length
+            ? latestParsedSections.map((section) => ({
+                title: section.title,
+                body: buildMedSafetySectionBodyText(section),
+              }))
+            : [{ title: t("결론"), body: lastAssistantMessage.content }]),
+          ...(lastAssistantMessage.sources?.length
+            ? [{ title: t("출처"), body: buildMedSafetySourcesCopyLines(lastAssistantMessage.sources).join("\n") }]
+            : []),
+        ],
       })
     : "";
 
@@ -1500,12 +1539,16 @@ export function ToolMedSafetyPage() {
     setLastSubmittedQuery(question);
 
     try {
-      const maxClientRetries = 1;
+      const maxClientRetries = activeSearchType === "premium" ? 0 : 1;
       let response: Response | null = null;
       let normalizedData: AnalyzePayload | null = null;
       let finalError = "med_safety_analyze_failed";
       const continuationTokenForRequest =
-        lastContinuationToken && lastContinuationSearchType === activeSearchType ? lastContinuationToken : null;
+        activeSearchType === "standard" && lastContinuationToken && lastContinuationSearchType === activeSearchType
+          ? lastContinuationToken
+          : null;
+      const continuationMemoryForRequest =
+        activeSearchType === "premium" ? buildPremiumContinuationMemory(lastUserMessage, lastAssistantMessage) : undefined;
 
       for (let attempt = 0; attempt <= maxClientRetries; attempt += 1) {
         try {
@@ -1516,6 +1559,7 @@ export function ToolMedSafetyPage() {
               stream: true,
               searchType: activeSearchType,
               continuationToken: continuationTokenForRequest ?? undefined,
+              continuationMemory: continuationMemoryForRequest,
               ...(imageToSend ? { imageDataUrl: imageToSend } : {}),
             },
             MED_SAFETY_CLIENT_TIMEOUT_MS
@@ -1580,6 +1624,10 @@ export function ToolMedSafetyPage() {
         timestamp: normalizedData.analyzedAt,
         model: normalizedData.model,
         source: normalizedData.source,
+        sources: normalizedData.sources,
+        groundingMode: normalizedData.groundingMode,
+        groundingStatus: normalizedData.groundingStatus,
+        groundingError: normalizedData.groundingError ?? null,
       };
       setMessages((prev) => (normalizedData.startedFreshSession ? [userMessage, assistantMessage] : [...prev, assistantMessage]));
       setLastContinuationToken(normalizedData.continuationToken ?? null);
@@ -1900,7 +1948,15 @@ export function ToolMedSafetyPage() {
                             <div className="whitespace-pre-wrap break-words text-[16px] leading-7">{message.content}</div>
                           </div>
                         ) : (
-                          <AssistantAnswerSections content={message.content} />
+                          <div className="space-y-4">
+                            <AssistantAnswerSections content={message.content} />
+                            <MedSafetySourceRail
+                              sources={message.sources ?? []}
+                              groundingMode={message.groundingMode ?? "none"}
+                              groundingStatus={message.groundingStatus ?? "none"}
+                              groundingError={message.groundingError ?? null}
+                            />
+                          </div>
                         )}
                         <div
                           className={`mt-2 flex flex-wrap items-center gap-2 px-1 text-[11px] text-ios-sub ${

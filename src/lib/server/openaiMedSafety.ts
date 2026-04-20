@@ -1,6 +1,12 @@
 import { normalizeOpenAIResponsesBaseUrl, resolveOpenAIResponsesRequestConfig } from "@/lib/server/openaiGateway";
 import { canonicalizeMedSafetyAnswerText } from "@/lib/medSafetyAnswerSections";
 import {
+  mergeMedSafetySources,
+  type MedSafetyGroundingMode,
+  type MedSafetyGroundingStatus,
+  type MedSafetySource,
+} from "@/lib/medSafetySources";
+import {
   assembleMedSafetyDeveloperPrompt,
   buildDeterministicRouteDecision,
   buildHeuristicQualityDecision,
@@ -34,6 +40,13 @@ export type MedSafetyAnalysisResult = {
   query: string;
 };
 
+type MedSafetyGroundingResult = {
+  sources: MedSafetySource[];
+  groundingMode: MedSafetyGroundingMode;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError: string | null;
+};
+
 type AnalyzeParams = {
   query: string;
   locale: "ko" | "en";
@@ -52,6 +65,7 @@ type ResponsesAttempt = {
   responseId: string | null;
   conversationId: string | null;
   usage: ResponsesUsage | null;
+  sources: MedSafetySource[];
 };
 
 type TextDeltaHandler = (delta: string) => void | Promise<void>;
@@ -119,11 +133,45 @@ export type OpenAIMedSafetyOutput = {
   fallbackReason: string | null;
   openaiResponseId: string | null;
   openaiConversationId: string | null;
+  sources: MedSafetySource[];
+  groundingMode: MedSafetyGroundingMode;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError: string | null;
   routeDecision?: MedSafetyRouteDecision | null;
   runtimeMode?: MedSafetyRuntimeMode;
   usageBreakdown?: MedSafetyUsageBreakdown | null;
   shadowComparison?: MedSafetyShadowComparison | null;
 };
+
+type WebSearchContextSize = "small" | "medium" | "large";
+
+type MedSafetyWebSearchProfile = {
+  type: "premium_web";
+  allowedDomains: string[];
+  externalWebAccess: boolean;
+  searchContextSize: WebSearchContextSize;
+  toolChoice: "required" | "auto";
+  includeSourceList: boolean;
+  maxToolCalls: number;
+};
+
+const PREMIUM_WEB_SEARCH_ALLOWED_DOMAINS = [
+  "ncbi.nlm.nih.gov",
+  "clinicaltrials.gov",
+  "fda.gov",
+  "cdc.gov",
+  "who.int",
+  "nih.gov",
+  "medlineplus.gov",
+  "nice.org.uk",
+  "nhs.uk",
+  "ema.europa.eu",
+  "kdca.go.kr",
+  "mfds.go.kr",
+] as const;
+
+const PREMIUM_WEB_SEARCH_MAX_TOOL_CALLS = 4;
+const PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS = 4800;
 
 function normalizeApiKey() {
   const key =
@@ -217,6 +265,128 @@ function resolveTranslateTotalBudgetMs() {
   const raw = Number(process.env.OPENAI_MED_SAFETY_TRANSLATE_BUDGET_MS ?? 90_000);
   if (!Number.isFinite(raw)) return 90_000;
   return Math.max(30_000, Math.min(180_000, Math.round(raw)));
+}
+
+function buildPremiumWebSearchProfile(): MedSafetyWebSearchProfile {
+  return {
+    type: "premium_web",
+    allowedDomains: [...PREMIUM_WEB_SEARCH_ALLOWED_DOMAINS],
+    externalWebAccess: true,
+    searchContextSize: "medium",
+    toolChoice: "required",
+    includeSourceList: true,
+    maxToolCalls: PREMIUM_WEB_SEARCH_MAX_TOOL_CALLS,
+  };
+}
+
+function appendMedSafetySourceCandidate(
+  out: Array<{ url?: unknown; title?: unknown; domain?: unknown; cited?: unknown }>,
+  value: unknown,
+  cited: boolean
+) {
+  if (!value || typeof value !== "object") return;
+  const node = value as Record<string, unknown>;
+  out.push({
+    url: node.url ?? node.link ?? node.uri ?? node.source_url ?? node.sourceUrl,
+    title: node.title ?? node.name ?? node.label,
+    domain: node.domain ?? node.hostname ?? node.host,
+    cited,
+  });
+}
+
+function appendMedSafetyAnnotationSources(
+  out: Array<{ url?: unknown; title?: unknown; domain?: unknown; cited?: unknown }>,
+  annotations: unknown
+) {
+  if (!Array.isArray(annotations)) return;
+  for (const item of annotations) {
+    if (!item || typeof item !== "object") continue;
+    const node = item as Record<string, unknown>;
+    const citation =
+      (node.url_citation as Record<string, unknown> | undefined) ??
+      (node.citation as Record<string, unknown> | undefined) ??
+      node;
+    const type = String(node.type ?? citation?.type ?? "").trim().toLowerCase();
+    const url = citation?.url ?? citation?.link ?? node.url ?? node.link;
+    if (!url || (type && !type.includes("url_citation") && !type.includes("citation"))) continue;
+    out.push({
+      url,
+      title: citation?.title ?? citation?.name ?? node.title,
+      domain: citation?.domain ?? node.domain,
+      cited: true,
+    });
+  }
+}
+
+function appendMedSafetySearchSources(
+  out: Array<{ url?: unknown; title?: unknown; domain?: unknown; cited?: unknown }>,
+  value: unknown
+) {
+  if (!Array.isArray(value)) return;
+  for (const item of value) appendMedSafetySourceCandidate(out, item, false);
+}
+
+function extractMedSafetySourcesFromResponsesPayload(payload: any): MedSafetySource[] {
+  const collected: Array<{ url?: unknown; title?: unknown; domain?: unknown; cited?: unknown }> = [];
+  const visitContentParts = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    for (const part of value) {
+      if (!part || typeof part !== "object") continue;
+      const node = part as Record<string, unknown>;
+      appendMedSafetyAnnotationSources(collected, node.annotations);
+      appendMedSafetySearchSources(collected, node.sources);
+      appendMedSafetySearchSources(collected, node?.action && typeof node.action === "object" ? (node.action as Record<string, unknown>).sources : null);
+    }
+  };
+
+  appendMedSafetySearchSources(collected, payload?.web_search_call?.action?.sources);
+  appendMedSafetySearchSources(collected, payload?.response?.web_search_call?.action?.sources);
+
+  const output = Array.isArray(payload?.output) ? payload.output : [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const node = item as Record<string, unknown>;
+    appendMedSafetySearchSources(collected, node?.action && typeof node.action === "object" ? (node.action as Record<string, unknown>).sources : null);
+    appendMedSafetySearchSources(collected, node?.web_search_call && typeof node.web_search_call === "object"
+      ? ((node.web_search_call as Record<string, unknown>).action as Record<string, unknown> | undefined)?.sources
+      : null);
+    appendMedSafetySearchSources(collected, node.sources);
+    visitContentParts(node.content);
+  }
+
+  visitContentParts(payload?.message?.content);
+  visitContentParts(payload?.choices?.[0]?.message?.content);
+  return mergeMedSafetySources(collected, 8);
+}
+
+function buildGroundingResult(args: {
+  mode: MedSafetyGroundingMode;
+  sources?: MedSafetySource[] | null;
+  error?: string | null;
+}): MedSafetyGroundingResult {
+  if (args.mode === "none") {
+    return {
+      sources: [],
+      groundingMode: "none",
+      groundingStatus: "none",
+      groundingError: null,
+    };
+  }
+  const sources = mergeMedSafetySources(args.sources ?? [], 8);
+  if (sources.length > 0) {
+    return {
+      sources,
+      groundingMode: args.mode,
+      groundingStatus: "ok",
+      groundingError: null,
+    };
+  }
+  return {
+    sources: [],
+    groundingMode: args.mode,
+    groundingStatus: "failed",
+    groundingError: args.error ? truncateError(args.error, 220) : "grounding_sources_missing",
+  };
 }
 
 function truncateError(raw: string, size = 220) {
@@ -991,6 +1161,7 @@ async function readResponsesEventStream(args: {
         responseId: fallbackResponseId,
         conversationId: fallbackConversationId,
         usage: extractResponsesUsage(fallbackJson),
+        sources: extractMedSafetySourcesFromResponsesPayload(fallbackJson),
       };
     }
     await emitSectionStreamFallback({
@@ -1004,6 +1175,7 @@ async function readResponsesEventStream(args: {
       responseId: fallbackResponseId,
       conversationId: fallbackConversationId,
       usage: extractResponsesUsage(fallbackJson),
+      sources: extractMedSafetySourcesFromResponsesPayload(fallbackJson),
     };
   }
 
@@ -1019,6 +1191,7 @@ async function readResponsesEventStream(args: {
         responseId: fallbackResponseId,
         conversationId: fallbackConversationId,
         usage: extractResponsesUsage(fallbackJson),
+        sources: extractMedSafetySourcesFromResponsesPayload(fallbackJson),
       };
     }
     await emitSectionStreamFallback({
@@ -1032,6 +1205,7 @@ async function readResponsesEventStream(args: {
       responseId: fallbackResponseId,
       conversationId: fallbackConversationId,
       usage: extractResponsesUsage(fallbackJson),
+      sources: extractMedSafetySourcesFromResponsesPayload(fallbackJson),
     };
   }
 
@@ -1134,9 +1308,11 @@ async function readResponsesEventStream(args: {
       responseId,
       conversationId,
       usage,
+      sources: [],
     };
   }
 
+  const fallbackNode = completedResponse ?? lastEventPayload?.response ?? lastEventPayload ?? null;
   if (streamError) {
     return {
       text: null,
@@ -1144,10 +1320,10 @@ async function readResponsesEventStream(args: {
       responseId,
       conversationId,
       usage,
+      sources: extractMedSafetySourcesFromResponsesPayload(fallbackNode),
     };
   }
 
-  const fallbackNode = completedResponse ?? lastEventPayload?.response ?? lastEventPayload ?? null;
   const fallbackText = fallbackNode ? extractResponsesText(fallbackNode) : "";
   const finalText = fallbackText.trim().length >= rawText.trim().length ? fallbackText.trim() : rawText.trim();
   if (!finalText) {
@@ -1157,6 +1333,7 @@ async function readResponsesEventStream(args: {
       responseId,
       conversationId,
       usage: usage ?? extractResponsesUsage(fallbackNode),
+      sources: extractMedSafetySourcesFromResponsesPayload(fallbackNode),
     };
   }
   await flushRawDelta(finalText);
@@ -1166,6 +1343,7 @@ async function readResponsesEventStream(args: {
     responseId,
     conversationId,
     usage: usage ?? extractResponsesUsage(fallbackNode),
+    sources: extractMedSafetySourcesFromResponsesPayload(fallbackNode),
   };
 }
 
@@ -1287,6 +1465,7 @@ async function callResponsesApi(args: {
   storeResponses: boolean;
   compatMode?: boolean;
   onTextDelta?: TextDeltaHandler;
+  webSearchProfile?: MedSafetyWebSearchProfile;
 }): Promise<ResponsesAttempt> {
   const {
     apiKey,
@@ -1305,6 +1484,7 @@ async function callResponsesApi(args: {
     storeResponses,
     compatMode,
     onTextDelta,
+    webSearchProfile,
   } = args;
   const requestConfig = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl,
@@ -1319,6 +1499,7 @@ async function callResponsesApi(args: {
       responseId: null,
       conversationId: null,
       usage: null,
+      sources: [],
     };
   }
 
@@ -1356,9 +1537,25 @@ async function callResponsesApi(args: {
         },
         reasoning: { effort: reasoningEffort },
         max_output_tokens: maxOutputTokens,
-        tools: [],
+        tools: webSearchProfile
+          ? [
+              {
+                type: "web_search",
+                filters: {
+                  allowed_domains: webSearchProfile.allowedDomains,
+                },
+                external_web_access: webSearchProfile.externalWebAccess,
+                search_context_size: webSearchProfile.searchContextSize,
+              },
+            ]
+          : [],
         store: storeResponses,
       };
+  if (!compatMode && webSearchProfile) {
+    body.tool_choice = webSearchProfile.toolChoice;
+    body.max_tool_calls = webSearchProfile.maxToolCalls;
+    if (webSearchProfile.includeSourceList) body.include = ["web_search_call.action.sources"];
+  }
   if (onTextDelta) body.stream = true;
   if (previousResponseId) body.previous_response_id = previousResponseId;
   else if (conversationId) body.conversation = conversationId;
@@ -1393,6 +1590,7 @@ async function callResponsesApi(args: {
         responseId: null,
         conversationId: null,
         usage: null,
+        sources: [],
       };
     }
     return {
@@ -1401,6 +1599,7 @@ async function callResponsesApi(args: {
       responseId: null,
       conversationId: null,
       usage: null,
+      sources: [],
     };
   }
   clearTimeout(timeout);
@@ -1414,6 +1613,7 @@ async function callResponsesApi(args: {
       responseId: null,
       conversationId: null,
       usage: null,
+      sources: [],
     };
   }
 
@@ -1437,9 +1637,17 @@ async function callResponsesApi(args: {
       responseId,
       conversationId: conversationResponseId,
       usage: extractResponsesUsage(json),
+      sources: extractMedSafetySourcesFromResponsesPayload(json),
     };
   }
-  return { text, error: null, responseId, conversationId: conversationResponseId, usage: extractResponsesUsage(json) };
+  return {
+    text,
+    error: null,
+    responseId,
+    conversationId: conversationResponseId,
+    usage: extractResponsesUsage(json),
+    sources: extractMedSafetySourcesFromResponsesPayload(json),
+  };
 }
 
 async function callResponsesApiWithRetry(
@@ -1450,7 +1658,14 @@ async function callResponsesApiWithRetry(
 ): Promise<ResponsesAttempt> {
   const { retries, retryBaseMs, ...rest } = args;
   let attempt = 0;
-  let last: ResponsesAttempt = { text: null, error: "openai_request_failed", responseId: null, conversationId: null, usage: null };
+  let last: ResponsesAttempt = {
+    text: null,
+    error: "openai_request_failed",
+    responseId: null,
+    conversationId: null,
+    usage: null,
+    sources: [],
+  };
 
   while (attempt <= retries) {
     last = await callResponsesApi(rest);
@@ -1467,12 +1682,121 @@ async function callResponsesApiWithRetry(
         responseId: null,
         conversationId: null,
         usage: null,
+        sources: [],
       };
     }
     attempt += 1;
   }
 
   return last;
+}
+
+async function generateGroundedPremiumAnswer(args: {
+  apiKey: string;
+  model: string;
+  developerPrompt: string;
+  userPrompt: string;
+  apiBaseUrl: string;
+  imageDataUrl?: string;
+  signal: AbortSignal;
+  upstreamTimeoutMs: number;
+  storeResponses: boolean;
+  onTextDelta?: TextDeltaHandler;
+  allowStreaming?: boolean;
+}): Promise<{
+  answerText: string | null;
+  responseId: string | null;
+  conversationId: string | null;
+  usage: ResponsesUsage | null;
+  sources: MedSafetySource[];
+  stage: string;
+  streamed: boolean;
+  reasoningEffort: MedSafetyReasoningEffort;
+  maxOutputTokens: number;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError: string | null;
+  error: string | null;
+}> {
+  const groundedAttempt = await callResponsesApi({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: args.developerPrompt,
+    userPrompt: args.userPrompt,
+    apiBaseUrl: args.apiBaseUrl,
+    imageDataUrl: args.imageDataUrl,
+    signal: args.signal,
+    maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
+    upstreamTimeoutMs: args.upstreamTimeoutMs,
+    verbosity: "medium",
+    reasoningEffort: "low",
+    storeResponses: args.storeResponses,
+    onTextDelta: args.allowStreaming ? args.onTextDelta : undefined,
+    webSearchProfile: buildPremiumWebSearchProfile(),
+  });
+
+  if (!groundedAttempt.error && groundedAttempt.text && groundedAttempt.sources.length > 0) {
+    return {
+      answerText: groundedAttempt.text,
+      responseId: groundedAttempt.responseId,
+      conversationId: groundedAttempt.conversationId,
+      usage: groundedAttempt.usage,
+      sources: groundedAttempt.sources,
+      stage: "main_grounded",
+      streamed: Boolean(args.allowStreaming && args.onTextDelta),
+      reasoningEffort: "low",
+      maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
+      groundingStatus: "ok",
+      groundingError: null,
+      error: null,
+    };
+  }
+
+  const groundedError = groundedAttempt.error ?? "grounding_sources_missing";
+  const fallbackAttempt = await callResponsesApi({
+    apiKey: args.apiKey,
+    model: args.model,
+    developerPrompt: args.developerPrompt,
+    userPrompt: args.userPrompt,
+    apiBaseUrl: args.apiBaseUrl,
+    imageDataUrl: args.imageDataUrl,
+    signal: args.signal,
+    maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
+    upstreamTimeoutMs: args.upstreamTimeoutMs,
+    verbosity: "medium",
+    reasoningEffort: "low",
+    storeResponses: args.storeResponses,
+  });
+  if (!fallbackAttempt.error && fallbackAttempt.text) {
+    return {
+      answerText: fallbackAttempt.text,
+      responseId: fallbackAttempt.responseId,
+      conversationId: fallbackAttempt.conversationId,
+      usage: sumUsages(groundedAttempt.usage, fallbackAttempt.usage),
+      sources: [],
+      stage: "main_grounded_fallback",
+      streamed: false,
+      reasoningEffort: "low",
+      maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
+      groundingStatus: "failed",
+      groundingError: groundedError,
+      error: null,
+    };
+  }
+
+  return {
+    answerText: null,
+    responseId: fallbackAttempt.responseId ?? groundedAttempt.responseId,
+    conversationId: fallbackAttempt.conversationId ?? groundedAttempt.conversationId,
+    usage: sumUsages(groundedAttempt.usage, fallbackAttempt.usage),
+    sources: [],
+    stage: "main_grounded",
+    streamed: false,
+    reasoningEffort: "low",
+    maxOutputTokens: PREMIUM_WEB_SEARCH_MAX_OUTPUT_TOKENS,
+    groundingStatus: "failed",
+    groundingError: groundedError,
+    error: fallbackAttempt.error ?? groundedError,
+  };
 }
 
 async function generateAnswerWithPrompt(args: {
@@ -1498,10 +1822,13 @@ async function generateAnswerWithPrompt(args: {
   responseId: string | null;
   conversationId: string | null;
   usage: ResponsesUsage | null;
+  sources: MedSafetySource[];
   stage: string;
   streamed: boolean;
   reasoningEffort: MedSafetyReasoningEffort;
   maxOutputTokens: number;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError: string | null;
   error: string | null;
 }> {
   const reasoningEfforts = args.profile.reasoningEfforts;
@@ -1540,10 +1867,13 @@ async function generateAnswerWithPrompt(args: {
           responseId: attempt.responseId,
           conversationId: attempt.conversationId,
           usage: attempt.usage,
+          sources: [],
           stage: "main",
           streamed: allowStreamDelta,
           reasoningEffort,
           maxOutputTokens: outputTokenLimit,
+          groundingStatus: "none",
+          groundingError: null,
           error: null,
         };
       }
@@ -1560,10 +1890,13 @@ async function generateAnswerWithPrompt(args: {
             responseId: attempt.responseId,
             conversationId: attempt.conversationId,
             usage: attempt.usage,
+            sources: [],
             stage: "main",
             streamed: false,
             reasoningEffort,
             maxOutputTokens: outputTokenLimit,
+            groundingStatus: "none",
+            groundingError: null,
             error: attempt.error,
           };
         }
@@ -1590,10 +1923,13 @@ async function generateAnswerWithPrompt(args: {
               responseId: statelessRetry.responseId,
               conversationId: statelessRetry.conversationId,
               usage: statelessRetry.usage,
+              sources: [],
               stage: "main_compat",
               streamed: false,
               reasoningEffort,
               maxOutputTokens: outputTokenLimit,
+              groundingStatus: "none",
+              groundingError: null,
               error: null,
             };
           }
@@ -1606,10 +1942,13 @@ async function generateAnswerWithPrompt(args: {
             responseId: statelessRetry.responseId,
             conversationId: statelessRetry.conversationId,
             usage: sumUsages(attempt.usage, statelessRetry.usage),
+            sources: [],
             stage: "main_compat",
             streamed: false,
             reasoningEffort,
             maxOutputTokens: outputTokenLimit,
+            groundingStatus: "none",
+            groundingError: null,
             error: statelessRetry.error ?? attempt.error,
           };
         }
@@ -1619,10 +1958,13 @@ async function generateAnswerWithPrompt(args: {
           responseId: attempt.responseId,
           conversationId: attempt.conversationId,
           usage: attempt.usage,
+          sources: [],
           stage: "main",
           streamed: false,
           reasoningEffort,
           maxOutputTokens: outputTokenLimit,
+          groundingStatus: "none",
+          groundingError: null,
           error: attempt.error,
         };
       }
@@ -1657,10 +1999,13 @@ async function generateAnswerWithPrompt(args: {
       responseId: statelessRescue.responseId,
       conversationId: statelessRescue.conversationId,
       usage: sumUsages(lastEmptyAttempt?.usage, statelessRescue.usage),
+      sources: [],
       stage: "main_rescue_stateless",
       streamed: false,
       reasoningEffort: rescueReasoningEffort,
       maxOutputTokens: rescueOutputLimit,
+      groundingStatus: "none",
+      groundingError: null,
       error: null,
     };
   }
@@ -1686,10 +2031,13 @@ async function generateAnswerWithPrompt(args: {
       responseId: compatRescue.responseId,
       conversationId: compatRescue.conversationId,
       usage: sumUsages(lastEmptyAttempt?.usage, statelessRescue.usage, compatRescue.usage),
+      sources: [],
       stage: "main_rescue_compat",
       streamed: false,
       reasoningEffort: rescueReasoningEffort,
       maxOutputTokens: rescueOutputLimit,
+      groundingStatus: "none",
+      groundingError: null,
       error: null,
     };
   }
@@ -1700,10 +2048,13 @@ async function generateAnswerWithPrompt(args: {
     conversationId:
       compatRescue.conversationId ?? statelessRescue.conversationId ?? lastEmptyAttempt?.conversationId ?? null,
     usage: sumUsages(lastEmptyAttempt?.usage, statelessRescue.usage, compatRescue.usage),
+    sources: [],
     stage: "main",
     streamed: false,
     reasoningEffort: rescueReasoningEffort,
     maxOutputTokens: rescueOutputLimit,
+    groundingStatus: "none",
+    groundingError: null,
     error: compatRescue.error ?? statelessRescue.error ?? lastEmptyAttempt?.error ?? "openai_empty_text",
   };
 }
@@ -2039,6 +2390,7 @@ async function runQualityGateAndRepair(args: {
     responseId: null,
     conversationId: null,
     usage: null,
+    sources: [],
   };
   const allowSecondRepairPass =
     args.decision.risk === "high" &&
@@ -2201,11 +2553,11 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         break;
       }
       const apiBaseUrl = apiBaseUrls[baseIndex]!;
-      const useContinuationState = modelIndex === 0 && baseIndex === 0;
+      const isPremiumSearch = isPremiumSearchModel(candidateModel);
+      const useContinuationState = !isPremiumSearch && modelIndex === 0 && baseIndex === 0;
       const previousResponseId = useContinuationState ? params.previousResponseId : undefined;
       const conversationId = useContinuationState ? params.conversationId : undefined;
-      const shouldUseContinuationIds = Boolean(previousResponseId || conversationId);
-      const isPremiumSearch = isPremiumSearchModel(candidateModel);
+      const shouldUseContinuationIds = !isPremiumSearch && Boolean(previousResponseId || conversationId);
       const internalUtilityModel = resolveInternalUtilityModel(candidateModel);
       let routeDecision: MedSafetyRouteDecision;
       let routeUsage: ResponsesUsage | null = null;
@@ -2260,6 +2612,8 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           actualPromptChars: mainDeveloperPrompt.length,
           tokenCandidates: promptProfile.outputTokenCandidates.join(","),
           reasoningEfforts: promptProfile.reasoningEfforts.join(","),
+          groundingMode: isPremiumSearch ? "premium_web" : "none",
+          usedContinuationIds: shouldUseContinuationIds,
           ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
         },
       });
@@ -2268,25 +2622,39 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       const primaryUserPrompt = runtimeMode === "hybrid_live"
         ? appendMustIncludeHints(baseUserPrompt, params.query, routeDecision, params.locale, Boolean(params.imageDataUrl))
         : baseUserPrompt;
-      const mainAttempt = await generateAnswerWithPrompt({
-        apiKey,
-        model: candidateModel,
-        locale: params.locale,
-        developerPrompt: mainDeveloperPrompt,
-        userPrompt: primaryUserPrompt,
-        apiBaseUrl,
-        imageDataUrl: params.imageDataUrl,
-        previousResponseId,
-        conversationId,
-        signal: params.signal,
-        upstreamTimeoutMs,
-        storeResponses,
-        profile: promptProfile,
-        onTextDelta: allowStreaming ? params.onTextDelta : undefined,
-        allowStreaming,
-        networkRetries,
-        networkRetryBaseMs,
-      });
+      const mainAttempt = isPremiumSearch
+        ? await generateGroundedPremiumAnswer({
+            apiKey,
+            model: candidateModel,
+            developerPrompt: mainDeveloperPrompt,
+            userPrompt: primaryUserPrompt,
+            apiBaseUrl,
+            imageDataUrl: params.imageDataUrl,
+            signal: params.signal,
+            upstreamTimeoutMs,
+            storeResponses,
+            onTextDelta: allowStreaming ? params.onTextDelta : undefined,
+            allowStreaming,
+          })
+        : await generateAnswerWithPrompt({
+            apiKey,
+            model: candidateModel,
+            locale: params.locale,
+            developerPrompt: mainDeveloperPrompt,
+            userPrompt: primaryUserPrompt,
+            apiBaseUrl,
+            imageDataUrl: params.imageDataUrl,
+            previousResponseId,
+            conversationId,
+            signal: params.signal,
+            upstreamTimeoutMs,
+            storeResponses,
+            profile: promptProfile,
+            onTextDelta: allowStreaming ? params.onTextDelta : undefined,
+            allowStreaming,
+            networkRetries,
+            networkRetryBaseMs,
+          });
       if (mainAttempt.error || !mainAttempt.answerText) {
         lastError = mainAttempt.error ?? "openai_empty_text";
         continue;
@@ -2296,6 +2664,13 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
       let gateUsage: ResponsesUsage | null = null;
       let repairUsage: ResponsesUsage | null = null;
       let shadowComparison: MedSafetyShadowComparison | null = null;
+      let groundingResult = isPremiumSearch
+        ? buildGroundingResult({
+            mode: "premium_web",
+            sources: mainAttempt.sources,
+            error: mainAttempt.groundingError,
+          })
+        : buildGroundingResult({ mode: "none" });
 
       logHybridDiagnostics({
         runtimeMode,
@@ -2308,12 +2683,19 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
           streamed: mainAttempt.streamed,
           reasoningEffort: mainAttempt.reasoningEffort,
           maxOutputTokens: mainAttempt.maxOutputTokens,
+          groundingMode: groundingResult.groundingMode,
+          groundingStatus: groundingResult.groundingStatus,
+          groundingError: groundingResult.groundingError,
+          sourceCount: groundingResult.sources.length,
+          citedSourceCount: groundingResult.sources.filter((source) => source.cited).length,
+          maxToolCalls: isPremiumSearch ? PREMIUM_WEB_SEARCH_MAX_TOOL_CALLS : 0,
+          usedContinuationIds: shouldUseContinuationIds,
           mainPromptMode: runtimeMode === "hybrid_live" ? "behavioral_contract_rich_internal_sparse_prompt" : "legacy_monolithic",
           ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
         },
       });
 
-      if (runtimeMode === "hybrid_live") {
+      if (!isPremiumSearch && runtimeMode === "hybrid_live") {
         const quality = await runQualityGateAndRepair({
           query: params.query,
           locale: params.locale,
@@ -2351,7 +2733,7 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
             ...buildPromptDisciplineDiagnostics(routeDecision, promptProfile, promptAssembly),
           },
         });
-      } else if (runtimeMode === "hybrid_shadow") {
+      } else if (!isPremiumSearch && runtimeMode === "hybrid_shadow") {
         const hybridAttempt = await generateAnswerWithPrompt({
           apiKey,
           model: candidateModel,
@@ -2431,6 +2813,10 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
         fallbackReason: null,
         openaiResponseId: mainAttempt.responseId,
         openaiConversationId: mainAttempt.conversationId,
+        sources: groundingResult.sources,
+        groundingMode: groundingResult.groundingMode,
+        groundingStatus: groundingResult.groundingStatus,
+        groundingError: groundingResult.groundingError,
         routeDecision,
         runtimeMode,
         usageBreakdown: buildUsageBreakdown({
@@ -2453,6 +2839,12 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
   }
 
   const fallbackAnswer = buildFallbackAnswer(params.query, params.locale, lastError);
+  const fallbackGrounding = isPremiumSearchModel(selectedModel)
+    ? buildGroundingResult({
+        mode: "premium_web",
+        error: lastError,
+      })
+    : buildGroundingResult({ mode: "none" });
   return {
     result: buildAnalyzeResult(params.query, fallbackAnswer),
     model: selectedModel,
@@ -2460,6 +2852,10 @@ export async function analyzeMedSafetyWithOpenAI(params: AnalyzeParams): Promise
     fallbackReason: lastError,
     openaiResponseId: null,
     openaiConversationId: null,
+    sources: fallbackGrounding.sources,
+    groundingMode: fallbackGrounding.groundingMode,
+    groundingStatus: fallbackGrounding.groundingStatus,
+    groundingError: fallbackGrounding.groundingError,
     routeDecision: lastRouteDecision,
     runtimeMode,
     usageBreakdown: buildUsageBreakdown({

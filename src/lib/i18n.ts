@@ -56,6 +56,13 @@ const EN_BASE: Record<string, string> = {
 };
 
 const EN_EXTRA: Record<string, string> = {
+  "빠른 AI 답변": "Fast AI answer",
+  "최신 근거 확인 + 출처 링크 포함": "Latest evidence check + source links",
+  "근거 출처 {count}개": "{count} evidence sources",
+  "대표 출처": "Primary source",
+  "원문 보기": "Open source",
+  "출처": "Sources",
+  "웹 근거를 불러오지 못해 AI 답변만 표시 중입니다.": "Couldn't load web grounding, so only the AI answer is shown.",
   // Settings navigation
   "설정 항목을 선택해 주세요.": "Pick what you want to set up.",
   "일반 설정 열기": "Open General Settings",
