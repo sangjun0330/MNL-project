@@ -3,13 +3,13 @@ import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import { getDefaultSearchTypeForTier, getPlanDefinition, type SearchCreditType } from "@/lib/billing/plans";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { analyzeMedSafetyWithOpenAI, translateMedSafetyToEnglish } from "@/lib/server/openaiMedSafety";
-import {
-  createMedSafetyContinuationToken,
-  readMedSafetyContinuationToken,
-} from "@/lib/server/medSafetyContinuation";
-import { shouldGenerateKoEnglishVariant } from "@/lib/server/medSafetyPrompting";
+import { analyzeMedSafetyStructuredWithOpenAI } from "@/lib/server/openaiMedSafetyStructured";
 import { mergeMedSafetySources, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
+import type {
+  MedSafetyQualitySnapshot,
+  MedSafetyStructuredAnswer,
+  MedSafetyVerificationReport,
+} from "@/lib/medSafetyStructured";
 import type { Json } from "@/types/supabase";
 
 export const runtime = "edge";
@@ -29,7 +29,6 @@ const MAX_MED_SAFETY_HISTORY_RETENTION_DAYS = 90;
 
 type RequestBody = {
   query?: unknown;
-  continuationToken?: unknown;
   locale?: unknown;
   imageDataUrl?: unknown;
   stream?: unknown;
@@ -45,10 +44,15 @@ type MedSafetyResponseData = {
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
   fallbackReason: string | null;
-  continuationToken: string | null;
-  startedFreshSession: boolean;
   searchType: SearchCreditType;
   creditBucket: "included" | "extra" | null;
+  result: {
+    schema_version: string;
+    answer: MedSafetyStructuredAnswer;
+    sources: MedSafetySource[];
+    quality: MedSafetyQualitySnapshot;
+    verification: MedSafetyVerificationReport | null;
+  };
   sources: MedSafetySource[];
   groundingMode: MedSafetyGroundingMode;
   groundingStatus: MedSafetyGroundingStatus;
@@ -103,7 +107,6 @@ function normalizePublicReasonToken(raw: unknown): string | null {
   if (statusMatch) {
     const status = statusMatch[1];
     if (status === "400") {
-      if (/(previous_response|conversation)/i.test(value)) return "openai_responses_400_continuation";
       if (/(max_output|max output|token limit|too many tokens|context length|incomplete_details|max_output_tokens)/i.test(value)) {
         return "openai_responses_400_token_limit";
       }
@@ -278,6 +281,50 @@ async function safeSaveMedSafetyContent(
   }
 }
 
+async function safeAppendMedSafetySearchResult(params: {
+  userId: string;
+  language: Language;
+  searchType: SearchCreditType;
+  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyStructuredWithOpenAI>>;
+}): Promise<string | null> {
+  try {
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!serviceRole || !supabaseUrl) return "missing_supabase_env";
+    const { appendMedSafetySearchResult } = await import("@/lib/server/medSafetySearchResultStore");
+    await appendMedSafetySearchResult({
+      userId: params.userId,
+      query: params.analyzed.query,
+      searchType: params.searchType,
+      language: params.language,
+      model: params.analyzed.model,
+      routeDecision: params.analyzed.routeDecision as unknown as Json,
+      groundingSummary: ({
+        mode: params.analyzed.groundingMode,
+        status: params.analyzed.groundingStatus,
+        error: params.analyzed.groundingError,
+        sources: params.analyzed.sources,
+        retrievalNote: params.analyzed.debug?.retrievalNote ?? null,
+      } satisfies Json) as Json,
+      answerSchema: params.analyzed.answer as unknown as Json,
+      quality: params.analyzed.quality as unknown as Json,
+      verifierFlags: params.analyzed.verification
+        ? ({
+            ran: params.analyzed.verification.ran,
+            passed: params.analyzed.verification.passed,
+            issues: params.analyzed.verification.issues,
+            notes: params.analyzed.verification.notes,
+          } satisfies Json)
+        : null,
+      latencyMs: params.analyzed.latencyMs,
+      tokenUsage: params.analyzed.usage as unknown as Json,
+    });
+    return null;
+  } catch {
+    return "save_med_safety_result_failed";
+  }
+}
+
 function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_PRO) {
   const normalizedLimit = Math.max(MED_SAFETY_RECENT_LIMIT_FREE, Math.min(MED_SAFETY_RECENT_LIMIT_PRO, Math.round(limit)));
   const retentionDaysRaw = Number(process.env.MED_SAFETY_HISTORY_RETENTION_DAYS ?? DEFAULT_MED_SAFETY_HISTORY_RETENTION_DAYS);
@@ -316,12 +363,61 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         analyzedAt: Number.isFinite(Number(resultNode.analyzedAt)) ? Number(resultNode.analyzedAt) : savedAt,
         source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
         fallbackReason: toPublicReason(resultNode.fallbackReason),
-        continuationToken: typeof resultNode.continuationToken === "string" ? resultNode.continuationToken : null,
-        startedFreshSession: resultNode.startedFreshSession === true,
         searchType: resultNode.searchType === "premium" ? "premium" : "standard",
         creditBucket: resultNode.creditBucket === "included" || resultNode.creditBucket === "extra" ? resultNode.creditBucket : null,
+        result: isRecord(resultNode.result)
+          ? {
+              schema_version: String(resultNode.result.schema_version ?? "med_safety_answer_v2"),
+              answer: resultNode.result.answer as MedSafetyStructuredAnswer,
+              sources: mergeMedSafetySources(Array.isArray(resultNode.result.sources) ? (resultNode.result.sources as MedSafetySource[]) : []),
+              quality: (resultNode.result.quality ?? {}) as MedSafetyQualitySnapshot,
+              verification: (resultNode.result.verification ?? null) as MedSafetyVerificationReport | null,
+            }
+          : {
+              schema_version: "med_safety_answer_v2",
+              answer: {
+                schema_version: "med_safety_answer_v2",
+                question_type: "general",
+                triage_level: "routine",
+                bottom_line: answer,
+                bottom_line_citation_ids: [],
+                key_points: [],
+                recommended_actions: [],
+                do_not_do: [],
+                when_to_escalate: [],
+                patient_specific_caveats: [],
+                uncertainty: {
+                  summary: "",
+                  needs_verification: false,
+                  reasons: [],
+                },
+                freshness: {
+                  retrieved_at: null,
+                  newest_effective_date: null,
+                  note: "",
+                  verification_status: "unknown",
+                },
+                citations: [],
+                comparison_table: [],
+              },
+              sources: mergeMedSafetySources(Array.isArray(resultNode.sources) ? (resultNode.sources as MedSafetySource[]) : []),
+              quality: {
+                verification_run: false,
+                verification_passed: true,
+                official_citation_rate: 0,
+                unsupported_claim_count: 0,
+                supported_claim_count: 0,
+                total_claim_count: 0,
+                grounded: false,
+                high_risk: false,
+              },
+              verification: null,
+            },
         sources: mergeMedSafetySources(Array.isArray(resultNode.sources) ? (resultNode.sources as MedSafetySource[]) : []),
-        groundingMode: resultNode.groundingMode === "premium_web" ? "premium_web" : "none",
+        groundingMode:
+          resultNode.groundingMode === "premium_web" || resultNode.groundingMode === "official_search"
+            ? (resultNode.groundingMode as MedSafetyGroundingMode)
+            : "none",
         groundingStatus:
           resultNode.groundingStatus === "ok" || resultNode.groundingStatus === "failed" ? resultNode.groundingStatus : "none",
         groundingError: resultNode.groundingError == null ? null : String(resultNode.groundingError),
@@ -378,13 +474,6 @@ function pickLocale(raw: unknown): "ko" | "en" {
   return "ko";
 }
 
-function pickContinuationToken(raw: unknown) {
-  const value = String(raw ?? "").trim();
-  if (!value) return undefined;
-  if (value.length < 24 || value.length > 8192) return undefined;
-  return value;
-}
-
 function pickStreamMode(raw: unknown) {
   if (typeof raw === "boolean") return raw;
   const value = String(raw ?? "")
@@ -405,10 +494,6 @@ function pickContinuationMemory(raw: unknown) {
     .trim();
   if (!value) return undefined;
   return value.slice(0, 2400);
-}
-
-function resolveMedSafetyModelForSearchType(searchType: SearchCreditType) {
-  return searchType === "premium" ? "gpt-5.4" : "gpt-5.2";
 }
 
 function estimateBase64Bytes(dataUrl: string) {
@@ -450,22 +535,27 @@ function resolveAnalyzeTimeoutMs() {
 function buildResponseData(params: {
   language: Language;
   analyzedAt: number;
-  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
+  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyStructuredWithOpenAI>>;
   searchType: SearchCreditType;
   creditBucket: "included" | "extra" | null;
 }): MedSafetyResponseData {
   return {
-    answer: params.analyzed.result.answer,
-    query: params.analyzed.result.query,
+    answer: params.analyzed.answerText,
+    query: params.analyzed.query,
     language: params.language,
     model: params.analyzed.model,
     analyzedAt: params.analyzedAt,
-    source: params.analyzed.fallbackReason ? "openai_fallback" : "openai_live",
+    source: params.analyzed.fallbackReason && !params.analyzed.quality.grounded ? "openai_fallback" : "openai_live",
     fallbackReason: toPublicReason(params.analyzed.fallbackReason),
-    continuationToken: null,
-    startedFreshSession: false,
     searchType: params.searchType,
     creditBucket: params.creditBucket,
+    result: {
+      schema_version: params.analyzed.answer.schema_version,
+      answer: params.analyzed.answer,
+      sources: params.analyzed.sources,
+      quality: params.analyzed.quality,
+      verification: params.analyzed.verification,
+    },
     sources: params.analyzed.sources,
     groundingMode: params.analyzed.groundingMode,
     groundingStatus: params.analyzed.groundingStatus,
@@ -474,10 +564,10 @@ function buildResponseData(params: {
 }
 
 function shouldCommitConsumedCredit(params: {
-  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyWithOpenAI>>;
+  analyzed: Awaited<ReturnType<typeof analyzeMedSafetyStructuredWithOpenAI>>;
   responseData: MedSafetyResponseData;
 }) {
-  const liveModelSucceeded = params.analyzed.fallbackReason == null;
+  const liveModelSucceeded = params.responseData.source === "openai_live";
   const hasContent = String(params.responseData.answer ?? "").trim().length > 0;
   return liveModelSucceeded && hasContent;
 }
@@ -498,7 +588,6 @@ export async function POST(req: NextRequest) {
     const bodyRaw = ((await req.json().catch(() => null)) ?? {}) as RequestBody;
     const locale = pickLocale(bodyRaw.locale);
     const streamMode = pickStreamMode(bodyRaw.stream);
-    const continuationToken = pickContinuationToken(bodyRaw.continuationToken);
     const continuationMemory = pickContinuationMemory(bodyRaw.continuationMemory);
     const query = String(bodyRaw.query ?? "")
       .replace(/\s+/g, " ")
@@ -547,131 +636,28 @@ export async function POST(req: NextRequest) {
     const abort = new AbortController();
     const timeoutMs = resolveAnalyzeTimeoutMs();
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
-    const routeStartedAt = Date.now();
-    const continuationState =
-      searchType === "standard"
-        ? await readMedSafetyContinuationToken({
-            token: continuationToken,
-            userId,
-          })
-        : null;
-    const requestedModel = resolveMedSafetyModelForSearchType(searchType);
-    const isCompatibleContinuation =
-      continuationState?.searchType === searchType &&
-      continuationState?.model === requestedModel;
-    const previousResponseId = isCompatibleContinuation ? continuationState?.previousResponseId ?? undefined : undefined;
-    const conversationId = isCompatibleContinuation ? continuationState?.conversationId ?? undefined : undefined;
     const runAnalyze = async (
-      onTextDelta?: (delta: string) => void | Promise<void>,
+      onStage?: (stage: "routing" | "retrieving" | "generating" | "verifying", payload?: Record<string, unknown>) => void | Promise<void>,
     ) => {
       const analyzedAt = Date.now();
       const today = todayISO();
-      const shouldGenerateEnglishVariant = shouldGenerateKoEnglishVariant();
-      const effectiveOnTextDelta = locale === "ko" ? onTextDelta : undefined;
-
-      const analyzedKo = await analyzeMedSafetyWithOpenAI({
+      const analyzed = await analyzeMedSafetyStructuredWithOpenAI({
         query,
-        locale: "ko",
+        locale,
+        searchType,
         imageDataUrl: imageDataUrl || undefined,
-        modelOverride: requestedModel,
-        previousResponseId,
-        conversationId,
         continuationMemory,
-        onTextDelta: effectiveOnTextDelta,
+        onStage,
         signal: abort.signal,
       });
 
-      const payloadKo = buildResponseData({
-        language: "ko",
+      const responseData = buildResponseData({
+        language: locale,
         analyzedAt,
-        analyzed: analyzedKo,
+        analyzed,
         searchType,
         creditBucket: consumedBucket,
       });
-
-      let payloadEn: MedSafetyResponseData | null = null;
-      if (locale === "en" || shouldGenerateEnglishVariant) {
-        const translateController = new AbortController();
-        const relayAbort = () => translateController.abort();
-        const translateTimeoutMs = locale === "en" ? 18_000 : 7_000;
-        const translateTimer = setTimeout(() => translateController.abort(), translateTimeoutMs);
-        abort.signal.addEventListener("abort", relayAbort);
-        try {
-          const translated = await translateMedSafetyToEnglish({
-            answer: analyzedKo.result.answer,
-            rawText: analyzedKo.rawText,
-            model: analyzedKo.model,
-            signal: translateController.signal,
-          });
-          payloadEn = {
-            ...payloadKo,
-            answer: translated.result.answer,
-            language: "en",
-            model: translated.model ?? payloadKo.model,
-            fallbackReason: mergePublicReasons(payloadKo.fallbackReason, translated.debug),
-          };
-        } catch {
-          if (locale === "en") {
-            const elapsed = Date.now() - routeStartedAt;
-            const remainingMs = timeoutMs - elapsed;
-            if (remainingMs > 10_000) {
-              try {
-                const analyzedEn = await analyzeMedSafetyWithOpenAI({
-                  query,
-                  locale: "en",
-                  imageDataUrl: imageDataUrl || undefined,
-                  modelOverride: requestedModel,
-                  previousResponseId,
-                  conversationId,
-                  continuationMemory,
-                  signal: abort.signal,
-                });
-                payloadEn = buildResponseData({
-                  language: "en",
-                  analyzedAt,
-                  analyzed: analyzedEn,
-                  searchType,
-                  creditBucket: consumedBucket,
-                });
-                payloadEn.fallbackReason = mergePublicReasons("en_direct", payloadEn.fallbackReason);
-              } catch {
-                payloadEn = null;
-              }
-            }
-          }
-        } finally {
-          clearTimeout(translateTimer);
-          abort.signal.removeEventListener("abort", relayAbort);
-        }
-      }
-
-      const nextContinuationToken =
-        searchType === "standard"
-          ? await createMedSafetyContinuationToken({
-              userId,
-              responseId: analyzedKo.openaiResponseId,
-              conversationId: analyzedKo.openaiConversationId,
-              model: requestedModel,
-              searchType,
-            })
-          : null;
-      payloadKo.continuationToken = nextContinuationToken;
-      payloadKo.startedFreshSession = false;
-      if (payloadEn) {
-        payloadEn.continuationToken = nextContinuationToken;
-        payloadEn.startedFreshSession = false;
-      }
-
-      const storedPayloadKo: MedSafetyResponseData = {
-        ...payloadKo,
-        continuationToken: null,
-      };
-      const storedPayloadEn: MedSafetyResponseData | null = payloadEn
-        ? {
-            ...payloadEn,
-            continuationToken: null,
-          }
-        : null;
 
       const saveError = await safeSaveMedSafetyContent(userId, today, "ko", {
         medSafetySearch: {
@@ -681,23 +667,30 @@ export async function POST(req: NextRequest) {
             query,
           },
           variants: {
-            ko: storedPayloadKo,
-            ...(storedPayloadEn ? { en: storedPayloadEn } : {}),
+            [locale]: {
+              ...responseData,
+            },
           },
         },
       } satisfies Json);
 
       if (saveError) {
-        payloadKo.fallbackReason = mergePublicReasons(payloadKo.fallbackReason, saveError);
-        if (payloadEn) {
-          payloadEn.fallbackReason = mergePublicReasons(payloadEn.fallbackReason, saveError);
-        }
+        responseData.fallbackReason = mergePublicReasons(responseData.fallbackReason, saveError);
       }
 
-      const responseData = locale === "en" ? payloadEn ?? payloadKo : payloadKo;
+      const resultSaveError = await safeAppendMedSafetySearchResult({
+        userId,
+        language: locale,
+        searchType,
+        analyzed,
+      });
+      if (resultSaveError) {
+        responseData.fallbackReason = mergePublicReasons(responseData.fallbackReason, resultSaveError);
+      }
+
       const shouldCommitCredit = shouldCommitConsumedCredit({
-        analyzed: analyzedKo,
-        responseData: payloadKo,
+        analyzed,
+        responseData,
       }) && !abort.signal.aborted;
       if (shouldCommitCredit) {
         const recentLimit =
@@ -709,10 +702,7 @@ export async function POST(req: NextRequest) {
           dateISO: today,
           language: locale,
           query,
-          result: {
-            ...responseData,
-            continuationToken: null,
-          },
+          result: responseData,
           recentLimit,
         });
         if (recentSaveError) {
@@ -731,7 +721,7 @@ export async function POST(req: NextRequest) {
         }
         return jsonNoStore({
           ok: true,
-          ...responseData,
+          result: responseData,
         });
       } catch (error: any) {
         await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
@@ -752,21 +742,28 @@ export async function POST(req: NextRequest) {
           }
         };
 
-        pushEvent("start", { ok: true });
+        pushEvent("status", { stage: "routing" });
         try {
           const { responseData, shouldCommitCredit } = await runAnalyze(
-            async (delta) => {
-              const chunk = String(delta ?? "");
-              if (!chunk) return;
-              pushEvent("delta", { text: chunk });
+            async (stage, payload) => {
+              pushEvent("status", {
+                stage,
+                ...(payload ?? {}),
+              });
             }
           );
           if (!shouldCommitCredit) {
             await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
           }
+          if (responseData.groundingError) {
+            pushEvent("warning", {
+              code: responseData.groundingError,
+              message: responseData.groundingError,
+            });
+          }
           pushEvent("result", {
             ok: true,
-            ...responseData,
+            result: responseData,
           });
         } catch (error: any) {
           await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);

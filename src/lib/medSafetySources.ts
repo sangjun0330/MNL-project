@@ -1,8 +1,18 @@
+export type MedSafetySourceSupportStrength = "direct" | "background";
+
 export type MedSafetySource = {
+  id?: string;
   url: string;
   title: string;
   domain: string;
   cited: boolean;
+  organization?: string | null;
+  docType?: string | null;
+  effectiveDate?: string | null;
+  retrievedAt?: string | null;
+  claimScope?: string | null;
+  supportStrength?: MedSafetySourceSupportStrength | null;
+  official?: boolean;
 };
 
 export type MedSafetyInlineCitationParseResult = {
@@ -10,14 +20,27 @@ export type MedSafetyInlineCitationParseResult = {
   citations: MedSafetySource[];
 };
 
-export type MedSafetyGroundingMode = "none" | "premium_web";
+export type MedSafetyGroundingMode = "none" | "premium_web" | "official_search";
 export type MedSafetyGroundingStatus = "none" | "ok" | "failed";
 
 type MedSafetySourceInput = {
+  id?: unknown;
   url?: unknown;
   title?: unknown;
   domain?: unknown;
   cited?: unknown;
+  organization?: unknown;
+  docType?: unknown;
+  doc_type?: unknown;
+  effectiveDate?: unknown;
+  effective_date?: unknown;
+  retrievedAt?: unknown;
+  retrieved_at?: unknown;
+  claimScope?: unknown;
+  claim_scope?: unknown;
+  supportStrength?: unknown;
+  support_strength?: unknown;
+  official?: unknown;
 };
 
 const COMMON_LABEL_MAP: Array<[RegExp, string]> = [
@@ -44,6 +67,23 @@ function normalizeText(value: unknown) {
     .replace(/\u0000/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeIsoDate(value: unknown) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function normalizeDateOnly(value: unknown) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
 }
 
 function shouldStripMedSafetyTrackingParam(key: string, value: string) {
@@ -105,6 +145,20 @@ export function formatMedSafetySourceDomain(domain: string) {
   return normalizeText(domain).replace(/^www\./i, "");
 }
 
+export function isOfficialMedSafetyDomain(domain: string) {
+  const host = formatMedSafetySourceDomain(domain);
+  return COMMON_LABEL_MAP.some(([pattern]) => pattern.test(host));
+}
+
+export function inferMedSafetyOrganization(domain: string, title?: string | null) {
+  const host = formatMedSafetySourceDomain(domain);
+  for (const [pattern, label] of COMMON_LABEL_MAP) {
+    if (pattern.test(host)) return label;
+  }
+  const normalizedTitle = normalizeText(title);
+  return normalizedTitle && normalizedTitle.length <= 32 ? normalizedTitle : fallbackTitleFromDomain(host);
+}
+
 function fallbackTitleFromDomain(domain: string) {
   const host = formatMedSafetySourceDomain(domain);
   for (const [pattern, label] of COMMON_LABEL_MAP) {
@@ -135,10 +189,19 @@ export function buildMedSafetySource(input: MedSafetySourceInput): MedSafetySour
   const domain = formatMedSafetySourceDomain(normalizeText(input.domain) || getMedSafetySourceDomain(url));
   if (!domain) return null;
   return {
+    id: normalizeText(input.id) || undefined,
     url,
     domain,
     title: buildNormalizedTitle(input.title, domain),
     cited: input.cited === true,
+    organization: normalizeText(input.organization) || inferMedSafetyOrganization(domain, normalizeText(input.title)) || null,
+    docType: normalizeText(input.docType ?? input.doc_type) || null,
+    effectiveDate: normalizeDateOnly(input.effectiveDate ?? input.effective_date),
+    retrievedAt: normalizeIsoDate(input.retrievedAt ?? input.retrieved_at),
+    claimScope: normalizeText(input.claimScope ?? input.claim_scope) || null,
+    supportStrength:
+      normalizeText(input.supportStrength ?? input.support_strength).toLowerCase() === "background" ? "background" : "direct",
+    official: input.official === false ? false : isOfficialMedSafetyDomain(domain),
   };
 }
 
@@ -159,11 +222,23 @@ export function mergeMedSafetySources(values: MedSafetySourceInput[], limit = 8)
       orderedKeys.push(key);
       continue;
     }
+    current.id ||= next.id;
     current.cited ||= next.cited;
     if (isFallbackLikeTitle(current.title, current.domain) && !isFallbackLikeTitle(next.title, next.domain)) {
       current.title = next.title;
     }
     if (!current.domain && next.domain) current.domain = next.domain;
+    current.organization ||= next.organization;
+    current.docType ||= next.docType;
+    current.effectiveDate ||= next.effectiveDate;
+    current.retrievedAt ||= next.retrievedAt;
+    current.claimScope ||= next.claimScope;
+    current.official = current.official !== false || next.official !== false;
+    if (current.supportStrength !== "direct" && next.supportStrength === "direct") {
+      current.supportStrength = "direct";
+    } else if (!current.supportStrength) {
+      current.supportStrength = next.supportStrength ?? "direct";
+    }
   }
 
   const ordered = orderedKeys

@@ -165,7 +165,10 @@ function normalizeHistory(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_FREE) 
         model: typeof resultNode.model === "string" ? resultNode.model : null,
         source: String(resultNode.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
         sources: mergeMedSafetySources(Array.isArray(resultNode.sources) ? (resultNode.sources as MedSafetySource[]) : []),
-        groundingMode: resultNode.groundingMode === "premium_web" ? "premium_web" : "none",
+        groundingMode:
+          resultNode.groundingMode === "premium_web" || resultNode.groundingMode === "official_search"
+            ? resultNode.groundingMode
+            : "none",
         groundingStatus:
           resultNode.groundingStatus === "ok" || resultNode.groundingStatus === "failed" ? resultNode.groundingStatus : "none",
         groundingError: typeof resultNode.groundingError === "string" ? resultNode.groundingError : null,

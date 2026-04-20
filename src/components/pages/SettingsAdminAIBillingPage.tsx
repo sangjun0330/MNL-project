@@ -38,6 +38,14 @@ type SummaryResponse = {
     upsellClickCount: number;
     upsellConversionRatePct: number;
   };
+  quality: {
+    officialCitationRate: number;
+    unsupportedClaimRate: number;
+    verificationFailRate: number;
+    groundingMissRate: number;
+    highRiskQueryShare: number;
+    totalResults: number;
+  };
 };
 
 const CARD = "rounded-[24px] border border-ios-sep bg-white p-5";
@@ -202,6 +210,32 @@ export function SettingsAdminAIBillingPage() {
                       차감 {summary.usage.burnRate.premium.consumed} / 지급 {summary.usage.burnRate.premium.granted}
                     </div>
                   </div>
+                </div>
+              </section>
+
+              <section className={`${CARD} mt-4`}>
+                <div className="text-[18px] font-bold text-ios-text">답변 품질</div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <Metric
+                    label="공식 출처 비율"
+                    value={`${Math.round(summary.quality.officialCitationRate * 1000) / 10}%`}
+                    hint={`로그 ${summary.quality.totalResults}건 기준`}
+                  />
+                  <Metric
+                    label="근거 미지원 주장 비율"
+                    value={`${Math.round(summary.quality.unsupportedClaimRate * 1000) / 10}%`}
+                    hint="낮을수록 좋음"
+                  />
+                  <Metric
+                    label="검증 실패 비율"
+                    value={`${Math.round(summary.quality.verificationFailRate * 1000) / 10}%`}
+                    hint="verifier 실행 결과"
+                  />
+                  <Metric
+                    label="grounding miss 비율"
+                    value={`${Math.round(summary.quality.groundingMissRate * 1000) / 10}%`}
+                    hint={`고위험 질문 비중 ${Math.round(summary.quality.highRiskQueryShare * 1000) / 10}%`}
+                  />
                 </div>
               </section>
             </>

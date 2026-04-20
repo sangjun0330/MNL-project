@@ -69,6 +69,14 @@ export type AdminAIBillingSummary = {
     upsellClickCount: number;
     upsellConversionRatePct: number;
   };
+  quality: {
+    officialCitationRate: number;
+    unsupportedClaimRate: number;
+    verificationFailRate: number;
+    groundingMissRate: number;
+    highRiskQueryShare: number;
+    totalResults: number;
+  };
 };
 
 function asPlanTier(value: unknown): PlanTier {
@@ -187,11 +195,21 @@ export async function readAdminAIBillingSummary(rangeDays = 30): Promise<AdminAI
   const sinceMs = parseDate(sinceIso)?.getTime() ?? Date.now() - safeRangeDays * DAY_MS;
   const admin = getSupabaseAdmin();
 
-  const [usersRes, ordersRes, usageEvents, analyticsEvents] = await Promise.all([
+  const [usersRes, ordersRes, usageEvents, analyticsEvents, qualitySummary] = await Promise.all([
     admin.from("rnest_users").select("user_id, subscription_tier"),
     readBillingOrdersForAnalytics(conversionWindowIso),
     readUsageEvents(sinceIso),
     readAnalyticsEvents(sinceIso),
+    import("@/lib/server/medSafetySearchResultStore")
+      .then((module) => module.readMedSafetySearchQualitySummary(safeRangeDays))
+      .catch(() => ({
+        officialCitationRate: 0,
+        unsupportedClaimRate: 0,
+        verificationFailRate: 0,
+        groundingMissRate: 0,
+        highRiskQueryShare: 0,
+        totalResults: 0,
+      })),
   ]);
 
   if (usersRes.error) throw usersRes.error;
@@ -349,5 +367,6 @@ export async function readAdminAIBillingSummary(rangeDays = 30): Promise<AdminAI
       upsellClickCount,
       upsellConversionRatePct: toRatePct(upsellConvertedUsers, upsellClickedUsers.size),
     },
+    quality: qualitySummary,
   };
 }

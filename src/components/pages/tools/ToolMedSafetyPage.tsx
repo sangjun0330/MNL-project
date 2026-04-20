@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +27,13 @@ import { sanitizeMemoDocument } from "@/lib/notebook";
 import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
 import { MedSafetySourceRail } from "@/components/pages/tools/MedSafetySourceRail";
 import { MedSafetySourceButton } from "@/components/pages/tools/MedSafetySourceButton";
+import {
+  buildMedSafetyAnswerText,
+  normalizeMedSafetyStructuredAnswer,
+  type MedSafetyQualitySnapshot,
+  type MedSafetyStructuredAnswer,
+  type MedSafetyVerificationReport,
+} from "@/lib/medSafetyStructured";
 import {
   buildMedSafetyDisplayLines,
   buildMedSafetySectionBodyText,
@@ -60,7 +68,6 @@ const OPEN_LAYOUT_CLASS =
   "relative min-h-[calc(100dvh-120px)] overflow-hidden bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#FAFAFB_42%,#F4F5F7_100%)]";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 시도해 주세요.";
-const MED_SAFETY_SESSION_STORAGE_KEY_BASE = "rnest-med-safety-session";
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -76,6 +83,9 @@ type Message = {
   groundingMode?: MedSafetyGroundingMode;
   groundingStatus?: MedSafetyGroundingStatus;
   groundingError?: string | null;
+  structuredAnswer?: MedSafetyStructuredAnswer | null;
+  quality?: MedSafetyQualitySnapshot | null;
+  verification?: MedSafetyVerificationReport | null;
 };
 
 type AnalyzePayload = {
@@ -85,128 +95,27 @@ type AnalyzePayload = {
   analyzedAt: number;
   source: "openai_live" | "openai_fallback";
   fallbackReason?: string | null;
-  continuationToken?: string | null;
-  startedFreshSession?: boolean;
   searchType: SearchCreditType;
   creditBucket: "included" | "extra" | null;
+  structuredAnswer: MedSafetyStructuredAnswer | null;
+  quality: MedSafetyQualitySnapshot | null;
+  verification: MedSafetyVerificationReport | null;
   sources: MedSafetySource[];
   groundingMode: MedSafetyGroundingMode;
   groundingStatus: MedSafetyGroundingStatus;
   groundingError?: string | null;
 };
 
-type PersistedMedSafetySession = {
-  messages: Message[];
-  input: string;
-  lastContinuationToken: string | null;
-  lastContinuationSearchType: SearchCreditType | null;
-  lastSubmittedQuery: string;
-  showSessionDecisionPrompt: boolean;
-  updatedAt: number;
-};
+const ALLOWED_VERIFICATION_ISSUES = new Set<MedSafetyVerificationReport["issues"][number]>([
+  "claim_citation_mismatch",
+  "unsupported_specificity",
+  "missing_urgency",
+  "self_contradiction",
+  "overlong_indirect",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function canUseSessionStorage() {
-  // Service consent flow requires server-only persistence for RNest health/AI state.
-  return false;
-}
-
-function buildMedSafetySessionStorageKey(userId?: string | null) {
-  return userId ? `${MED_SAFETY_SESSION_STORAGE_KEY_BASE}:${userId}` : MED_SAFETY_SESSION_STORAGE_KEY_BASE;
-}
-
-function purgeLegacyMedSafetySessionStorage() {
-  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
-  try {
-    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
-      const key = window.sessionStorage.key(index);
-      if (!key?.startsWith(MED_SAFETY_SESSION_STORAGE_KEY_BASE)) continue;
-      window.sessionStorage.removeItem(key);
-    }
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
-function normalizePersistedMessage(value: unknown): Message | null {
-  if (!isRecord(value)) return null;
-  const role = value.role === "assistant" ? "assistant" : value.role === "user" ? "user" : null;
-  const content = typeof value.content === "string" ? value.content : "";
-  const timestamp = Number(value.timestamp);
-  if (!role || !content || !Number.isFinite(timestamp)) return null;
-  return {
-    id: typeof value.id === "string" && value.id ? value.id : `${role}-${timestamp.toString(36)}`,
-    role,
-    content: role === "assistant" ? normalizeMultilineText(content) : content,
-    timestamp,
-    model: typeof value.model === "string" ? value.model : undefined,
-    source:
-      value.source === "openai_fallback" ? "openai_fallback" : value.source === "openai_live" ? "openai_live" : undefined,
-    imageDataUrl: null,
-    sources: mergeMedSafetySources(Array.isArray(value.sources) ? (value.sources as MedSafetySource[]) : []),
-    groundingMode: value.groundingMode === "premium_web" ? "premium_web" : "none",
-    groundingStatus: value.groundingStatus === "ok" || value.groundingStatus === "failed" ? value.groundingStatus : "none",
-    groundingError: typeof value.groundingError === "string" ? value.groundingError : null,
-  };
-}
-
-function readPersistedMedSafetySession(storageKey: string): PersistedMedSafetySession | null {
-  if (!canUseSessionStorage()) return null;
-  try {
-    const raw = window.sessionStorage.getItem(storageKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed) || !Array.isArray(parsed.messages)) return null;
-    const messages = parsed.messages.map(normalizePersistedMessage).filter((message): message is Message => Boolean(message));
-    if (!messages.some((message) => message.role === "assistant")) return null;
-    return {
-      messages,
-      input: typeof parsed.input === "string" ? parsed.input : "",
-      lastContinuationToken: typeof parsed.lastContinuationToken === "string" ? parsed.lastContinuationToken : null,
-      lastContinuationSearchType:
-        parsed.lastContinuationSearchType === "premium"
-          ? "premium"
-          : parsed.lastContinuationSearchType === "standard"
-            ? "standard"
-            : null,
-      lastSubmittedQuery: typeof parsed.lastSubmittedQuery === "string" ? parsed.lastSubmittedQuery : "",
-      showSessionDecisionPrompt: parsed.showSessionDecisionPrompt === true,
-      updatedAt: Number(parsed.updatedAt) || Date.now(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writePersistedMedSafetySession(storageKey: string, session: PersistedMedSafetySession) {
-  if (!canUseSessionStorage()) return;
-  const sanitizedMessages = session.messages.map((message) => ({
-    ...message,
-    imageDataUrl: null,
-  }));
-  try {
-    window.sessionStorage.setItem(
-      storageKey,
-      JSON.stringify({
-        ...session,
-        messages: sanitizedMessages,
-      })
-    );
-  } catch {
-    // Ignore storage quota/private mode failures.
-  }
-}
-
-function clearPersistedMedSafetySession(storageKey: string) {
-  if (!canUseSessionStorage()) return;
-  try {
-    window.sessionStorage.removeItem(storageKey);
-  } catch {
-    // Ignore storage failures.
-  }
 }
 
 function normalizeMultilineText(value: unknown) {
@@ -262,8 +171,6 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
   if (normalized.includes("openai_responses_404") || normalized.includes("model_not_found"))
     return t("AI 응답 설정을 확인해 주세요.");
   if (normalized.includes("openai_responses_429")) return t("요청 한도가 초과되었습니다. 잠시 후 다시 시도해 주세요.");
-  if (normalized.includes("openai_responses_400_continuation"))
-    return t("이전 대화 상태 동기화에 실패했습니다. 새 검색으로 다시 시도해 주세요.");
   if (normalized.includes("openai_responses_400_token_limit"))
     return t("AI 응답 길이 제한으로 요청이 중단되었습니다. 다시 시도해 주세요.");
   if (normalized.includes("openai_empty_text")) return t("AI 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 시도해 주세요.");
@@ -277,8 +184,27 @@ function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayl
   if (!isRecord(payloadRaw)) return { ok: false, error: "invalid_response_payload" };
   if (payloadRaw.ok === false) return { ok: false, error: String(payloadRaw.error ?? "med_safety_analyze_failed") };
 
-  const node = payloadRaw.ok === true && isRecord(payloadRaw.data) ? payloadRaw.data : payloadRaw;
-  const answer = normalizeMultilineText(node.answer);
+  const node =
+    payloadRaw.ok === true && isRecord(payloadRaw.result)
+      ? payloadRaw.result
+      : payloadRaw.ok === true && isRecord(payloadRaw.data)
+        ? payloadRaw.data
+        : payloadRaw;
+
+  const nodeSources = mergeMedSafetySources(Array.isArray(node.sources) ? (node.sources as MedSafetySource[]) : []);
+  const resultNode = isRecord(node.result) ? node.result : null;
+  const resultVerificationNode = resultNode && isRecord(resultNode.verification) ? resultNode.verification : null;
+  const structuredAnswer =
+    resultNode && isRecord(resultNode.answer)
+      ? normalizeMedSafetyStructuredAnswer(resultNode.answer, mergeMedSafetySources(Array.isArray(resultNode.sources) ? (resultNode.sources as MedSafetySource[]) : nodeSources))
+      : null;
+
+  const verificationIssues = Array.isArray(resultVerificationNode?.issues)
+    ? resultVerificationNode.issues
+        .map((item) => String(item))
+        .filter((item): item is MedSafetyVerificationReport["issues"][number] => ALLOWED_VERIFICATION_ISSUES.has(item as MedSafetyVerificationReport["issues"][number]))
+    : [];
+  const answer = normalizeMultilineText(node.answer ?? (structuredAnswer ? buildMedSafetyAnswerText(structuredAnswer) : ""));
   const query = String(node.query ?? "").trim();
   const model = String(node.model ?? "").trim();
   const analyzedAt = Number(node.analyzedAt);
@@ -294,12 +220,40 @@ function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayl
       analyzedAt,
       source: String(node.source ?? "") === "openai_fallback" ? "openai_fallback" : "openai_live",
       fallbackReason: node.fallbackReason == null ? null : String(node.fallbackReason),
-      continuationToken: typeof node.continuationToken === "string" ? node.continuationToken : null,
-      startedFreshSession: node.startedFreshSession === true,
       searchType: node.searchType === "premium" ? "premium" : "standard",
       creditBucket: node.creditBucket === "included" || node.creditBucket === "extra" ? node.creditBucket : null,
-      sources: mergeMedSafetySources(Array.isArray(node.sources) ? (node.sources as MedSafetySource[]) : []),
-      groundingMode: node.groundingMode === "premium_web" ? "premium_web" : "none",
+      structuredAnswer,
+      quality: resultNode && isRecord(resultNode.quality)
+        ? ({
+            verification_run: resultNode.quality.verification_run === true,
+            verification_passed: resultNode.quality.verification_passed !== false,
+            official_citation_rate: Number(resultNode.quality.official_citation_rate ?? 0) || 0,
+            unsupported_claim_count: Number(resultNode.quality.unsupported_claim_count ?? 0) || 0,
+            supported_claim_count: Number(resultNode.quality.supported_claim_count ?? 0) || 0,
+            total_claim_count: Number(resultNode.quality.total_claim_count ?? 0) || 0,
+            grounded: resultNode.quality.grounded === true,
+            high_risk: resultNode.quality.high_risk === true,
+          } satisfies MedSafetyQualitySnapshot)
+        : null,
+      verification: resultVerificationNode
+        ? ({
+            ran: resultVerificationNode.ran === true,
+            passed: resultVerificationNode.passed !== false,
+            issues: verificationIssues,
+            notes: Array.isArray(resultVerificationNode.notes)
+              ? resultVerificationNode.notes.map((item) => String(item)).filter(Boolean)
+              : [],
+            corrected_answer:
+              resultVerificationNode.corrected_answer && isRecord(resultVerificationNode.corrected_answer)
+                ? normalizeMedSafetyStructuredAnswer(resultVerificationNode.corrected_answer, nodeSources)
+                : null,
+          } satisfies MedSafetyVerificationReport)
+        : null,
+      sources: nodeSources,
+      groundingMode:
+        node.groundingMode === "premium_web" || node.groundingMode === "official_search"
+          ? (node.groundingMode as MedSafetyGroundingMode)
+          : "none",
       groundingStatus: node.groundingStatus === "ok" || node.groundingStatus === "failed" ? node.groundingStatus : "none",
       groundingError: node.groundingError == null ? null : String(node.groundingError),
     },
@@ -439,10 +393,10 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
 
 async function parseAnalyzeStreamResponse(args: {
   response: Response;
-  onDelta: (text: string) => void;
-  onStart?: () => void;
+  onStatus?: (stage: "routing" | "retrieving" | "generating" | "verifying") => void;
+  onWarning?: (warning: string) => void;
 }): Promise<{ data: AnalyzePayload | null; error: string | null }> {
-  const { response, onDelta, onStart } = args;
+  const { response, onStatus, onWarning } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const payloadRaw = (await response.json().catch(() => null)) as unknown;
@@ -478,13 +432,16 @@ async function parseAnalyzeStreamResponse(args: {
     }
 
     const eventType = parsedBlock.event || String((payload as any)?.type ?? "");
-    if (eventType === "start") {
-      if (onStart) onStart();
+    if (eventType === "status") {
+      const stage = String((payload as any)?.stage ?? "");
+      if (stage === "routing" || stage === "retrieving" || stage === "generating" || stage === "verifying") {
+        onStatus?.(stage);
+      }
       return;
     }
-    if (eventType === "delta") {
-      const text = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
-      if (text) onDelta(text);
+    if (eventType === "warning") {
+      const warning = typeof (payload as any)?.message === "string" ? (payload as any).message : "";
+      if (warning) onWarning?.(warning);
       return;
     }
     if (eventType === "error") {
@@ -774,6 +731,230 @@ function InlineAnswerText({
   );
 }
 
+function structuredTriageBadge(answer: MedSafetyStructuredAnswer) {
+  if (answer.triage_level === "critical") {
+    return {
+      label: "즉시 대응",
+      className: "border-[#F2C9C9] bg-[#FFF1F1] text-[#A33636]",
+    };
+  }
+  if (answer.triage_level === "urgent") {
+    return {
+      label: "우선 확인",
+      className: "border-[#F0DEC4] bg-[#FFF7EE] text-[#9A5B1B]",
+    };
+  }
+  return {
+    label: "일반 확인",
+    className: "border-[#D8E0EC] bg-[#F1F5FA] text-[#48627E]",
+  };
+}
+
+function citationLookupFromAnswer(answer: MedSafetyStructuredAnswer, sources: MedSafetySource[]) {
+  const merged = mergeMedSafetySources([...answer.citations, ...sources], 12);
+  const byId = new Map<string, MedSafetySource>();
+  merged.forEach((source: MedSafetySource, index: number) => {
+    const id = typeof source.id === "string" && source.id ? source.id : `src_${index + 1}`;
+    byId.set(id, { ...source, id });
+  });
+  return byId;
+}
+
+function renderCitationButtons(ids: string[], citationLookup: Map<string, MedSafetySource>) {
+  const citations = ids
+    .map((id) => citationLookup.get(id))
+    .filter((item): item is MedSafetySource => Boolean(item));
+  if (!citations.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {citations.map((source) => (
+        <MedSafetySourceButton key={`${source.url}-${source.id ?? "src"}`} source={source} variant="inline" />
+      ))}
+    </div>
+  );
+}
+
+function StructuredAnswerItems({
+  title,
+  items,
+  citationLookup,
+}: {
+  title: string;
+  items: Array<{ text: string; citation_ids: string[]; evidence_status: "supported" | "needs_review" }>;
+  citationLookup: Map<string, MedSafetySource>;
+}) {
+  if (!items.length) return null;
+  return (
+    <section className="rounded-[24px] border border-[#E6E8ED] bg-[#FCFCFD] px-5 py-5">
+      <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
+        {title}
+      </div>
+      <div className="mt-3 flex flex-col gap-3">
+        {items.map((item, index) => (
+          <div key={`${title}-${index}`} className="rounded-[18px] border border-[#EEF0F3] bg-white px-4 py-3">
+            <div className="flex items-start gap-3">
+              <span className="mt-[9px] h-[6px] w-[6px] shrink-0 rounded-full bg-[color:var(--rnest-accent)]/70" />
+              <div className="min-w-0 flex-1">
+                <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{item.text}</div>
+                {item.evidence_status === "needs_review" ? (
+                  <div className="mt-2 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
+                    근거 확인 필요
+                  </div>
+                ) : null}
+                {renderCitationButtons(item.citation_ids, citationLookup)}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StructuredComparisonTable({
+  answer,
+  citationLookup,
+}: {
+  answer: MedSafetyStructuredAnswer;
+  citationLookup: Map<string, MedSafetySource>;
+}) {
+  if (!answer.comparison_table.length) return null;
+  return (
+    <section className="rounded-[24px] border border-[#DDE5F0] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFD_100%)] px-5 py-5">
+      <div className="inline-flex items-center rounded-[14px] border border-[#D8E0EC] bg-[#F1F5FA] px-3 py-1.5 text-[11.5px] font-semibold text-[#48627E]">
+        비교 포인트
+      </div>
+      <div className="mt-3 grid gap-3">
+        {answer.comparison_table.map((row: MedSafetyStructuredAnswer["comparison_table"][number], index: number) => (
+          <div key={`comparison-${index}`} className="rounded-[18px] border border-[#E4EAF3] bg-white px-4 py-4">
+            <div className="text-[15px] font-semibold leading-6 text-ios-text">{row.role || `항목 ${index + 1}`}</div>
+            <div className="mt-2 grid gap-2 text-[13.5px] leading-6 text-ios-text/90">
+              {row.when_to_use ? <div><span className="font-semibold text-ios-text">언제 쓰는지:</span> {row.when_to_use}</div> : null}
+              {row.effect_onset ? <div><span className="font-semibold text-ios-text">효과 시작:</span> {row.effect_onset}</div> : null}
+              {row.limitations ? <div><span className="font-semibold text-ios-text">한계/주의:</span> {row.limitations}</div> : null}
+              {row.bedside_points ? <div><span className="font-semibold text-ios-text">실무 포인트:</span> {row.bedside_points}</div> : null}
+            </div>
+            {row.evidence_status === "needs_review" ? (
+              <div className="mt-3 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
+                근거 확인 필요
+              </div>
+            ) : null}
+            {renderCitationButtons(row.citation_ids, citationLookup)}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StructuredSourceCards({ sources }: { sources: MedSafetySource[] }) {
+  if (!sources.length) return null;
+  return (
+    <section className="rounded-[24px] border border-[#E6E8ED] bg-white px-5 py-5">
+      <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
+        출처 카드
+      </div>
+      <div className="mt-3 grid gap-3">
+        {sources.map((source: MedSafetySource) => (
+          <div key={source.url} className="rounded-[18px] border border-[#EEF0F3] bg-[#FCFCFD] px-4 py-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[14px] font-semibold text-ios-text">{source.title}</div>
+              <div className="inline-flex items-center rounded-full border border-[#E6E8ED] bg-white px-2.5 py-1 text-[10.5px] font-semibold text-ios-sub">
+                {source.organization ?? source.domain}
+              </div>
+              {source.official !== false ? (
+                <div className="inline-flex items-center rounded-full border border-[#D4E0F3] bg-[#EEF4FF] px-2.5 py-1 text-[10.5px] font-semibold text-[#31598B]">
+                  공식기관
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-2 text-[12.5px] leading-6 text-ios-sub">
+              {source.effectiveDate ? `문서 날짜 ${source.effectiveDate}` : "문서 날짜 확인 불가"}
+              {source.retrievedAt ? ` · 확인 ${new Date(source.retrievedAt).toLocaleString("ko-KR")}` : ""}
+            </div>
+            {source.claimScope ? <div className="mt-1 text-[12.5px] leading-6 text-ios-sub">{source.claimScope}</div> : null}
+            <div className="mt-3">
+              <MedSafetySourceButton source={source} variant="rail" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StructuredAssistantAnswer({
+  answer,
+  sources,
+  quality,
+  verification,
+  groundingMode,
+  groundingStatus,
+  groundingError,
+}: {
+  answer: MedSafetyStructuredAnswer;
+  sources: MedSafetySource[];
+  quality?: MedSafetyQualitySnapshot | null;
+  verification?: MedSafetyVerificationReport | null;
+  groundingMode: MedSafetyGroundingMode;
+  groundingStatus: MedSafetyGroundingStatus;
+  groundingError?: string | null;
+}) {
+  const badge = structuredTriageBadge(answer);
+  const citationLookup = citationLookupFromAnswer(answer, sources);
+  const sourceCards = mergeMedSafetySources([...answer.citations, ...sources], 12);
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-[28px] border border-[#DCE5F2] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] px-5 py-5 shadow-[0_16px_34px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold ${badge.className}`}>
+            {badge.label}
+          </span>
+          {quality?.grounded ? (
+            <span className="inline-flex items-center rounded-full border border-[#D4E0F3] bg-[#EEF4FF] px-3 py-1.5 text-[11px] font-semibold text-[#31598B]">
+              공식 근거 연결됨
+            </span>
+          ) : null}
+          {answer.freshness.verification_status !== "verified" ? (
+            <span className="inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-3 py-1.5 text-[11px] font-semibold text-[#9A5B1B]">
+              최신성 재확인 권장
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-3 whitespace-pre-wrap break-words text-[17px] font-semibold leading-7 tracking-[-0.015em] text-ios-text">
+          {answer.bottom_line}
+        </div>
+        {answer.bottom_line_citation_ids.length ? renderCitationButtons(answer.bottom_line_citation_ids, citationLookup) : null}
+        {answer.uncertainty.summary ? (
+          <div className="mt-4 rounded-[18px] border border-[#EEF0F3] bg-white px-4 py-3 text-[13px] leading-6 text-ios-sub">
+            <div className="font-semibold text-ios-text">근거 제한</div>
+            <div className="mt-1">{answer.uncertainty.summary}</div>
+          </div>
+        ) : null}
+        {groundingMode !== "none" && groundingStatus === "failed" ? (
+          <div className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-[13px] leading-6 text-amber-800">
+            {groundingError || "공식 근거 확인이 충분히 완료되지 않았습니다."}
+          </div>
+        ) : null}
+        {verification?.ran && !verification.passed ? (
+          <div className="mt-3 rounded-[18px] border border-[#F0DEC4] bg-[#FFF7EE] px-4 py-3 text-[13px] leading-6 text-[#9A5B1B]">
+            최종 검증에서 보수적으로 조정된 답변입니다.
+          </div>
+        ) : null}
+      </section>
+
+      <StructuredAnswerItems title="핵심 포인트" items={answer.key_points} citationLookup={citationLookup} />
+      <StructuredAnswerItems title="권고" items={answer.recommended_actions} citationLookup={citationLookup} />
+      <StructuredAnswerItems title="피해야 할 점" items={answer.do_not_do} citationLookup={citationLookup} />
+      <StructuredAnswerItems title="즉시 보고 상황" items={answer.when_to_escalate} citationLookup={citationLookup} />
+      <StructuredAnswerItems title="환자별 예외" items={answer.patient_specific_caveats} citationLookup={citationLookup} />
+      <StructuredComparisonTable answer={answer} citationLookup={citationLookup} />
+      <StructuredSourceCards sources={sourceCards} />
+    </div>
+  );
+}
+
 function SectionBodyLines({
   section,
   sources,
@@ -899,136 +1080,6 @@ function AssistantAnswerSections({ content, sources }: { content: string; source
   );
 }
 
-/**
- * Streaming variant: parses the accumulating streamingText into sections
- * in real-time and renders each completed section as a card immediately.
- * The last (in-progress) section shows a typing cursor.
- */
-function StreamingBodyLines({ section, bodyTextClass, isLastSection }: { section: AnswerSection; bodyTextClass: string; isLastSection: boolean }) {
-  if (!section.bodyLines.length) return null;
-  const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
-  return (
-    <div className={section.lead ? "mt-4 flex flex-col gap-1.5" : "mt-0.5 flex flex-col gap-1.5"}>
-      {displayLines.map((parsedLine, lineIndex) => {
-        const isLastLine = isLastSection && lineIndex === displayLines.length - 1;
-
-        if (parsedLine.kind === "blank") {
-          return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
-        }
-
-        const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
-        const cursor = isLastLine ? (
-          <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-        ) : null;
-
-        if (parsedLine.kind === "bullet") {
-          return (
-            <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
-              <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
-              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
-            </div>
-          );
-        }
-        if (parsedLine.kind === "number") {
-          return (
-            <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
-              <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
-              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
-            </div>
-          );
-        }
-        if (parsedLine.kind === "label") {
-          return (
-            <div key={`${section.title}-${lineIndex}`} className={`flex items-start gap-3 ${bodyTextClass}`} style={indentStyle}>
-              <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
-              <div className="min-w-0 whitespace-pre-wrap break-words">{parsedLine.content}{cursor}</div>
-            </div>
-          );
-        }
-        return (
-          <div key={`${section.title}-${lineIndex}`} className={`whitespace-pre-wrap break-words ${bodyTextClass}`} style={indentStyle}>
-            {parsedLine.content}{cursor}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function StreamingAnswerSections({ content }: { content: string }) {
-  const rawSections = parseMedSafetyAnswerSections(content);
-  const sections = splitSectionSubHeadings(rawSections);
-  if (!sections.length) {
-    if (!content.trim()) return null;
-    return (
-      <div className="flex flex-col">
-        <section className={sectionCardClass("summary")}>
-          <div className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass("summary")}`}>
-            결론
-          </div>
-          <div className="mt-3.5">
-            <div className="whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text">
-              {content}
-              <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-            </div>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
-  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text";
-  const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
-
-  return (
-    <div className="flex flex-col">
-      {sections.map((section, sectionIndex) => {
-        const isLastSection = sectionIndex === sections.length - 1;
-        const isContinuation = section.continuation;
-
-        return (
-          <div key={`${section.title}-${sectionIndex}`}>
-            {isContinuation ? (
-              <div className="flex justify-center py-0">
-                <div className={`h-3 w-px border-l-2 border-dashed ${connectorColor(section.tone)} opacity-70`} />
-              </div>
-            ) : sectionIndex > 0 ? (
-              <div className="h-4" />
-            ) : null}
-
-            <section className={`${sectionCardClass(section.tone)} transition-all duration-300 ease-out`}>
-              {isContinuation ? (
-                <div className="text-[13px] font-semibold text-ios-text/70">
-                  {section.title}
-                </div>
-              ) : (
-                <div
-                  className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass(
-                    section.tone
-                  )}`}
-                >
-                  {section.title}
-                </div>
-              )}
-              <div className={isContinuation ? "mt-2.5" : "mt-3.5"}>
-                {section.lead ? (
-                  <div className={leadTextClass}>
-                    {section.lead}
-                    {isLastSection && section.bodyLines.length === 0 ? (
-                      <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse rounded-full bg-[color:var(--rnest-accent)] align-middle" />
-                    ) : null}
-                  </div>
-                ) : null}
-                <StreamingBodyLines section={section} bodyTextClass={bodyTextClass} isLastSection={isLastSection} />
-              </div>
-            </section>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /* ── Thinking indicator messages ── */
 const THINKING_GENERIC = [
   "질문을 분석하고 있어요...",
@@ -1132,7 +1183,13 @@ function pickThinkingMessages(query: string): string[] {
   return THINKING_GENERIC;
 }
 
-function ThinkingIndicator({ streamPhase, query }: { streamPhase: "idle" | "connecting" | "writing"; query: string }) {
+function ThinkingIndicator({
+  streamPhase,
+  query,
+}: {
+  streamPhase: "idle" | "routing" | "retrieving" | "generating" | "verifying";
+  query: string;
+}) {
   const messages = useMemo(() => pickThinkingMessages(query), [query]);
   const [msgIndex, setMsgIndex] = useState(0);
 
@@ -1148,7 +1205,13 @@ function ThinkingIndicator({ streamPhase, query }: { streamPhase: "idle" | "conn
   return (
     <div className="min-w-0 flex-1">
       <div className="text-[14px] font-semibold text-[color:var(--rnest-accent)]">
-        {streamPhase === "connecting" ? "AI 분석 중..." : messages[msgIndex]}
+        {streamPhase === "routing"
+          ? "질문 구조 분석 중..."
+          : streamPhase === "retrieving"
+            ? "공식 근거 확인 중..."
+            : streamPhase === "verifying"
+              ? "근거-주장 일치 여부 점검 중..."
+              : messages[msgIndex]}
       </div>
       <div className="mt-2 flex items-center gap-1.5">
         <span className="inline-block h-2 w-2 animate-[bounce_1s_ease-in-out_infinite] rounded-full bg-[color:var(--rnest-accent)] opacity-60" />
@@ -1168,14 +1231,10 @@ export function ToolMedSafetyPage() {
   const [mounted, setMounted] = useState(false);
   const [medSafetyConsentStatus, setMedSafetyConsentStatus] = useState<"idle" | "pending" | "consented">("idle");
   const [medSafetyConsentSubmitting, setMedSafetyConsentSubmitting] = useState(false);
-  const [didRestoreSession, setDidRestoreSession] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [streamPhase, setStreamPhase] = useState<"idle" | "connecting" | "writing">("idle");
-  const [lastContinuationToken, setLastContinuationToken] = useState<string | null>(null);
-  const [lastContinuationSearchType, setLastContinuationSearchType] = useState<SearchCreditType | null>(null);
+  const [streamPhase, setStreamPhase] = useState<"idle" | "routing" | "retrieving" | "generating" | "verifying">("idle");
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
@@ -1191,7 +1250,6 @@ export function ToolMedSafetyPage() {
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const restoredSessionKeyRef = useRef<string | null>(null);
   const searchTypeMenuRef = useRef<HTMLDivElement | null>(null);
 
   const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
@@ -1216,10 +1274,9 @@ export function ToolMedSafetyPage() {
   const premiumQuotaRemaining = Math.max(0, Number(medSafetyQuota?.premium.totalRemaining ?? 0));
   const activePlanTitle = getPlanDefinition(activeTier).title;
   const billingActionHref = `${withReturnTo("/settings/billing", "/tools/med-safety")}#search-credits`;
-  const medSafetySessionStorageKey = buildMedSafetySessionStorageKey(user?.userId ?? null);
   const quotaKnown = authStatus === "authenticated" && !billingLoading && !!medSafetyQuota;
   const canAsk = authStatus === "authenticated" && (!quotaKnown || selectedQuotaRemaining > 0);
-  const hasConversation = messages.length > 0 || Boolean(streamingText);
+  const hasConversation = messages.length > 0;
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user") ?? null;
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
@@ -1252,7 +1309,6 @@ export function ToolMedSafetyPage() {
 
   useEffect(() => {
     setMounted(true);
-    purgeLegacyMedSafetySessionStorage();
   }, []);
 
   useEffect(() => {
@@ -1277,49 +1333,6 @@ export function ToolMedSafetyPage() {
     })();
     return () => { cancelled = true; };
   }, [mounted, authStatus]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    if (authStatus === "loading") return;
-
-    if (authStatus !== "authenticated" || !user?.userId) {
-      setDidRestoreSession(true);
-      return;
-    }
-
-    if (restoredSessionKeyRef.current === medSafetySessionStorageKey) {
-      setDidRestoreSession(true);
-      return;
-    }
-
-    const persisted = readPersistedMedSafetySession(medSafetySessionStorageKey);
-    if (persisted) {
-      setMessages(persisted.messages);
-      setInput(persisted.input);
-      setStreamingText("");
-      setLastContinuationToken(persisted.lastContinuationToken);
-      setLastContinuationSearchType(persisted.lastContinuationSearchType);
-      setError(null);
-      setLastSubmittedQuery(persisted.lastSubmittedQuery);
-      setSelectedImage(null);
-      setSelectedImageName("");
-      setShowSessionDecisionPrompt(persisted.showSessionDecisionPrompt);
-    } else if (restoredSessionKeyRef.current && restoredSessionKeyRef.current !== medSafetySessionStorageKey) {
-      setMessages([]);
-      setInput("");
-      setStreamingText("");
-      setLastContinuationToken(null);
-      setLastContinuationSearchType(null);
-      setError(null);
-      setLastSubmittedQuery("");
-      setSelectedImage(null);
-      setSelectedImageName("");
-      setShowSessionDecisionPrompt(false);
-    }
-
-    restoredSessionKeyRef.current = medSafetySessionStorageKey;
-    setDidRestoreSession(true);
-  }, [mounted, authStatus, user?.userId, medSafetySessionStorageKey]);
 
   useEffect(() => {
     if (!copyMessage) return;
@@ -1360,19 +1373,11 @@ export function ToolMedSafetyPage() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Auto-scroll only for new messages/errors, or during streaming when user is near bottom
+  // Auto-scroll to the newest message unless the user has deliberately scrolled away.
   useEffect(() => {
     if (!threadEndRef.current) return;
-    if (userHasScrolledUpRef.current && streamingText) return; // user scrolled up during streaming — don't force
     threadEndRef.current.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages, error, streamingText]);
-
-  // During streaming, only scroll if user is at the bottom
-  useEffect(() => {
-    if (!threadEndRef.current || !streamingText) return;
-    if (userHasScrolledUpRef.current) return;
-    threadEndRef.current.scrollIntoView({ block: "end" });
-  }, [streamingText]);
+  }, [messages, error]);
 
   useEffect(() => {
     const textarea = composerInputRef.current;
@@ -1389,48 +1394,6 @@ export function ToolMedSafetyPage() {
     setIsSearchTypeMenuOpen(false);
   }, [isComposerLocked]);
 
-  useEffect(() => {
-    if (!mounted || !didRestoreSession) return;
-    if (authStatus !== "authenticated" || !user?.userId) return;
-    if (isLoading || streamingText) return;
-
-    const hasPersistableSession =
-      messages.some((message) => message.role === "assistant") ||
-      input.trim().length > 0 ||
-      Boolean(lastContinuationToken) ||
-      Boolean(lastSubmittedQuery) ||
-      showSessionDecisionPrompt;
-
-    if (!hasPersistableSession) {
-      clearPersistedMedSafetySession(medSafetySessionStorageKey);
-      return;
-    }
-
-    writePersistedMedSafetySession(medSafetySessionStorageKey, {
-      messages,
-      input,
-      lastContinuationToken,
-      lastContinuationSearchType,
-      lastSubmittedQuery,
-      showSessionDecisionPrompt,
-      updatedAt: Date.now(),
-    });
-  }, [
-    mounted,
-    didRestoreSession,
-    authStatus,
-    user?.userId,
-    medSafetySessionStorageKey,
-    messages,
-    input,
-    lastContinuationToken,
-    lastContinuationSearchType,
-    lastSubmittedQuery,
-    showSessionDecisionPrompt,
-    isLoading,
-    streamingText,
-  ]);
-
   function focusComposerSoon() {
     window.setTimeout(() => {
       composerInputRef.current?.focus();
@@ -1440,15 +1403,11 @@ export function ToolMedSafetyPage() {
   function resetConversation() {
     setMessages([]);
     setInput("");
-    setStreamingText("");
     setError(null);
-    setLastContinuationToken(null);
-    setLastContinuationSearchType(null);
     setLastSubmittedQuery("");
     setSelectedImage(null);
     setSelectedImageName("");
     setShowSessionDecisionPrompt(false);
-    clearPersistedMedSafetySession(medSafetySessionStorageKey);
   }
 
   function continueCurrentSession() {
@@ -1572,8 +1531,7 @@ export function ToolMedSafetyPage() {
     setSelectedImageName("");
     userHasScrolledUpRef.current = false;
     setIsLoading(true);
-    setStreamingText("");
-    setStreamPhase("connecting");
+    setStreamPhase("routing");
     setError(null);
     setShowSessionDecisionPrompt(false);
     setLastSubmittedQuery(question);
@@ -1583,12 +1541,7 @@ export function ToolMedSafetyPage() {
       let response: Response | null = null;
       let normalizedData: AnalyzePayload | null = null;
       let finalError = "med_safety_analyze_failed";
-      const continuationTokenForRequest =
-        activeSearchType === "standard" && lastContinuationToken && lastContinuationSearchType === activeSearchType
-          ? lastContinuationToken
-          : null;
-      const continuationMemoryForRequest =
-        activeSearchType === "premium" ? buildPremiumContinuationMemory(lastUserMessage, lastAssistantMessage) : undefined;
+      const continuationMemoryForRequest = buildPremiumContinuationMemory(lastUserMessage, lastAssistantMessage);
 
       for (let attempt = 0; attempt <= maxClientRetries; attempt += 1) {
         try {
@@ -1598,7 +1551,6 @@ export function ToolMedSafetyPage() {
               locale: lang,
               stream: true,
               searchType: activeSearchType,
-              continuationToken: continuationTokenForRequest ?? undefined,
               continuationMemory: continuationMemoryForRequest,
               ...(imageToSend ? { imageDataUrl: imageToSend } : {}),
             },
@@ -1609,13 +1561,11 @@ export function ToolMedSafetyPage() {
           if (response.ok && contentType.includes("text/event-stream")) {
             const streamed = await parseAnalyzeStreamResponse({
               response,
-              onStart: () => {
-                setStreamPhase("connecting");
+              onStatus: (stage) => {
+                setStreamPhase(stage);
               },
-              onDelta: (text) => {
-                if (!text) return;
-                setStreamPhase("writing");
-                setStreamingText((prev) => `${prev}${text}`);
+              onWarning: (warning) => {
+                setError(parseErrorMessage(warning, t));
               },
             });
             if (streamed.data) {
@@ -1638,12 +1588,12 @@ export function ToolMedSafetyPage() {
           if (attempt >= maxClientRetries) break;
         }
 
-        setStreamingText(""); setStreamPhase("connecting");
+        setStreamPhase("routing");
         await waitMs(Math.min(2200, 500 * (attempt + 1)) + Math.floor(Math.random() * 180));
       }
 
       if (!response?.ok || !normalizedData) {
-        setStreamingText(""); setStreamPhase("idle");
+        setStreamPhase("idle");
         if (String(finalError).toLowerCase().includes("insufficient_med_safety_credits")) {
           setError(
             alternateQuotaRemaining > 0
@@ -1656,7 +1606,7 @@ export function ToolMedSafetyPage() {
         return;
       }
 
-      setStreamingText(""); setStreamPhase("idle");
+      setStreamPhase("idle");
       const assistantMessage: Message = {
         id: `assistant-${normalizedData.analyzedAt.toString(36)}`,
         role: "assistant",
@@ -1668,10 +1618,11 @@ export function ToolMedSafetyPage() {
         groundingMode: normalizedData.groundingMode,
         groundingStatus: normalizedData.groundingStatus,
         groundingError: normalizedData.groundingError ?? null,
+        structuredAnswer: normalizedData.structuredAnswer,
+        quality: normalizedData.quality,
+        verification: normalizedData.verification,
       };
-      setMessages((prev) => (normalizedData.startedFreshSession ? [userMessage, assistantMessage] : [...prev, assistantMessage]));
-      setLastContinuationToken(normalizedData.continuationToken ?? null);
-      setLastContinuationSearchType(normalizedData.continuationToken ? normalizedData.searchType : null);
+      setMessages((prev) => [...prev, assistantMessage]);
       setShowSessionDecisionPrompt(true);
 
       if (normalizedData.source === "openai_fallback") {
@@ -1683,7 +1634,7 @@ export function ToolMedSafetyPage() {
         setError(null);
       }
     } catch (cause: any) {
-      setStreamingText(""); setStreamPhase("idle");
+      setStreamPhase("idle");
       setError(parseErrorMessage(String(cause?.message ?? "med_safety_analyze_failed"), t));
     } finally {
       setIsLoading(false); setStreamPhase("idle");
@@ -1982,20 +1933,42 @@ export function ToolMedSafetyPage() {
                           <div className={MESSAGE_USER_CLASS}>
                             {message.imageDataUrl ? (
                               <div className="mb-3 overflow-hidden rounded-[18px] border border-[#E5E7EB] bg-white">
-                                <img src={message.imageDataUrl} alt="" className="max-h-[280px] w-full object-cover" />
+                                <Image
+                                  src={message.imageDataUrl}
+                                  alt=""
+                                  width={960}
+                                  height={720}
+                                  unoptimized
+                                  sizes="(max-width: 768px) 100vw, 70vw"
+                                  className="max-h-[280px] w-full object-cover"
+                                />
                               </div>
                             ) : null}
                             <div className="whitespace-pre-wrap break-words text-[16px] leading-7">{message.content}</div>
                           </div>
                         ) : (
                           <div className="space-y-4">
-                            <AssistantAnswerSections content={message.content} sources={message.sources ?? []} />
-                            <MedSafetySourceRail
-                              sources={message.sources ?? []}
-                              groundingMode={message.groundingMode ?? "none"}
-                              groundingStatus={message.groundingStatus ?? "none"}
-                              groundingError={message.groundingError ?? null}
-                            />
+                            {message.structuredAnswer ? (
+                              <StructuredAssistantAnswer
+                                answer={message.structuredAnswer}
+                                sources={message.sources ?? []}
+                                quality={message.quality ?? null}
+                                verification={message.verification ?? null}
+                                groundingMode={message.groundingMode ?? "none"}
+                                groundingStatus={message.groundingStatus ?? "none"}
+                                groundingError={message.groundingError ?? null}
+                              />
+                            ) : (
+                              <>
+                                <AssistantAnswerSections content={message.content} sources={message.sources ?? []} />
+                                <MedSafetySourceRail
+                                  sources={message.sources ?? []}
+                                  groundingMode={message.groundingMode ?? "none"}
+                                  groundingStatus={message.groundingStatus ?? "none"}
+                                  groundingError={message.groundingError ?? null}
+                                />
+                              </>
+                            )}
                           </div>
                         )}
                         <div
@@ -2025,32 +1998,22 @@ export function ToolMedSafetyPage() {
                     </div>
                   ))}
 
-                  {isLoading && streamPhase !== "idle" && !streamingText ? (
+                  {isLoading && streamPhase !== "idle" ? (
                     <div className="flex justify-start">
                       <div className="w-full max-w-[860px] min-w-0 px-2">
                         <div className="flex items-start gap-3">
                           <div className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center">
-                            <img
+                            <Image
                               src="/icons/icon-192.png"
                               alt="RNest"
+                              width={36}
+                              height={36}
                               className="h-9 w-9 rounded-full bg-white object-contain p-0.5"
                             />
                             <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
                           </div>
                           <ThinkingIndicator streamPhase={streamPhase} query={lastSubmittedQuery} />
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {streamingText ? (
-                    <div className="flex justify-start">
-                      <div className="w-full max-w-[860px] min-w-0">
-                        <StreamingAnswerSections content={streamingText} />
-                        <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[11px] text-ios-sub">
-                          <span>{t("AI")}</span>
-                          <span>{t("작성 중...")}</span>
                         </div>
                       </div>
                     </div>
@@ -2166,7 +2129,7 @@ export function ToolMedSafetyPage() {
             >
               {selectedImage ? (
                 <div className="mb-2 flex items-center gap-3 rounded-[20px] border border-[#EAE6F6] bg-white/86 px-3 py-2.5">
-                  <img src={selectedImage} alt="" className="h-12 w-12 rounded-[14px] object-cover" />
+                  <Image src={selectedImage} alt="" width={48} height={48} unoptimized className="h-12 w-12 rounded-[14px] object-cover" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px] font-medium text-ios-text">{selectedImageName}</div>
                     <div className="mt-0.5 text-[11px] text-ios-sub">{t("질문과 함께 전송됩니다.")}</div>
