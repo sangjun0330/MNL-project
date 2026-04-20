@@ -1312,6 +1312,19 @@ const EN_EXTRA: Record<string, string> = {
     "Network is unstable. Turn on mobile data/network and tap `Run AI Analysis` again.",
   "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 제공자는 본 결과의 사용으로 발생한 진단·치료·투약 결정 및 결과에 대해 책임을 지지 않습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요.":
     "This output is auto-generated for reference and must not be used as a basis for medical decisions. The provider is not responsible for diagnosis/treatment/medication decisions or outcomes based on this output. Always prioritize hospital policy, physician orders, and clinical confirmation.",
+  "본 기능은 임상 참고 정보 도구이며 의료기기가 아닙니다. AI 결과는 교육·참고 목적으로만 사용하고, 실제 투약·처치는 반드시 처방의·병원 지침·약사를 통해 최종 확인하세요.":
+    "This feature is a clinical reference tool, not a medical device. AI results are for educational and reference purposes only. Always verify actual medication or treatment decisions with a physician, hospital policy, or pharmacist.",
+  "AI 임상 검색 이용 전 확인": "Before Using AI Clinical Search",
+  "본 기능은 임상 참고 정보 도구이며 의료기기가 아닙니다.":
+    "This feature is a clinical reference tool, not a medical device.",
+  "AI 결과는 교육·참고 목적으로만 사용하세요.":
+    "AI results are for educational and reference purposes only.",
+  "실제 투약·처치 판단은 반드시 처방의·병원 지침·약사를 통해 최종 확인하세요.":
+    "Always verify actual medication or treatment decisions with a physician, hospital policy, or pharmacist.",
+  "응급 상황에서 이 결과만을 근거로 임상 결정을 내리지 마세요.":
+    "Do not make clinical decisions in emergencies based solely on these results.",
+  "이해했습니다, 참고용으로만 사용할게요":
+    "Understood — I will use this for reference only.",
   "오늘 수면 기록이 필요해요": "Today's sleep log is required.",
   "AI 맞춤회복 분석 전 필수": "Required before AI recovery analysis",
   "AI 회복 해설 분석 전 필수": "Required before AI recovery brief",

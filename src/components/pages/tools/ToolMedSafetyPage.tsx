@@ -1092,6 +1092,7 @@ export function ToolMedSafetyPage() {
   const { user, status: authStatus } = useAuthState();
   const { loading: billingLoading, subscription, reload: reloadBilling } = useBillingAccess();
   const [mounted, setMounted] = useState(false);
+  const [medSafetyAcked, setMedSafetyAcked] = useState(true);
   const [didRestoreSession, setDidRestoreSession] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -1172,6 +1173,12 @@ export function ToolMedSafetyPage() {
   useEffect(() => {
     setMounted(true);
     purgeLegacyMedSafetySessionStorage();
+    try {
+      const acked = localStorage.getItem("rnest_med_safety_ack_v1");
+      setMedSafetyAcked(acked === "1");
+    } catch {
+      setMedSafetyAcked(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -1679,6 +1686,51 @@ export function ToolMedSafetyPage() {
 
   return (
     <>
+      {mounted && !medSafetyAcked ? (
+        <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/40 pb-[env(safe-area-inset-bottom)] sm:items-center sm:pb-0">
+          <div className="w-full max-w-[480px] rounded-t-[32px] border border-[#E8E8EC] bg-white px-6 pb-10 pt-7 sm:rounded-[32px] sm:pb-8">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50">
+                <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5 text-blue-500" aria-hidden="true">
+                  <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M10 9v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                  <circle cx="10" cy="6.5" r="0.9" fill="currentColor"/>
+                </svg>
+              </div>
+              <div className="text-[17px] font-bold tracking-[-0.02em] text-ios-text">{t("AI 임상 검색 이용 전 확인")}</div>
+            </div>
+            <ul className="space-y-2.5 text-[14px] leading-[1.7] text-ios-text/80">
+              <li className="flex items-start gap-2">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                {t("본 기능은 임상 참고 정보 도구이며 의료기기가 아닙니다.")}
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                {t("AI 결과는 교육·참고 목적으로만 사용하세요.")}
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                {t("실제 투약·처치 판단은 반드시 처방의·병원 지침·약사를 통해 최종 확인하세요.")}
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                {t("응급 상황에서 이 결과만을 근거로 임상 결정을 내리지 마세요.")}
+              </li>
+            </ul>
+            <button
+              type="button"
+              className="mt-6 w-full rounded-full bg-[color:var(--rnest-accent)] py-3.5 text-[15px] font-semibold text-white"
+              onClick={() => {
+                try { localStorage.setItem("rnest_med_safety_ack_v1", "1") } catch {}
+                setMedSafetyAcked(true);
+              }}
+            >
+              {t("이해했습니다, 참고용으로만 사용할게요")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -1787,10 +1839,17 @@ export function ToolMedSafetyPage() {
                   </div>
                 </div>
 
-                <div className="mx-auto mt-8 w-full max-w-[900px] px-1 text-[12.5px] leading-6 text-ios-sub">
-                  {t(
-                    "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
-                  )}
+                <div className="mx-auto mt-6 w-full max-w-[900px]">
+                  <div className="flex items-start gap-2.5 rounded-[18px] border border-blue-100 bg-blue-50/80 px-4 py-3">
+                    <svg viewBox="0 0 20 20" fill="none" className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" aria-hidden="true">
+                      <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
+                      <path d="M10 9v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                      <circle cx="10" cy="6.5" r="0.9" fill="currentColor"/>
+                    </svg>
+                    <p className="text-[12.5px] leading-[1.65] text-blue-700">
+                      {t("본 기능은 임상 참고 정보 도구이며 의료기기가 아닙니다. AI 결과는 교육·참고 목적으로만 사용하고, 실제 투약·처치는 반드시 처방의·병원 지침·약사를 통해 최종 확인하세요.")}
+                    </p>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1872,10 +1931,17 @@ export function ToolMedSafetyPage() {
                   <div ref={threadEndRef} />
                 </div>
 
-                <div className="mx-auto mt-8 w-full px-1 text-[12.5px] leading-6 text-ios-sub">
-                  {t(
-                    "본 결과는 참고용 자동 생성 정보이며 의료행위 판단의 근거로 사용할 수 없습니다. 모든 처치는 병원 지침, 처방, 의료진 확인을 우선해 결정해 주세요."
-                  )}
+                <div className="mx-auto mt-6 w-full">
+                  <div className="flex items-start gap-2.5 rounded-[18px] border border-blue-100 bg-blue-50/80 px-4 py-3">
+                    <svg viewBox="0 0 20 20" fill="none" className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" aria-hidden="true">
+                      <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
+                      <path d="M10 9v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                      <circle cx="10" cy="6.5" r="0.9" fill="currentColor"/>
+                    </svg>
+                    <p className="text-[12.5px] leading-[1.65] text-blue-700">
+                      {t("본 기능은 임상 참고 정보 도구이며 의료기기가 아닙니다. AI 결과는 교육·참고 목적으로만 사용하고, 실제 투약·처치는 반드시 처방의·병원 지침·약사를 통해 최종 확인하세요.")}
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
