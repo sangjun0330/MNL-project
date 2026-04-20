@@ -87,7 +87,6 @@ export type OpenAIMedSafetyStructuredOutput = {
 type WebSearchContextSize = "low" | "medium" | "high";
 
 type MedSafetyWebSearchProfile = {
-  allowedDomains: string[];
   searchContextSize: WebSearchContextSize;
   toolChoice: "required" | "auto";
   includeSourceList: boolean;
@@ -604,7 +603,6 @@ function buildGroundingDecision(query: string, imageDataUrl?: string): Grounding
 
 function buildWebSearchProfile(searchType: SearchCreditType): MedSafetyWebSearchProfile {
   return {
-    allowedDomains: [...ALLOWED_DOMAINS],
     searchContextSize: searchType === "premium" ? "high" : "medium",
     toolChoice: "required",
     includeSourceList: true,
@@ -1046,7 +1044,6 @@ async function callStructuredModel<T>(args: {
     body.tools = [
       {
         type: "web_search_preview",
-        allowed_domains: args.webSearchProfile.allowedDomains,
         search_context_size: args.webSearchProfile.searchContextSize,
       },
     ];
