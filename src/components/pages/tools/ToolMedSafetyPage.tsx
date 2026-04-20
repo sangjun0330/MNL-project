@@ -784,28 +784,41 @@ function StructuredAnswerItems({
   citationLookup: Map<string, MedSafetySource>;
 }) {
   if (!items.length) return null;
+  const [summaryItem, ...detailItems] = items;
   return (
     <section className="rounded-[24px] border border-[#E6E8ED] bg-[#FCFCFD] px-5 py-5">
       <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
         {title}
       </div>
-      <div className="mt-3 flex flex-col gap-3">
-        {items.map((item, index) => (
-          <div key={`${title}-${index}`} className="rounded-[18px] border border-[#EEF0F3] bg-white px-4 py-3">
-            <div className="flex items-start gap-3">
-              <span className="mt-[9px] h-[6px] w-[6px] shrink-0 rounded-full bg-[color:var(--rnest-accent)]/70" />
-              <div className="min-w-0 flex-1">
-                <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{item.text}</div>
-                {item.evidence_status === "needs_review" ? (
-                  <div className="mt-2 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
-                    근거 확인 필요
-                  </div>
-                ) : null}
-                {renderCitationButtons(item.citation_ids, citationLookup)}
-              </div>
-            </div>
+      <div className="mt-3 rounded-[18px] border border-[#EEF0F3] bg-white px-4 py-4">
+        <div className="whitespace-pre-wrap break-words text-[15px] font-semibold leading-7 text-ios-text">
+          {summaryItem.text}
+        </div>
+        {summaryItem.evidence_status === "needs_review" ? (
+          <div className="mt-2 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
+            근거 확인 필요
           </div>
-        ))}
+        ) : null}
+        {renderCitationButtons(summaryItem.citation_ids, citationLookup)}
+
+        {detailItems.length ? (
+          <div className="mt-4 flex flex-col gap-3">
+            {detailItems.map((item, index) => (
+              <div key={`${title}-${index + 1}`} className="flex items-start gap-3">
+                <span className="mt-[11px] h-[6px] w-[6px] shrink-0 rounded-full bg-[color:var(--rnest-accent)]/70" />
+                <div className="min-w-0 flex-1">
+                  <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{item.text}</div>
+                  {item.evidence_status === "needs_review" ? (
+                    <div className="mt-2 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
+                      근거 확인 필요
+                    </div>
+                  ) : null}
+                  {renderCitationButtons(item.citation_ids, citationLookup)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </section>
   );

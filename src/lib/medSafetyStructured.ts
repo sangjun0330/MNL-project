@@ -261,7 +261,7 @@ function normalizeAnswerItem(value: unknown): MedSafetyAnswerItem | null {
   };
 }
 
-function normalizeAnswerItems(value: unknown, limit = 6) {
+function normalizeAnswerItems(value: unknown, limit = 4) {
   if (!Array.isArray(value)) return [] as MedSafetyAnswerItem[];
   const out: MedSafetyAnswerItem[] = [];
   for (const item of value) {
@@ -462,8 +462,11 @@ export function normalizeMedSafetyStructuredAnswer(raw: unknown, fallbackSources
 
 function pushAnswerItemLines(lines: string[], title: string, items: MedSafetyAnswerItem[]) {
   if (!items.length) return;
+  const [summary, ...details] = items;
   lines.push(`${title}:`);
-  items.forEach((item) => {
+  const summarySuffix = summary.evidence_status === "needs_review" ? " (근거 확인 필요)" : "";
+  lines.push(`${summary.text}${summarySuffix}`);
+  details.forEach((item) => {
     const suffix = item.evidence_status === "needs_review" ? " (근거 확인 필요)" : "";
     lines.push(`- ${item.text}${suffix}`);
   });

@@ -173,7 +173,7 @@ const ANSWER_SCHEMA = {
     bottom_line_citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
     key_points: {
       type: "array",
-      maxItems: 6,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -187,7 +187,7 @@ const ANSWER_SCHEMA = {
     },
     recommended_actions: {
       type: "array",
-      maxItems: 6,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -201,7 +201,7 @@ const ANSWER_SCHEMA = {
     },
     do_not_do: {
       type: "array",
-      maxItems: 6,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -215,7 +215,7 @@ const ANSWER_SCHEMA = {
     },
     when_to_escalate: {
       type: "array",
-      maxItems: 6,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -229,7 +229,7 @@ const ANSWER_SCHEMA = {
     },
     patient_specific_caveats: {
       type: "array",
-      maxItems: 6,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -834,6 +834,10 @@ function buildAnswerDeveloperPrompt(locale: Locale, decision: GroundingDecision)
     "병원 내부 프로토콜, 임의의 처방, 환자별 확정 지시를 만들어 넣지 마라.",
     "답변은 구조화된 JSON이지만, 각 필드는 실제 간호 현장에서 바로 쓸 수 있게 채워라.",
     "bottom_line에는 제목 없는 결론 1~3문장을 넣고, urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
+    "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 항상 첫 항목을 소제목 아래 들어가는 핵심 요약 1문장으로 써라.",
+    "각 섹션의 2번째 항목부터는 세부 bullet이다. 기본은 2개 이내 bullet로 제한하고, 위험도·보고 필요·예외 경계 때문에 꼭 필요할 때만 3번째 bullet을 허용하라.",
+    "각 bullet은 기본 1문장으로 쓰고, 임상적으로 중요한 내용이 빠질 때만 2문장까지 허용하라.",
+    "질문에 비해 과하지도 빈약하지도 않게, 필요한 범위에서만 구조화하라.",
     "key_points에는 핵심 판단 포인트만 넣어라. recommended_actions에는 간호사가 지금 할 수 있는 행동을 우선 넣어라.",
     "do_not_do에는 흔하지만 위험한 행동이나 근거 없는 단정을 넣어라. when_to_escalate에는 즉시 보고/에스컬레이션 기준을 넣어라.",
     "patient_specific_caveats에는 실제로 판단을 바꿀 수 있는 예외만 넣어라.",
@@ -865,6 +869,8 @@ function buildAnswerUserPrompt(args: {
     "근거 패킷(JSON):",
     JSON.stringify(args.evidence, null, 2),
     "위 근거를 바탕으로 간호 실무에서 바로 쓸 수 있는 답변을 만들어라.",
+    "시스템 출력 규칙상, 비어 있지 않은 각 섹션 배열의 첫 항목은 소제목 아래 첫 줄 요약이고, 그 다음 항목들만 bullet 세부 내용으로 사용된다.",
+    "따라서 각 섹션은 필요할 때만 채우고, 첫 항목은 요약 1문장, 이후 항목은 기본 2개 이내의 짧은 bullet로 구성하라.",
     "출처가 없는 세부사항은 만들어 넣지 말고 uncertainty 또는 needs_review로 처리하라.",
     "환자 악화 가능성, 즉시 보고 기준, 중단/재평가 기준이 있으면 when_to_escalate 또는 recommended_actions에 우선 반영하라.",
   ]
@@ -881,6 +887,8 @@ function buildVerifierDeveloperPrompt(locale: Locale, decision: GroundingDecisio
     "문제가 있으면 corrected_answer를 보수적으로 수정하라.",
     "수정할 때는 사실을 덧붙이기보다 unsupported specificity를 줄이고, 즉시 행동/보고를 분명히 하고, 근거가 약한 항목은 uncertainty 또는 needs_review로 낮춰라.",
     "간호사에게 처방권이 필요한 행동을 직접 지시하는 표현이 있으면 제거하거나 더 안전한 확인/보고 방식으로 바꿔라.",
+    "비어 있지 않은 각 섹션은 첫 항목이 소제목 아래 요약 1문장인지, 이후 항목이 bullet 세부사항인지 확인하라.",
+    "각 섹션이 과도하게 길거나 bullet이 너무 많으면 줄여라. 기본은 세부 bullet 2개 이내이며, 꼭 필요할 때만 3개까지 허용한다.",
     decision.triage_level === "routine"
       ? "routine 질문은 과도한 경고를 줄이고 핵심 판단을 남겨라."
       : "urgent 또는 critical 질문은 when_to_escalate 누락, recommended_actions의 미온적 표현, bottom_line 초반의 우선순위 누락을 엄격하게 잡아라.",
