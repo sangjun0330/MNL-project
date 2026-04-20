@@ -33,7 +33,7 @@ export default function Page() {
           <h1 className="mt-2 text-[24px] font-bold tracking-[-0.03em] text-[#102a43]">개인정보처리방침</h1>
           <p className="mt-3 text-[13px] leading-7 text-[#61758a]">
             RNest는 서비스 제공에 필요한 범위에서만 개인정보를 처리하며, 실제 앱에서 제공되는 기록 저장, AI,
-            소셜, 쇼핑, 결제, 배송, 고객지원 기능을 기준으로 본 방침을 작성합니다.
+            소셜, 결제, 고객지원 기능을 기준으로 본 방침을 작성합니다.
           </p>
           <div className="mt-4 rounded-[20px] border border-[#e5edf6] bg-[#f8fbff] p-4 text-[12.5px] leading-6 text-[#52657a]">
             <div className="font-semibold text-[#214469]">중요 안내</div>
@@ -55,10 +55,9 @@ export default function Page() {
                 <><span className="font-semibold text-[#24415d]">기록·개인화 정보:</span> 일정, 메모, 감정 기록, 수면·낮잠·스트레스·활동·카페인·기분·증상·생리주기 관련 자가 입력 정보, 개인화 설정, 인사이트 계산에 필요한 상태값</>,
                 <><span className="font-semibold text-[#24415d]">노트 및 첨부파일 정보:</span> 노트 문서, 템플릿, 기록 보기 데이터, 업로드한 파일의 메타데이터, 저장 경로, 파일 유형, 크기</>,
                 <><span className="font-semibold text-[#24415d]">AI 관련 정보:</span> 질문 입력, AI 처리에 필요한 기록 요약, 업로드한 이미지, AI 응답 결과, 최근 이용 이력, 프롬프트 버전 및 실행 메타데이터</>,
-                <><span className="font-semibold text-[#24415d]">쇼핑·주문 정보:</span> 장바구니, 위시리스트, 배송지, 수령인명, 연락처, 우편번호, 상세주소, 배송메모, 주문내역, 구매확정, 리뷰, 환불·교환·클레임 정보</>,
-                <><span className="font-semibold text-[#24415d]">결제·배송 연동 정보:</span> 결제 승인·취소 결과값, 결제키 등 결제 확인에 필요한 요약 정보, 택배사, 운송장번호, 배송추적 이벤트</>,
+                <><span className="font-semibold text-[#24415d]">결제 정보:</span> 결제 승인·취소·환불 결과값, 결제키 등 결제 확인과 정산에 필요한 요약 정보</>,
                 <><span className="font-semibold text-[#24415d]">기술·보안 정보:</span> 접속 로그, IP 주소, 브라우저/기기 정보, 쿠키 또는 토큰, 오류 로그, 부정이용 방지를 위한 보안 관련 정보</>,
-                <><span className="font-semibold text-[#24415d]">동의·문의 정보:</span> 서비스 동의 시각과 버전, 고객 문의 내용, 주문·환불·배송 알림 발송 이력</>,
+                <><span className="font-semibold text-[#24415d]">동의·문의 정보:</span> 서비스 동의 시각과 버전, 고객 문의 내용, 운영상 필요한 안내 발송 이력</>,
               ]}
             />
           </Section>
@@ -66,9 +65,9 @@ export default function Page() {
           <Section title="2. 개인정보 수집 방법">
             <BulletList
               items={[
-                "회원가입, 로그인, 기록 입력, 쇼핑 주문, 배송지 저장, 고객 문의 등 이용자가 직접 입력하는 방식",
+                "회원가입, 로그인, 기록 입력, 고객 문의 등 이용자가 직접 입력하는 방식",
                 "서비스 이용 과정에서 자동 생성되거나 계산되는 방식",
-                "외부 로그인 제공자, 결제사업자, 배송조회 사업자 등 연동 서비스로부터 제공받는 방식",
+                "외부 로그인 제공자, 결제사업자 등 연동 서비스로부터 제공받는 방식",
               ]}
             />
           </Section>
@@ -80,7 +79,7 @@ export default function Page() {
                 "일정·건강기록 저장, 동기화, 백업, 복구, 개인화 서비스 제공",
                 "RNest Vital, 회복 플래너, 통계, 추천, AI 응답, 약물안전성/건강 관련 안내 제공",
                 "소셜 연결, 그룹·챌린지 운영, 공개 범위 반영, 커뮤니티 안전관리",
-                "상품 주문, 결제 승인 확인, 배송, 배송조회, 구매확정, 환불·교환·클레임 처리",
+                "유료 플랜 결제 승인 확인, 정산, 환불 처리",
                 "문의 응대, 분쟁 해결, 공지 발송, 부정이용 방지, 법령 준수, 감사·보안 로그 관리",
               ]}
             />
@@ -106,8 +105,8 @@ export default function Page() {
               ]}
             />
             <p className="rounded-[18px] bg-[#f8fbff] px-4 py-3 text-[12.5px] leading-6 text-[#52657a]">
-              위 보존기간은 「전자상거래 등에서의 소비자보호에 관한 법률 시행령」 등 관련 법령에 따른 기준을 반영한
-              것입니다. 백업본은 즉시 완전 삭제되지 않고 다음 덮어쓰기 주기까지 합리적인 기간 동안 남을 수 있습니다.
+              위 보존기간은 전자금융, 소비자 보호, 세무·회계 관련 법령상 기준을 반영한 것입니다. 백업본은 즉시 완전
+              삭제되지 않고 다음 덮어쓰기 주기까지 합리적인 기간 동안 남을 수 있습니다.
             </p>
           </Section>
 
@@ -128,8 +127,7 @@ export default function Page() {
                 <><span className="font-semibold text-[#24415d]">Supabase</span>: 회원 인증, 데이터베이스, 스토리지, 서비스 상태 저장</>,
                 <><span className="font-semibold text-[#24415d]">OpenAI / Cloudflare AI Gateway</span>: AI 응답 생성 및 AI 요청 라우팅</>,
                 <><span className="font-semibold text-[#24415d]">Toss Payments</span>: 결제 승인, 결제 취소, 환불 처리</>,
-                <><span className="font-semibold text-[#24415d]">SweetTracker</span>: 배송조회 및 운송장 상태 확인</>,
-                <><span className="font-semibold text-[#24415d]">Resend</span>: 주문·배송·환불 등 거래성 이메일 발송</>,
+                <><span className="font-semibold text-[#24415d]">Resend</span>: 결제·환불 등 거래성 이메일 발송</>,
               ]}
             />
             <p>
@@ -146,7 +144,6 @@ export default function Page() {
             <BulletList
               items={[
                 "결제 처리: 결제 승인, 결제 취소, 환불, 부정거래 탐지를 위해 결제사업자 및 관련 금융기관에 필요한 정보 제공",
-                "배송 처리: 상품 발송과 배송을 위해 수령인 정보, 연락처, 주소, 주문정보를 택배사 또는 물류 파트너에 제공",
                 "법령상 의무: 법원, 수사기관, 감독기관 등의 적법한 요구가 있는 경우",
               ]}
             />
@@ -178,8 +175,8 @@ export default function Page() {
 
           <Section title="10. 쿠키·세션·자동수집 장치">
             <p>
-              RNest는 로그인 유지, 보안 검증, 요청 무결성 확인, 사용자 상태 유지, 장바구니 및 세션 관리 등을 위해 쿠키,
-              세션 토큰 또는 이와 유사한 기술을 사용할 수 있습니다.
+              RNest는 로그인 유지, 보안 검증, 요청 무결성 확인, 사용자 상태 유지 등을 위해 쿠키, 세션 토큰 또는 이와
+              유사한 기술을 사용할 수 있습니다.
             </p>
             <BulletList
               items={[
@@ -194,7 +191,7 @@ export default function Page() {
               items={[
                 "접근 권한 최소화 및 관리자 권한 통제",
                 "전송 구간 보호, 인증·인가 절차 운영, 보안 로그 확인",
-                "일부 배송·주문 정보 마스킹, 오류·오남용 감지, 운영상 필요한 점검과 모니터링",
+                "민감 입력 마스킹, 오류·오남용 감지, 운영상 필요한 점검과 모니터링",
               ]}
             />
             <p>

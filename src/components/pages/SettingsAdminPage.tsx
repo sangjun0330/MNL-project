@@ -18,26 +18,7 @@ type AdminBillingOrderLite = {
   amount: number;
 };
 
-type AdminShopOrderLite = {
-  status: "READY" | "PAID" | "FAILED" | "CANCELED" | "REFUND_REQUESTED" | "REFUND_REJECTED" | "REFUNDED" | "SHIPPED" | "DELIVERED";
-  amount: number;
-};
-
-type AdminShopProductLite = {
-  active?: boolean;
-};
-
 type DashboardState = {
-  shop: {
-    totalOrders: number;
-    totalSales: number;
-    activeProducts: number;
-    readyToShip: number;
-    shipping: number;
-    delivered: number;
-    refundPending: number;
-    issues: number;
-  };
   billing: {
     totalRefunds: number;
     openRefunds: number;
@@ -67,16 +48,6 @@ const EMPTY_SOCIAL_OVERVIEW: SocialAdminOverview = {
 };
 
 const EMPTY_DASHBOARD: DashboardState = {
-  shop: {
-    totalOrders: 0,
-    totalSales: 0,
-    activeProducts: 0,
-    readyToShip: 0,
-    shipping: 0,
-    delivered: 0,
-    refundPending: 0,
-    issues: 0,
-  },
   billing: {
     totalRefunds: 0,
     openRefunds: 0,
@@ -129,22 +100,6 @@ async function readAdminObject<T>(path: string, headers: Record<string, string>)
     throw new Error(`failed_to_load:${path}`);
   }
   return json.data as T;
-}
-
-function buildShopDashboard(orders: AdminShopOrderLite[], products: AdminShopProductLite[]): DashboardState["shop"] {
-  const paidLikeStatuses: AdminShopOrderLite["status"][] = ["PAID", "SHIPPED", "DELIVERED", "REFUND_REQUESTED", "REFUND_REJECTED"];
-  return {
-    totalOrders: orders.length,
-    totalSales: orders
-      .filter((order) => paidLikeStatuses.includes(order.status))
-      .reduce((sum, order) => sum + Math.max(0, Math.round(Number(order.amount) || 0)), 0),
-    activeProducts: products.filter((product) => product.active !== false).length,
-    readyToShip: orders.filter((order) => order.status === "PAID").length,
-    shipping: orders.filter((order) => order.status === "SHIPPED").length,
-    delivered: orders.filter((order) => order.status === "DELIVERED").length,
-    refundPending: orders.filter((order) => order.status === "REFUND_REQUESTED").length,
-    issues: orders.filter((order) => order.status === "FAILED" || order.status === "REFUND_REJECTED").length,
-  };
 }
 
 function buildBillingDashboard(refunds: AdminRefundRowLite[], orders: AdminBillingOrderLite[]): DashboardState["billing"] {
@@ -279,19 +234,13 @@ export function SettingsAdminPage() {
 
       setAccessState("granted");
 
-      const [refundsResult, billingOrdersResult, shopOrdersResult, catalogResult, socialOverviewResult] = await Promise.allSettled([
+      const [refundsResult, billingOrdersResult, socialOverviewResult] = await Promise.allSettled([
         readAdminArray<AdminRefundRowLite>("/api/admin/billing/refunds?limit=200", headers, "requests"),
         readAdminArray<AdminBillingOrderLite>("/api/admin/billing/orders?limit=200", headers, "orders"),
-        readAdminArray<AdminShopOrderLite>("/api/admin/shop/orders?limit=200", headers, "orders"),
-        readAdminArray<AdminShopProductLite>("/api/admin/shop/catalog", headers, "products"),
         readAdminObject<SocialAdminOverview>("/api/admin/social/overview", headers),
       ]);
 
       const nextDashboard: DashboardState = {
-        shop:
-          shopOrdersResult.status === "fulfilled" && catalogResult.status === "fulfilled"
-            ? buildShopDashboard(shopOrdersResult.value, catalogResult.value)
-            : EMPTY_DASHBOARD.shop,
         billing:
           refundsResult.status === "fulfilled" && billingOrdersResult.status === "fulfilled"
             ? buildBillingDashboard(refundsResult.value, billingOrdersResult.value)
@@ -304,7 +253,6 @@ export function SettingsAdminPage() {
       setDashboard(nextDashboard);
 
       const partialFailures: string[] = [];
-      if (shopOrdersResult.status === "rejected" || catalogResult.status === "rejected") partialFailures.push("쇼핑 운영");
       if (refundsResult.status === "rejected" || billingOrdersResult.status === "rejected") partialFailures.push("결제·환불 운영");
       if (socialOverviewResult.status === "rejected") partialFailures.push("소셜 운영");
       setError(partialFailures.length > 0 ? `${partialFailures.join(", ")} 통계를 일부 불러오지 못했습니다.` : null);
@@ -324,16 +272,16 @@ export function SettingsAdminPage() {
   const heroMetrics = useMemo(
     () => [
       {
-        label: "쇼핑 주문",
-        value: dashboard.shop.totalOrders,
+        label: "소셜 사용자",
+        value: dashboard.social.totalUsers,
         tone: "text-ios-text",
-        hint: `활성 상품 ${dashboard.shop.activeProducts}개`,
+        hint: `읽기 전용 ${dashboard.social.readOnlyUsers}명`,
       },
       {
-        label: "발송 대기",
-        value: dashboard.shop.readyToShip,
+        label: "활성 게시글",
+        value: dashboard.social.totalPosts,
         tone: "text-[color:var(--rnest-accent)]",
-        hint: `배송 중 ${dashboard.shop.shipping}건`,
+        hint: `댓글 ${dashboard.social.totalComments}개`,
       },
       {
         label: "열린 환불",
@@ -389,44 +337,6 @@ export function SettingsAdminPage() {
           `정지 ${dashboard.social.suspendedUsers}명`,
           `24시간 게시글 ${dashboard.social.postsLast24h}건`,
           `AI 브리프 ${dashboard.social.aiBriefsThisWeek}회`,
-        ],
-      },
-      {
-        title: "쇼핑 운영",
-        description: "상품 관리, 주문 흐름, 배송 시작, 배송 이슈 대응까지 한 번에 관리합니다.",
-        href: "/settings/admin/shop",
-        cta: "쇼핑 관리",
-        accent: "bg-[#eaf1f8] text-[#17324d]",
-        metrics: [
-          {
-            label: "활성 상품",
-            value: dashboard.shop.activeProducts,
-            hint: `총 ${dashboard.shop.totalOrders}건 주문`,
-            tone: "text-ios-text",
-          },
-          {
-            label: "배송 중",
-            value: dashboard.shop.shipping,
-            hint: `배송 완료 ${dashboard.shop.delivered}건`,
-            tone: "text-[color:var(--rnest-accent)]",
-          },
-          {
-            label: "쇼핑 환불 대기",
-            value: dashboard.shop.refundPending,
-            hint: `이슈 ${dashboard.shop.issues}건`,
-            tone: dashboard.shop.refundPending > 0 ? "text-[#C2410C]" : "text-ios-text",
-          },
-          {
-            label: "누적 매출",
-            value: formatKrw(dashboard.shop.totalSales),
-            hint: "유효 결제 주문 기준",
-            tone: "text-ios-text",
-          },
-        ],
-        chips: [
-          `발송 대기 ${dashboard.shop.readyToShip}건`,
-          `배송 중 ${dashboard.shop.shipping}건`,
-          `배송 완료 ${dashboard.shop.delivered}건`,
         ],
       },
       {
@@ -550,7 +460,7 @@ export function SettingsAdminPage() {
         </Link>
         <div>
           <div className="text-[28px] font-extrabold tracking-[-0.03em] text-ios-text">운영 관리자</div>
-          <div className="text-[12.5px] text-ios-sub">쇼핑, 결제, 소셜 운영 상태를 한 화면에서 확인하고 바로 이동합니다.</div>
+          <div className="text-[12.5px] text-ios-sub">결제와 소셜 운영 상태를 한 화면에서 확인하고 바로 이동합니다.</div>
         </div>
       </div>
 
@@ -582,18 +492,18 @@ export function SettingsAdminPage() {
                       통계 확인과 처리 진입을 한 번에
                     </div>
                     <p className="mt-3 text-[13px] leading-6 text-ios-sub">
-                      쇼핑 주문·배송 통계와 결제·환불 상태를 같은 기준으로 정리해, 어떤 운영 화면으로 들어가야 하는지 바로
-                      판단할 수 있게 구성했습니다.
+                      결제·환불 상태와 소셜 운영 지표를 한 화면에 정리해, 어떤 운영 화면으로 들어가야 하는지 바로 판단할
+                      수 있게 구성했습니다.
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
-                        쇼핑 매출 {formatKrw(dashboard.shop.totalSales)}
-                      </Badge>
                       <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
                         결제 시도액 {formatKrw(dashboard.billing.totalAttemptAmount)}
                       </Badge>
                       <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
-                        처리 필요 {dashboard.shop.readyToShip + dashboard.billing.openRefunds}건
+                        가입 대기 {dashboard.social.pendingJoinRequests}건
+                      </Badge>
+                      <Badge variant="secondary" className="border-[#d9e2ee] bg-white text-[11px] text-[#41556f]">
+                        처리 필요 {dashboard.billing.openRefunds + dashboard.social.pendingJoinRequests}건
                       </Badge>
                     </div>
                   </div>

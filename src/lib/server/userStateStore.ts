@@ -131,14 +131,6 @@ function isJsonEqual(a: unknown, b: unknown): boolean {
 const SERVER_MANAGED_PAYLOAD_KEYS = [
   "aiRecoveryDaily",
   "recoveryOrderCompletions",
-  "shopWishlist",
-  "shopCart",
-  "shopShippingProfile",
-  "shopShippingAddressBook",
-  "shopOrders",
-  "shopOrderBundles",
-  "shopPurchaseConfirmations",
-  "shopClaims",
   "notebookState",
 ] as const;
 
@@ -323,8 +315,8 @@ export async function saveUserState(input: { userId: string; payload: any }): Pr
   }
 
   // Preserve server-managed domains unless caller explicitly set/updated them.
-  // This prevents app state sync payloads from wiping shop/account data that lives
-  // in the same row but outside the AppState schema.
+  // This prevents app state sync payloads from wiping auxiliary server-managed data
+  // that lives in the same row but outside the AppState schema.
   if (isRecord(nextPayload) && existingPayload) {
     let mergedPayload: Record<string, unknown> | null = null;
     for (const key of SERVER_MANAGED_PAYLOAD_KEYS) {
