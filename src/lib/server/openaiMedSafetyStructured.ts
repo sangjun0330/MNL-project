@@ -291,6 +291,17 @@ function splitModelList(raw: string) {
     .filter(Boolean);
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStructuredError(error: string | null) {
+  const value = String(error ?? "").toLowerCase();
+  if (!value) return false;
+  if (value.startsWith("openai_network_")) return true;
+  return /openai_responses_(408|409|425|429|500|502|503|504)/.test(value) || value.includes("openai_empty_text");
+}
+
 function normalizeApiKey() {
   const key =
     process.env.OPENAI_API_KEY ??
@@ -1353,8 +1364,8 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       question_type: decision.question_type,
     });
 
-    await params.onStage?.("generating");
-    const generated = await callStructuredModel<Record<string, unknown>>({
+    const reasoningEffort: "low" | "medium" = decision.high_risk ? "medium" : "low";
+    const callArgs = {
       apiKey,
       model,
       apiBaseUrl,
@@ -1378,10 +1389,22 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
             : 4200
           : 3200,
       storeResponses,
-      reasoningEffort: decision.high_risk ? "medium" : "low",
+      reasoningEffort,
       webSearchProfile,
       imageDataUrl: params.imageDataUrl,
-    });
+    };
+
+    await params.onStage?.("generating");
+    let generated = await callStructuredModel<Record<string, unknown>>(callArgs);
+    if (isRetryableStructuredError(generated.error) && !timeoutController.signal.aborted) {
+      const retryDelayMs = 700;
+      if (Date.now() - startedAt + retryDelayMs < timeoutMs) {
+        await sleep(retryDelayMs);
+      }
+      if (!timeoutController.signal.aborted) {
+        generated = await callStructuredModel<Record<string, unknown>>(callArgs);
+      }
+    }
 
     const sanitizedGeneratedData = sanitizeGeneratedAnswerForSearchType(generated.data, params.searchType, params.locale);
     const mergedSources = mergeMedSafetySources(

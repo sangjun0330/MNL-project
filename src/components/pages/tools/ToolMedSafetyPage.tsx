@@ -68,6 +68,7 @@ const OPEN_LAYOUT_CLASS =
   "relative min-h-[calc(100dvh-120px)] overflow-hidden bg-[radial-gradient(circle_at_top,#FFFFFF_0%,#FAFAFB_42%,#F4F5F7_100%)]";
 const MED_SAFETY_CLIENT_TIMEOUT_MS = 480_000;
 const RETRY_WITH_DATA_MESSAGE = "네트워크가 불안정합니다. 데이터(모바일 네트워크)를 켠 뒤 다시 시도해 주세요.";
+const UPSTREAM_TEMPORARY_MESSAGE = "AI 근거 검색 서버가 일시적으로 불안정했습니다. 잠시 후 다시 시도해 주세요.";
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -175,7 +176,8 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
     return t("AI 응답 길이 제한으로 요청이 중단되었습니다. 다시 시도해 주세요.");
   if (normalized.includes("openai_empty_text")) return t("AI 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 시도해 주세요.");
   if (normalized.includes("openai_stream_parse_failed")) return t("AI 응답을 끝까지 읽지 못했습니다. 다시 시도해 주세요.");
-  if (/openai_responses_(408|409|425|500|502|503|504)/.test(normalized)) return t(RETRY_WITH_DATA_MESSAGE);
+  if (/openai_responses_(408|409|425)/.test(normalized)) return t("AI 서버 요청이 일시적으로 충돌했습니다. 잠시 후 다시 시도해 주세요.");
+  if (/openai_responses_(500|502|503|504)/.test(normalized)) return t(UPSTREAM_TEMPORARY_MESSAGE);
   if (normalized.includes("invalid_response_payload")) return t("서버 응답 형식이 올바르지 않습니다. 다시 시도해 주세요.");
   return t("질문 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
 }
@@ -1555,8 +1557,9 @@ export function ToolMedSafetyPage() {
               onStatus: (stage) => {
                 setStreamPhase(stage);
               },
-              onWarning: (warning) => {
-                setError(parseErrorMessage(warning, t));
+              onWarning: () => {
+                // The structured answer card already shows grounding/fallback warnings inline.
+                // Avoid promoting transient upstream warnings to a global hard-error banner.
               },
             });
             if (streamed.data) {
@@ -1616,14 +1619,10 @@ export function ToolMedSafetyPage() {
       setMessages((prev) => [...prev, assistantMessage]);
       setShowSessionDecisionPrompt(true);
 
-      if (normalizedData.source === "openai_fallback") {
-        setError(
-          `${parseErrorMessage(String(normalizedData.fallbackReason ?? "openai_fallback"), t)} ${t("기본 안전 모드 답변을 표시합니다.")}`
-        );
-      } else {
+      if (normalizedData.source !== "openai_fallback") {
         applyOptimisticQuotaConsume(normalizedData.searchType);
-        setError(null);
       }
+      setError(null);
     } catch (cause: any) {
       setStreamPhase("idle");
       setError(parseErrorMessage(String(cause?.message ?? "med_safety_analyze_failed"), t));
