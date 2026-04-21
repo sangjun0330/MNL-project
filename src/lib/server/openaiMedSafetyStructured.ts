@@ -338,17 +338,7 @@ function resolveUpstreamTimeoutMs() {
   return Math.max(60_000, Math.min(240_000, Math.round(raw)));
 }
 
-function resolveMaxToolCalls() {
-  const raw = Number(
-    process.env.OPENAI_MED_SAFETY_MAX_TOOL_CALLS ??
-      process.env.OPENAI_MED_SAFETY_TOOL_CALLS ??
-      process.env.OPENAI_MAX_TOOL_CALLS ??
-      process.env.OPENAI_TOOL_CALLS ??
-      3
-  );
-  if (!Number.isFinite(raw)) return 3;
-  return Math.max(1, Math.min(12, Math.round(raw)));
-}
+const PREMIUM_MAX_TOOL_CALLS = 3;
 
 function resolveMedSafetyBaseMaxOutputTokens(searchType: SearchCreditType, decision: GroundingDecision) {
   const defaultValue =
@@ -1035,13 +1025,12 @@ function buildAnswerStylePrompt(decision: GroundingDecision) {
 }
 
 function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType, decision: GroundingDecision, query: string) {
-  const maxToolCalls = resolveMaxToolCalls();
   const groundingRule =
     searchType === "premium"
       ? [
           "[검색과 근거 사용]",
           "이번 응답은 웹 검색과 최종 답변 작성을 한 번에 수행한다.",
-          `웹 검색은 최대 ${maxToolCalls}회까지만 사용하라. 가능하면 1~2회의 고신호 검색으로 끝내고, 답에 필요한 공식 근거가 확보되면 즉시 검색을 중단하라.`,
+          `웹 검색은 반드시 최대 3회로 완료하라. 1~2회의 고신호 검색으로 핵심 공식 문서를 확보했으면 즉시 검색을 중단하고 답변을 완성하라. 추가 검색이 답변을 의미 있게 개선하지 못한다면 하지 마라.`,
           "같은 의미의 검색을 반복하지 말고, 이미 충분한 근거가 있으면 추가 검색 대신 바로 구조화된 답변을 완성하라.",
           "검색을 했다면 검색 결과를 소화해서 질문에 직접 답하라. 출처 목록만 길게 늘어놓는 답변은 금지한다.",
           "허용된 도메인 안의 공식·공공 출처를 우선 사용하라.",
@@ -1338,7 +1327,7 @@ async function callStructuredModel<T>(args: {
       },
     ];
     body.tool_choice = args.webSearchProfile.toolChoice;
-    body.max_tool_calls = resolveMaxToolCalls();
+    body.max_tool_calls = PREMIUM_MAX_TOOL_CALLS;
     if (args.webSearchProfile.includeSourceList) {
       body.include = ["web_search_call.action.sources"];
     }
