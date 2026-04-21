@@ -77,6 +77,7 @@ export type OpenAIMedSafetyStructuredOutput = {
 type WebSearchContextSize = "low" | "medium" | "high";
 
 type MedSafetyWebSearchProfile = {
+  toolType: "web_search" | "web_search_preview";
   searchContextSize: WebSearchContextSize;
   toolChoice: "required" | "auto";
   includeSourceList: boolean;
@@ -113,15 +114,15 @@ const CITATION_SCHEMA = {
     type: "object",
     additionalProperties: false,
     properties: {
-      id: { type: "string" },
-      url: { type: "string" },
-      title: { type: "string" },
-      domain: { type: "string" },
-      organization: { type: ["string", "null"] },
-      doc_type: { type: ["string", "null"] },
-      effective_date: { type: ["string", "null"] },
-      retrieved_at: { type: ["string", "null"] },
-      claim_scope: { type: ["string", "null"] },
+      id: { type: "string", maxLength: 40 },
+      url: { type: "string", maxLength: 600 },
+      title: { type: "string", maxLength: 220 },
+      domain: { type: "string", maxLength: 120 },
+      organization: { type: ["string", "null"], maxLength: 120 },
+      doc_type: { type: ["string", "null"], maxLength: 60 },
+      effective_date: { type: ["string", "null"], maxLength: 40 },
+      retrieved_at: { type: ["string", "null"], maxLength: 40 },
+      claim_scope: { type: ["string", "null"], maxLength: 180 },
       support_strength: { type: "string", enum: ["direct", "background"] },
       official: { type: "boolean" },
     },
@@ -147,8 +148,8 @@ const ANSWER_SCHEMA = {
   properties: {
     question_type: { type: "string", enum: ["general", "drug", "lab", "compare", "guideline", "device", "procedure", "image"] },
     triage_level: { type: "string", enum: ["routine", "urgent", "critical"] },
-    bottom_line: { type: "string" },
-    bottom_line_citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+    bottom_line: { type: "string", maxLength: 320 },
+    bottom_line_citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
     key_points: {
       type: "array",
       maxItems: 4,
@@ -156,8 +157,8 @@ const ANSWER_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string" },
-          citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+          text: { type: "string", maxLength: 220 },
+          citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
         required: ["text", "citation_ids", "evidence_status"],
@@ -170,8 +171,8 @@ const ANSWER_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string" },
-          citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+          text: { type: "string", maxLength: 220 },
+          citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
         required: ["text", "citation_ids", "evidence_status"],
@@ -184,8 +185,8 @@ const ANSWER_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string" },
-          citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+          text: { type: "string", maxLength: 220 },
+          citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
         required: ["text", "citation_ids", "evidence_status"],
@@ -198,8 +199,8 @@ const ANSWER_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string" },
-          citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+          text: { type: "string", maxLength: 220 },
+          citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
         required: ["text", "citation_ids", "evidence_status"],
@@ -212,8 +213,8 @@ const ANSWER_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string" },
-          citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+          text: { type: "string", maxLength: 220 },
+          citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
         required: ["text", "citation_ids", "evidence_status"],
@@ -223,9 +224,9 @@ const ANSWER_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        summary: { type: "string" },
+        summary: { type: "string", maxLength: 240 },
         needs_verification: { type: "boolean" },
-        reasons: { type: "array", items: { type: "string" }, maxItems: 6 },
+        reasons: { type: "array", items: { type: "string", maxLength: 140 }, maxItems: 4 },
       },
       required: ["summary", "needs_verification", "reasons"],
     },
@@ -233,9 +234,9 @@ const ANSWER_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        retrieved_at: { type: ["string", "null"] },
-        newest_effective_date: { type: ["string", "null"] },
-        note: { type: "string" },
+        retrieved_at: { type: ["string", "null"], maxLength: 40 },
+        newest_effective_date: { type: ["string", "null"], maxLength: 40 },
+        note: { type: "string", maxLength: 200 },
         verification_status: { type: "string", enum: ["verified", "dated", "unknown"] },
       },
       required: ["retrieved_at", "newest_effective_date", "note", "verification_status"],
@@ -243,17 +244,17 @@ const ANSWER_SCHEMA = {
     citations: CITATION_SCHEMA,
     comparison_table: {
       type: "array",
-      maxItems: 8,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          role: { type: "string" },
-          when_to_use: { type: "string" },
-          effect_onset: { type: "string" },
-          limitations: { type: "string" },
-          bedside_points: { type: "string" },
-          citation_ids: { type: "array", items: { type: "string" }, maxItems: 6 },
+          role: { type: "string", maxLength: 80 },
+          when_to_use: { type: "string", maxLength: 180 },
+          effect_onset: { type: "string", maxLength: 160 },
+          limitations: { type: "string", maxLength: 180 },
+          bedside_points: { type: "string", maxLength: 180 },
+          citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
         required: ["role", "when_to_use", "effect_onset", "limitations", "bedside_points", "citation_ids", "evidence_status"],
@@ -338,9 +339,61 @@ function resolveUpstreamTimeoutMs() {
 }
 
 function resolveMaxToolCalls() {
-  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_TOOL_CALLS ?? process.env.OPENAI_MAX_TOOL_CALLS ?? 3);
+  const raw = Number(
+    process.env.OPENAI_MED_SAFETY_MAX_TOOL_CALLS ??
+      process.env.OPENAI_MED_SAFETY_TOOL_CALLS ??
+      process.env.OPENAI_MAX_TOOL_CALLS ??
+      process.env.OPENAI_TOOL_CALLS ??
+      3
+  );
   if (!Number.isFinite(raw)) return 3;
   return Math.max(1, Math.min(12, Math.round(raw)));
+}
+
+function resolveMedSafetyBaseMaxOutputTokens(searchType: SearchCreditType, decision: GroundingDecision) {
+  const defaultValue =
+    searchType === "premium"
+      ? decision.question_type === "compare" ||
+        decision.question_type === "guideline" ||
+        decision.triage_level !== "routine"
+        ? 7000
+        : 5200
+      : 3200;
+  const raw = Number(
+    (searchType === "premium"
+      ? process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS_PREMIUM
+      : process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS_STANDARD) ??
+      process.env.OPENAI_MED_SAFETY_MAX_OUTPUT_TOKENS ??
+      process.env.OPENAI_MAX_OUTPUT_TOKENS ??
+      defaultValue
+  );
+  if (!Number.isFinite(raw)) return defaultValue;
+  return Math.max(2000, Math.min(10000, Math.round(raw)));
+}
+
+function resolveWebSearchToolType(): "web_search" | "web_search_preview" {
+  const raw = String(process.env.OPENAI_MED_SAFETY_WEB_SEARCH_TOOL ?? "web_search").trim().toLowerCase();
+  return raw === "web_search_preview" ? "web_search_preview" : "web_search";
+}
+
+function resolveWebSearchToolChoice(): "required" | "auto" {
+  const raw = String(process.env.OPENAI_MED_SAFETY_WEB_SEARCH_TOOL_CHOICE ?? "auto").trim().toLowerCase();
+  return raw === "required" ? "required" : "auto";
+}
+
+function readIncompleteReason(payload: any) {
+  return typeof payload?.incomplete_details?.reason === "string" ? payload.incomplete_details.reason : "";
+}
+
+function buildIncompleteError(payload: any) {
+  const reason = readIncompleteReason(payload);
+  const status = typeof payload?.status === "string" ? payload.status : "unknown";
+  return `openai_incomplete_status:${status}_reason:${reason || "unknown"}`;
+}
+
+function needsMoreOutputTokensStructuredError(error: string | null) {
+  const value = String(error ?? "").toLowerCase();
+  return value.includes("reason:max_output_tokens") || value.includes("structured_json_parse_failed:max_output_tokens");
 }
 
 function extractResponsesText(json: any): string {
@@ -765,8 +818,9 @@ function buildGroundingDecision(query: string, imageDataUrl?: string): Grounding
 function buildWebSearchProfile(searchType: SearchCreditType): MedSafetyWebSearchProfile | null {
   if (searchType !== "premium") return null;
   return {
-    searchContextSize: "high",
-    toolChoice: "required",
+    toolType: resolveWebSearchToolType(),
+    searchContextSize: "medium",
+    toolChoice: resolveWebSearchToolChoice(),
     includeSourceList: true,
   };
 }
@@ -975,16 +1029,20 @@ function buildAnswerStylePrompt(decision: GroundingDecision) {
     "recommended_actions와 when_to_escalate는 가능하면 동사로 시작하고, 지금 바로 할 수 있는 행동처럼 읽히게 써라.",
     "key_points는 단순 반복이 아니라 왜 중요한지 또는 무엇을 구분해야 하는지가 드러나야 한다.",
     "한 항목에 여러 메시지를 밀어 넣지 말고, 항목 하나에는 하나의 판단이나 행동만 담아라.",
+    "각 배열은 꼭 필요한 항목만 채우고, 충분하면 2~3개에서 멈춰라. 반복 항목으로 maxItems를 억지로 채우지 마라.",
     escalationRule,
   ].join(" ");
 }
 
 function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType, decision: GroundingDecision, query: string) {
+  const maxToolCalls = resolveMaxToolCalls();
   const groundingRule =
     searchType === "premium"
       ? [
           "[검색과 근거 사용]",
           "이번 응답은 웹 검색과 최종 답변 작성을 한 번에 수행한다.",
+          `웹 검색은 최대 ${maxToolCalls}회까지만 사용하라. 가능하면 1~2회의 고신호 검색으로 끝내고, 답에 필요한 공식 근거가 확보되면 즉시 검색을 중단하라.`,
+          "같은 의미의 검색을 반복하지 말고, 이미 충분한 근거가 있으면 추가 검색 대신 바로 구조화된 답변을 완성하라.",
           "검색을 했다면 검색 결과를 소화해서 질문에 직접 답하라. 출처 목록만 길게 늘어놓는 답변은 금지한다.",
           "허용된 도메인 안의 공식·공공 출처를 우선 사용하라.",
           "규제기관, 정부기관, 공공보건기관, 승인 라벨, DailyMed, PubMed 같은 공공 의학 출처를 일반 배경자료보다 우선하라.",
@@ -1275,7 +1333,7 @@ async function callStructuredModel<T>(args: {
   if (args.webSearchProfile) {
     body.tools = [
       {
-        type: "web_search_preview",
+        type: args.webSearchProfile.toolType,
         search_context_size: args.webSearchProfile.searchContextSize,
       },
     ];
@@ -1325,7 +1383,7 @@ async function callStructuredModel<T>(args: {
       responseId: typeof json?.id === "string" ? json.id : null,
       usage: extractUsageNode(json?.usage),
       sources: extractMedSafetySourcesFromResponsesPayload(json),
-      error: "openai_empty_text",
+      error: buildIncompleteError(json) || "openai_empty_text",
     };
   }
 
@@ -1340,13 +1398,14 @@ async function callStructuredModel<T>(args: {
       error: null,
     };
   } catch {
+    const incompleteReason = readIncompleteReason(json);
     return {
       data: null,
       rawText,
       responseId: typeof json?.id === "string" ? json.id : null,
       usage: extractUsageNode(json?.usage),
       sources: extractMedSafetySourcesFromResponsesPayload(json),
-      error: "structured_json_parse_failed",
+      error: incompleteReason ? `structured_json_parse_failed:${incompleteReason}` : "structured_json_parse_failed",
     };
   }
 }
@@ -1372,6 +1431,8 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
     });
 
     const reasoningEffort: "low" | "medium" = decision.high_risk ? "medium" : "low";
+    const baseMaxOutputTokens = resolveMedSafetyBaseMaxOutputTokens(params.searchType, decision);
+
     const callArgs = {
       apiKey,
       model,
@@ -1387,14 +1448,7 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       schemaName: "med_safety_answer",
       schema: ANSWER_SCHEMA as unknown as Record<string, unknown>,
       signal: timeoutController.signal,
-      maxOutputTokens:
-        params.searchType === "premium"
-          ? decision.question_type === "compare" ||
-            decision.question_type === "guideline" ||
-            decision.triage_level !== "routine"
-            ? 5000
-            : 4200
-          : 3200,
+      maxOutputTokens: baseMaxOutputTokens,
       storeResponses,
       reasoningEffort,
       webSearchProfile,
@@ -1411,6 +1465,13 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       if (!timeoutController.signal.aborted) {
         generated = await callStructuredModel<Record<string, unknown>>(callArgs);
       }
+    }
+    if (needsMoreOutputTokensStructuredError(generated.error) && !timeoutController.signal.aborted) {
+      const boostedArgs = {
+        ...callArgs,
+        maxOutputTokens: Math.min(baseMaxOutputTokens + 2500, 10000),
+      };
+      generated = await callStructuredModel<Record<string, unknown>>(boostedArgs);
     }
 
     const sanitizedGeneratedData = sanitizeGeneratedAnswerForSearchType(generated.data, params.searchType, params.locale);

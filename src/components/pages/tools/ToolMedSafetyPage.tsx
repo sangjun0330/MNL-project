@@ -174,12 +174,36 @@ function parseErrorMessage(raw: string, t: TranslateFn) {
   if (normalized.includes("openai_responses_429")) return t("요청 한도가 초과되었습니다. 잠시 후 다시 시도해 주세요.");
   if (normalized.includes("openai_responses_400_token_limit"))
     return t("AI 응답 길이 제한으로 요청이 중단되었습니다. 다시 시도해 주세요.");
+  if (normalized.includes("openai_incomplete_status") && normalized.includes("max_output_tokens")) {
+    return t("AI 응답 길이 제한으로 구조화된 답변이 중간에 끊겼습니다. max_output_tokens를 늘리거나 출력 구조를 더 줄여 주세요.");
+  }
+  if (normalized.includes("structured_json_parse_failed") && normalized.includes("max_output_tokens")) {
+    return t("AI 응답 길이 제한으로 구조화된 답변이 중간에 끊겼습니다. max_output_tokens를 늘리거나 출력 구조를 더 줄여 주세요.");
+  }
+  if (normalized.includes("structured_json_parse_failed")) {
+    return t("AI가 구조화된 답변 JSON을 끝까지 만들지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  }
   if (normalized.includes("openai_empty_text")) return t("AI 응답 본문이 비어 다시 시도했습니다. 잠시 후 다시 시도해 주세요.");
   if (normalized.includes("openai_stream_parse_failed")) return t("AI 응답을 끝까지 읽지 못했습니다. 다시 시도해 주세요.");
   if (/openai_responses_(408|409|425)/.test(normalized)) return t("AI 서버 요청이 일시적으로 충돌했습니다. 잠시 후 다시 시도해 주세요.");
   if (/openai_responses_(500|502|503|504)/.test(normalized)) return t(UPSTREAM_TEMPORARY_MESSAGE);
   if (normalized.includes("invalid_response_payload")) return t("서버 응답 형식이 올바르지 않습니다. 다시 시도해 주세요.");
   return t("질문 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
+}
+
+function formatGroundingErrorMessage(raw: string | null | undefined, t: TranslateFn) {
+  if (!raw) return t("공식 근거 확인이 충분히 완료되지 않았습니다.");
+  const normalized = String(raw).toLowerCase();
+  if (
+    (normalized.includes("openai_incomplete_status") || normalized.includes("structured_json_parse_failed")) &&
+    normalized.includes("max_output_tokens")
+  ) {
+    return t("AI 응답 길이 제한으로 공식 근거 요약이 중간에 끊겼습니다. max_output_tokens를 늘리거나 출력 구조를 더 줄여 주세요.");
+  }
+  if (/openai_responses_(500|502|503|504)/.test(normalized)) return t(UPSTREAM_TEMPORARY_MESSAGE);
+  if (normalized.includes("openai_timeout")) return t("공식 근거 검색이 시간 제한 안에 끝나지 않았습니다. 잠시 후 다시 시도해 주세요.");
+  if (normalized.includes("structured_json_parse_failed")) return t("AI가 구조화된 공식 근거 답변을 끝까지 만들지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  return t("공식 근거 확인이 충분히 완료되지 않았습니다.");
 }
 
 function parseAnalyzePayload(payloadRaw: unknown): { ok: true; data: AnalyzePayload } | { ok: false; error: string } {
@@ -879,6 +903,7 @@ function StructuredAssistantAnswer({
   groundingStatus: MedSafetyGroundingStatus;
   groundingError?: string | null;
 }) {
+  const { t } = useI18n();
   const badge = structuredTriageBadge(answer);
   const citationLookup = citationLookupFromAnswer(answer, sources);
   const sourceRailSources = mergeMedSafetySources([...answer.citations, ...sources], 12);
@@ -913,7 +938,7 @@ function StructuredAssistantAnswer({
         ) : null}
         {groundingMode !== "none" && groundingStatus === "failed" ? (
           <div className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-[13px] leading-6 text-amber-800">
-            {groundingError || "공식 근거 확인이 충분히 완료되지 않았습니다."}
+            {formatGroundingErrorMessage(groundingError, t)}
           </div>
         ) : null}
         {verification?.ran && !verification.passed ? (

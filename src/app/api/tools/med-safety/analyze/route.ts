@@ -97,6 +97,13 @@ function normalizePublicReasonToken(raw: unknown): string | null {
   if (normalized.includes("openai_timeout_upstream")) return "openai_timeout_upstream";
   if (normalized.includes("openai_timeout_retry_aborted")) return "openai_timeout_retry_aborted";
   if (normalized.includes("openai_stream_parse_failed")) return "openai_stream_parse_failed";
+  if (normalized.includes("structured_json_parse_failed") && normalized.includes("max_output_tokens")) {
+    return "structured_json_parse_failed:max_output_tokens";
+  }
+  if (normalized.includes("structured_json_parse_failed")) return "structured_json_parse_failed";
+  if (normalized.includes("openai_incomplete_status") && normalized.includes("max_output_tokens")) {
+    return "openai_incomplete_status:max_output_tokens";
+  }
   if (normalized.includes("openai_empty_text")) return "openai_empty_text";
   if (normalized.includes("translate_empty_source")) return "translate_empty_source";
   if (normalized.startsWith("en_direct")) return "en_direct";
