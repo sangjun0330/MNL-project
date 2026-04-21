@@ -696,37 +696,18 @@ function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
   });
 }
 
-function sectionCardClass(tone: AnswerSectionTone) {
-  if (tone === "summary") {
-    return "rounded-[28px] border border-[#DCE5F2] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] px-5 py-5 shadow-[0_16px_34px_rgba(15,23,42,0.04)]";
-  }
-  if (tone === "action") {
-    return "rounded-[28px] border border-[#D7E7DA] bg-[linear-gradient(180deg,#FFFFFF_0%,#F6FBF5_100%)] px-5 py-5";
-  }
-  if (tone === "warning") {
-    return "rounded-[28px] border border-[#F0DEC4] bg-[linear-gradient(180deg,#FFFDF9_0%,#FFF7EE_100%)] px-5 py-5";
-  }
-  if (tone === "compare") {
-    return "rounded-[28px] border border-[#DDE5F0] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFD_100%)] px-5 py-5";
-  }
-  return "rounded-[28px] border border-[#E6E8ED] bg-[#FCFCFD] px-5 py-5";
+function sectionCardClass(_tone: AnswerSectionTone) {
+  return "py-1";
 }
 
 function sectionTitleClass(tone: AnswerSectionTone) {
-  if (tone === "summary") return "border-[#D4E0F3] bg-[#EEF4FF] text-[#31598B]";
-  if (tone === "action") return "border-[#CFE0D2] bg-[#ECF7EC] text-[#2E6A35]";
-  if (tone === "warning") return "border-[#EACFAE] bg-[#FFF1DF] text-[#9A5B1B]";
-  if (tone === "compare") return "border-[#D8E0EC] bg-[#F1F5FA] text-[#48627E]";
-  return "border-[#E0E3E8] bg-[#F3F4F6] text-ios-sub";
+  if (tone === "warning") return "text-[#9A5B1B]";
+  if (tone === "action") return "text-[#2E6A35]";
+  if (tone === "summary") return "text-[#31598B]";
+  if (tone === "compare") return "text-[#48627E]";
+  return "text-ios-sub";
 }
 
-function connectorColor(tone: AnswerSectionTone) {
-  if (tone === "summary") return "border-[#D4DEEF]";
-  if (tone === "action") return "border-[#C5DBC8]";
-  if (tone === "warning") return "border-[#E8D5B8]";
-  if (tone === "compare") return "border-[#CFD8E6]";
-  return "border-[#DDDDE0]";
-}
 
 function InlineAnswerText({
   text,
@@ -804,49 +785,39 @@ function StructuredAnswerItems({
   title,
   items,
   citationLookup,
+  titleClass,
 }: {
   title: string;
   items: Array<{ text: string; citation_ids: string[]; evidence_status: "supported" | "needs_review" }>;
   citationLookup: Map<string, MedSafetySource>;
+  titleClass?: string;
 }) {
   if (!items.length) return null;
-  const [summaryItem, ...detailItems] = items;
   return (
-    <section className="rounded-[24px] border border-[#E6E8ED] bg-[#FCFCFD] px-5 py-5">
-      <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
+    <div>
+      <div className={`mb-2 text-[11.5px] font-bold uppercase tracking-[0.06em] ${titleClass ?? "text-ios-sub"}`}>
         {title}
       </div>
-      <div className="mt-3 rounded-[18px] border border-[#EEF0F3] bg-white px-4 py-4">
-        <div className="whitespace-pre-wrap break-words text-[15px] font-semibold leading-7 text-ios-text">
-          {summaryItem.text}
-        </div>
-        {summaryItem.evidence_status === "needs_review" ? (
-          <div className="mt-2 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
-            근거 확인 필요
-          </div>
-        ) : null}
-        {renderCitationButtons(summaryItem.citation_ids, citationLookup)}
-
-        {detailItems.length ? (
-          <div className="mt-4 flex flex-col gap-3">
-            {detailItems.map((item, index) => (
-              <div key={`${title}-${index + 1}`} className="flex items-start gap-3">
-                <span className="mt-[11px] h-[6px] w-[6px] shrink-0 rounded-full bg-[color:var(--rnest-accent)]/70" />
-                <div className="min-w-0 flex-1">
-                  <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{item.text}</div>
-                  {item.evidence_status === "needs_review" ? (
-                    <div className="mt-2 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
-                      근거 확인 필요
-                    </div>
-                  ) : null}
-                  {renderCitationButtons(item.citation_ids, citationLookup)}
+      <div className="space-y-2">
+        {items.map((item, index) => (
+          <div key={`${title}-${index}`} className="flex items-start gap-2.5">
+            <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-ios-text/30" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{item.text}</div>
+              {item.citation_ids.length > 0 ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {item.citation_ids.map((id) => {
+                    const src = citationLookup.get(id);
+                    if (!src) return null;
+                    return <MedSafetySourceButton key={id} source={src} variant="inline" />;
+                  })}
                 </div>
-              </div>
-            ))}
+              ) : null}
+            </div>
           </div>
-        ) : null}
+        ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -859,30 +830,31 @@ function StructuredComparisonTable({
 }) {
   if (!answer.comparison_table.length) return null;
   return (
-    <section className="rounded-[24px] border border-[#DDE5F0] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFD_100%)] px-5 py-5">
-      <div className="inline-flex items-center rounded-[14px] border border-[#D8E0EC] bg-[#F1F5FA] px-3 py-1.5 text-[11.5px] font-semibold text-[#48627E]">
-        비교 포인트
-      </div>
-      <div className="mt-3 grid gap-3">
+    <div>
+      <div className="mb-2 text-[11.5px] font-bold uppercase tracking-[0.06em] text-ios-sub">비교 포인트</div>
+      <div className="divide-y divide-[#EAECF0]">
         {answer.comparison_table.map((row: MedSafetyStructuredAnswer["comparison_table"][number], index: number) => (
-          <div key={`comparison-${index}`} className="rounded-[18px] border border-[#E4EAF3] bg-white px-4 py-4">
-            <div className="text-[15px] font-semibold leading-6 text-ios-text">{row.role || `항목 ${index + 1}`}</div>
-            <div className="mt-2 grid gap-2 text-[13.5px] leading-6 text-ios-text/90">
-              {row.when_to_use ? <div><span className="font-semibold text-ios-text">언제 쓰는지:</span> {row.when_to_use}</div> : null}
-              {row.effect_onset ? <div><span className="font-semibold text-ios-text">효과 시작:</span> {row.effect_onset}</div> : null}
-              {row.limitations ? <div><span className="font-semibold text-ios-text">한계/주의:</span> {row.limitations}</div> : null}
-              {row.bedside_points ? <div><span className="font-semibold text-ios-text">실무 포인트:</span> {row.bedside_points}</div> : null}
+          <div key={`comparison-${index}`} className="py-3">
+            <div className="text-[14.5px] font-semibold text-ios-text">{row.role || `항목 ${index + 1}`}</div>
+            <div className="mt-1.5 space-y-1 text-[13.5px] leading-[1.7] text-ios-text/90">
+              {row.when_to_use ? <p><span className="font-semibold text-ios-text">언제:</span> {row.when_to_use}</p> : null}
+              {row.effect_onset ? <p><span className="font-semibold text-ios-text">효과:</span> {row.effect_onset}</p> : null}
+              {row.limitations ? <p><span className="font-semibold text-ios-text">한계:</span> {row.limitations}</p> : null}
+              {row.bedside_points ? <p><span className="font-semibold text-ios-text">실무:</span> {row.bedside_points}</p> : null}
             </div>
-            {row.evidence_status === "needs_review" ? (
-              <div className="mt-3 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[10.5px] font-semibold text-[#9A5B1B]">
-                근거 확인 필요
+            {row.citation_ids.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {row.citation_ids.map((id) => {
+                  const src = citationLookup.get(id);
+                  if (!src) return null;
+                  return <MedSafetySourceButton key={id} source={src} variant="inline" />;
+                })}
               </div>
             ) : null}
-            {renderCitationButtons(row.citation_ids, citationLookup)}
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -906,68 +878,100 @@ function StructuredAssistantAnswer({
   const { t } = useI18n();
   const badge = structuredTriageBadge(answer);
   const citationLookup = citationLookupFromAnswer(answer, sources);
-  const sourceRailSources = mergeMedSafetySources([...answer.citations, ...sources], 12);
+  const allSources = mergeMedSafetySources([...answer.citations, ...sources], 12);
+
+  const hasAnySections =
+    answer.key_points.length > 0 ||
+    answer.recommended_actions.length > 0 ||
+    answer.do_not_do.length > 0 ||
+    answer.when_to_escalate.length > 0 ||
+    answer.patient_specific_caveats.length > 0 ||
+    answer.comparison_table.length > 0;
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-[28px] border border-[#DCE5F2] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] px-5 py-5 shadow-[0_16px_34px_rgba(15,23,42,0.04)]">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold ${badge.className}`}>
-            {badge.label}
+    <div className="min-w-0 py-1">
+      {/* Triage + grounded badges */}
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badge.className}`}>
+          {badge.label}
+        </span>
+        {quality?.grounded ? (
+          <span className="inline-flex items-center rounded-full border border-[#D4E0F3] bg-[#EEF4FF] px-2.5 py-1 text-[11px] font-semibold text-[#31598B]">
+            공식 근거 확인됨
           </span>
-          {quality?.grounded ? (
-            <span className="inline-flex items-center rounded-full border border-[#D4E0F3] bg-[#EEF4FF] px-3 py-1.5 text-[11px] font-semibold text-[#31598B]">
-              공식 근거 연결됨
-            </span>
-          ) : null}
-          {answer.freshness.verification_status !== "verified" ? (
-            <span className="inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-3 py-1.5 text-[11px] font-semibold text-[#9A5B1B]">
-              최신성 재확인 권장
-            </span>
-          ) : null}
-        </div>
-        <div className="mt-3 whitespace-pre-wrap break-words text-[17px] font-semibold leading-7 tracking-[-0.015em] text-ios-text">
-          {answer.bottom_line}
-        </div>
-        {answer.bottom_line_citation_ids.length ? renderCitationButtons(answer.bottom_line_citation_ids, citationLookup) : null}
-        {answer.uncertainty.summary ? (
-          <div className="mt-4 rounded-[18px] border border-[#EEF0F3] bg-white px-4 py-3 text-[13px] leading-6 text-ios-sub">
-            <div className="font-semibold text-ios-text">근거 제한</div>
-            <div className="mt-1">{answer.uncertainty.summary}</div>
-          </div>
         ) : null}
-        {groundingMode !== "none" && groundingStatus === "failed" ? (
-          <div className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-[13px] leading-6 text-amber-800">
-            {formatGroundingErrorMessage(groundingError, t)}
-          </div>
+        {answer.freshness.verification_status !== "verified" ? (
+          <span className="inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2.5 py-1 text-[11px] font-semibold text-[#9A5B1B]">
+            최신성 재확인 권장
+          </span>
         ) : null}
-        {verification?.ran && !verification.passed ? (
-          <div className="mt-3 rounded-[18px] border border-[#F0DEC4] bg-[#FFF7EE] px-4 py-3 text-[13px] leading-6 text-[#9A5B1B]">
-            최종 검증에서 보수적으로 조정된 답변입니다.
-          </div>
-        ) : null}
-      </section>
+      </div>
 
-      <StructuredAnswerItems title="핵심 포인트" items={answer.key_points} citationLookup={citationLookup} />
-      <StructuredAnswerItems title="권고" items={answer.recommended_actions} citationLookup={citationLookup} />
-      <StructuredAnswerItems title="피해야 할 점" items={answer.do_not_do} citationLookup={citationLookup} />
-      <StructuredAnswerItems title="즉시 보고 상황" items={answer.when_to_escalate} citationLookup={citationLookup} />
-      <StructuredAnswerItems title="환자별 예외" items={answer.patient_specific_caveats} citationLookup={citationLookup} />
-      <StructuredComparisonTable answer={answer} citationLookup={citationLookup} />
-      {sourceRailSources.length ? (
-        <section className="rounded-[24px] border border-[#E6E8ED] bg-white px-5 py-5">
-          <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
-            출처
+      {/* Main answer */}
+      <div className="whitespace-pre-wrap break-words text-[16.5px] font-semibold leading-[1.8] tracking-[-0.01em] text-ios-text">
+        {answer.bottom_line}
+      </div>
+      {answer.bottom_line_citation_ids.length ? (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {answer.bottom_line_citation_ids.map((id) => {
+            const src = citationLookup.get(id);
+            if (!src) return null;
+            return <MedSafetySourceButton key={id} source={src} variant="inline" />;
+          })}
+        </div>
+      ) : null}
+
+      {/* Status notes */}
+      {groundingMode !== "none" && groundingStatus === "failed" ? (
+        <p className="mt-2 text-[13px] leading-6 text-amber-700">
+          {formatGroundingErrorMessage(groundingError, t)}
+        </p>
+      ) : null}
+      {verification?.ran && !verification.passed ? (
+        <p className="mt-2 text-[12.5px] leading-6 text-[#9A5B1B]/80">
+          최종 검증에서 보수적으로 조정된 답변입니다.
+        </p>
+      ) : null}
+
+      {/* Section divider */}
+      {hasAnySections ? <div className="my-5 border-t border-[#EAECF0]" /> : null}
+
+      {/* Answer sections */}
+      {hasAnySections ? (
+        <div className="space-y-5">
+          <StructuredAnswerItems title="핵심 포인트" items={answer.key_points} citationLookup={citationLookup} />
+          <StructuredAnswerItems title="지금 할 일" items={answer.recommended_actions} citationLookup={citationLookup} />
+          <StructuredAnswerItems title="하지 말아야 할 것" items={answer.do_not_do} citationLookup={citationLookup} titleClass="text-[#9A5B1B]" />
+          <StructuredAnswerItems title="즉시 보고 상황" items={answer.when_to_escalate} citationLookup={citationLookup} titleClass="text-[#A33636]" />
+          <StructuredAnswerItems title="환자별 주의사항" items={answer.patient_specific_caveats} citationLookup={citationLookup} />
+        </div>
+      ) : null}
+
+      {/* Comparison table */}
+      {answer.comparison_table.length > 0 ? (
+        <div className={hasAnySections ? "mt-5" : "mt-4"}>
+          {!hasAnySections ? <div className="mb-4 border-t border-[#EAECF0]" /> : null}
+          <StructuredComparisonTable answer={answer} citationLookup={citationLookup} />
+        </div>
+      ) : null}
+
+      {/* Uncertainty note */}
+      {answer.uncertainty.needs_verification && answer.uncertainty.summary ? (
+        <p className="mt-4 text-[12.5px] leading-[1.7] text-ios-sub/75">
+          {answer.uncertainty.summary}
+        </p>
+      ) : null}
+
+      {/* Sources at bottom */}
+      {allSources.length > 0 ? (
+        <div className="mt-5 border-t border-[#EAECF0] pt-4">
+          <div className="mb-2.5 text-[11.5px] font-semibold text-ios-sub">출처</div>
+          <div className="flex flex-wrap gap-2">
+            {allSources.map((source, i) => (
+              <MedSafetySourceButton key={`${source.url}-${i}`} source={source} variant="rail" />
+            ))}
           </div>
-          <div className="mt-3">
-            <MedSafetySourceRail
-              sources={sourceRailSources}
-              groundingMode={groundingMode}
-              groundingStatus={groundingStatus}
-              groundingError={groundingError ?? null}
-            />
-          </div>
-        </section>
+        </div>
       ) : null}
     </div>
   );
@@ -1059,34 +1063,15 @@ function AssistantAnswerSections({ content, sources }: { content: string; source
   return (
     <div className="flex flex-col">
       {sections.map((section, sectionIndex) => {
-        const isContinuation = section.continuation;
-
         return (
           <div key={`${section.title}-${sectionIndex}`}>
-            {/* Connector line from previous card */}
-            {isContinuation ? (
-              <div className="flex justify-center py-0">
-                <div className={`h-3 w-px border-l-2 border-dashed ${connectorColor(section.tone)} opacity-70`} />
-              </div>
-            ) : sectionIndex > 0 ? (
-              <div className="h-4" />
-            ) : null}
+            {sectionIndex > 0 ? <div className="border-t border-[#EAECF0] my-4" /> : null}
 
             <section className={sectionCardClass(section.tone)}>
-              {isContinuation ? (
-                <div className="text-[13px] font-semibold text-ios-text/70">
-                  {section.title}
-                </div>
-              ) : (
-                <div
-                  className={`inline-flex items-center rounded-[14px] border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.01em] ${sectionTitleClass(
-                    section.tone
-                  )}`}
-                >
-                  {section.title}
-                </div>
-              )}
-              <div className={isContinuation ? "mt-2.5" : "mt-3.5"}>
+              <div className={`text-[11.5px] font-bold uppercase tracking-[0.06em] ${sectionTitleClass(section.tone)}`}>
+                {section.title}
+              </div>
+              <div className="mt-3">
                 {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} /> : null}
                 <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} />
               </div>
