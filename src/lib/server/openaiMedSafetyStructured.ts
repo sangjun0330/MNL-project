@@ -337,6 +337,12 @@ function resolveUpstreamTimeoutMs() {
   return Math.max(60_000, Math.min(240_000, Math.round(raw)));
 }
 
+function resolveMaxToolCalls() {
+  const raw = Number(process.env.OPENAI_MED_SAFETY_MAX_TOOL_CALLS ?? process.env.OPENAI_MAX_TOOL_CALLS ?? 3);
+  if (!Number.isFinite(raw)) return 3;
+  return Math.max(1, Math.min(12, Math.round(raw)));
+}
+
 function extractResponsesText(json: any): string {
   const chunks: string[] = [];
   const seen = new Set<string>();
@@ -1274,6 +1280,7 @@ async function callStructuredModel<T>(args: {
       },
     ];
     body.tool_choice = args.webSearchProfile.toolChoice;
+    body.max_tool_calls = resolveMaxToolCalls();
     if (args.webSearchProfile.includeSourceList) {
       body.include = ["web_search_call.action.sources"];
     }
