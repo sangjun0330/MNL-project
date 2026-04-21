@@ -5,7 +5,6 @@ import {
   normalizeMedSafetyStructuredAnswer,
   type MedSafetyQualitySnapshot,
   type MedSafetyStructuredAnswer,
-  type MedSafetyVerificationIssueCode,
   type MedSafetyVerificationReport,
 } from "@/lib/medSafetyStructured";
 import {
@@ -42,17 +41,8 @@ type ResponsesUsage = {
 type GroundingDecision = {
   question_type: MedSafetyStructuredAnswer["question_type"];
   triage_level: MedSafetyStructuredAnswer["triage_level"];
-  needs_grounding: boolean;
-  needs_verification: boolean;
   high_risk: boolean;
   freshness_sensitive: boolean;
-};
-
-type EvidenceRetrievalResult = {
-  question_type: MedSafetyStructuredAnswer["question_type"];
-  triage_level: MedSafetyStructuredAnswer["triage_level"];
-  grounding_note: string;
-  evidence_packets: MedSafetySource[];
 };
 
 type StructuredCallResult<T> = {
@@ -116,49 +106,39 @@ const OFFICIAL_TIER_2_DOMAINS = [
 
 const ALLOWED_DOMAINS = [...OFFICIAL_TIER_1_DOMAINS, ...OFFICIAL_TIER_2_DOMAINS];
 
-const RETRIEVAL_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    question_type: { type: "string", enum: ["general", "drug", "lab", "compare", "guideline", "device", "procedure", "image"] },
-    triage_level: { type: "string", enum: ["routine", "urgent", "critical"] },
-    grounding_note: { type: "string" },
-    evidence_packets: {
-      type: "array",
-      maxItems: 6,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "string" },
-          url: { type: "string" },
-          title: { type: "string" },
-          domain: { type: "string" },
-          organization: { type: ["string", "null"] },
-          doc_type: { type: ["string", "null"] },
-          effective_date: { type: ["string", "null"] },
-          retrieved_at: { type: ["string", "null"] },
-          claim_scope: { type: ["string", "null"] },
-          support_strength: { type: "string", enum: ["direct", "background"] },
-          official: { type: "boolean" },
-        },
-        required: [
-          "id",
-          "url",
-          "title",
-          "domain",
-          "organization",
-          "doc_type",
-          "effective_date",
-          "retrieved_at",
-          "claim_scope",
-          "support_strength",
-          "official",
-        ],
-      },
+const CITATION_SCHEMA = {
+  type: "array",
+  maxItems: 6,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      id: { type: "string" },
+      url: { type: "string" },
+      title: { type: "string" },
+      domain: { type: "string" },
+      organization: { type: ["string", "null"] },
+      doc_type: { type: ["string", "null"] },
+      effective_date: { type: ["string", "null"] },
+      retrieved_at: { type: ["string", "null"] },
+      claim_scope: { type: ["string", "null"] },
+      support_strength: { type: "string", enum: ["direct", "background"] },
+      official: { type: "boolean" },
     },
+    required: [
+      "id",
+      "url",
+      "title",
+      "domain",
+      "organization",
+      "doc_type",
+      "effective_date",
+      "retrieved_at",
+      "claim_scope",
+      "support_strength",
+      "official",
+    ],
   },
-  required: ["question_type", "triage_level", "grounding_note", "evidence_packets"],
 } as const;
 
 const ANSWER_SCHEMA = {
@@ -260,7 +240,7 @@ const ANSWER_SCHEMA = {
       },
       required: ["retrieved_at", "newest_effective_date", "note", "verification_status"],
     },
-    citations: RETRIEVAL_SCHEMA.properties.evidence_packets,
+    citations: CITATION_SCHEMA,
     comparison_table: {
       type: "array",
       maxItems: 8,
@@ -295,35 +275,6 @@ const ANSWER_SCHEMA = {
     "citations",
     "comparison_table",
   ],
-} as const;
-
-const VERIFIER_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    passed: { type: "boolean" },
-    issues: {
-      type: "array",
-      maxItems: 5,
-      items: {
-        type: "string",
-        enum: [
-          "claim_citation_mismatch",
-          "unsupported_specificity",
-          "missing_urgency",
-          "self_contradiction",
-          "overlong_indirect",
-        ],
-      },
-    },
-    notes: {
-      type: "array",
-      maxItems: 6,
-      items: { type: "string" },
-    },
-    corrected_answer: ANSWER_SCHEMA,
-  },
-  required: ["passed", "issues", "notes", "corrected_answer"],
 } as const;
 
 function normalizeText(value: unknown) {
@@ -537,28 +488,229 @@ function sumUsage(...values: Array<ResponsesUsage | null | undefined>): Response
   };
 }
 
-function isCompareQuery(query: string) {
-  return /(차이|비교|구분|vs\b|versus|어떤\s*걸|무슨\s*차이|둘\s*중)/i.test(query);
+type RankedQuestionType = Exclude<MedSafetyStructuredAnswer["question_type"], "image" | "general">;
+
+type QuestionTypeRuleSet = {
+  strong: RegExp[];
+  medium: RegExp[];
+  weak: RegExp[];
+};
+
+type QuestionSignals = {
+  explicitCompare: boolean;
+  explicitGuideline: boolean;
+  yearOrUpdate: boolean;
+  asksTiming: boolean;
+  asksInterpretation: boolean;
+  asksSelection: boolean;
+  asksMonitoring: boolean;
+  asksAdministration: boolean;
+  asksHoldOrStop: boolean;
+  asksCompatibility: boolean;
+  asksNumericThreshold: boolean;
+  asksTrendOrRecheck: boolean;
+  asksTroubleshooting: boolean;
+  asksAlarmOrSetting: boolean;
+  asksSequence: boolean;
+  mentionsDrugEntity: boolean;
+  mentionsLabEntity: boolean;
+  mentionsDeviceEntity: boolean;
+  mentionsProcedureEntity: boolean;
+};
+
+const QUESTION_TYPE_PRIORITY: RankedQuestionType[] = ["compare", "guideline", "drug", "lab", "device", "procedure"];
+
+const QUESTION_TYPE_RULES: Record<RankedQuestionType, QuestionTypeRuleSet> = {
+  compare: {
+    strong: [
+      /\bvs\b/i,
+      /\bversus\b/i,
+      /(차이|비교|구분|감별|둘\s*중|무엇이\s*더|어떤\s*걸\s*써|무슨\s*차이)/i,
+    ],
+    medium: [
+      /(선택\s*기준|언제\s*.*대신|언제\s*.*쓰|어떤\s*상황.*선택|A\/B|AUC\s*vs\s*trough)/i,
+      /(구별|구분해야|헷갈리|뭘\s*먼저\s*선택)/i,
+    ],
+    weak: [/(비슷|대신|또는|or\b|둘다)/i],
+  },
+  guideline: {
+    strong: [
+      /(가이드라인|guideline|권고안|권고문|consensus|statement|practice advisory|position statement)/i,
+      /(최신\s*(권고|지침|가이드라인)|업데이트된\s*(권고|지침)|현행\s*권고)/i,
+    ],
+    medium: [
+      /(몇\s*년\s*기준|20\d{2}\s*년\s*기준|as of\s*20\d{2}|업데이트|recent update|current recommendation)/i,
+      /(권장|recommended|recommendation|best practice)/i,
+    ],
+    weak: [/(최신|최근|현행|current|today)/i],
+  },
+  drug: {
+    strong: [
+      /(약물|투약|투여|용량|희석|주입|주사|속도|상호작용|금기|부작용|compatible|compatibility|tdm|auc|trough)/i,
+      /(insulin|heparin|vancomycin|norepinephrine|dopamine|epinephrine|dobutamine|amiodarone|digoxin|warfarin|enoxaparin|linezolid|piperacillin|tazobactam)/i,
+      /(항생제|승압제|진정제|항응고제|수혈|혈액제제)/i,
+    ],
+    medium: [
+      /(loading dose|maintenance dose|bolus|infusion|mixing|희석액|농도|투여\s*간격|주입\s*펌프|medication)/i,
+      /(약\s*끊|약\s*보류|투여\s*전\s*확인|administration|prescribed)/i,
+    ],
+    weak: [/(약|drug|med)/i],
+  },
+  lab: {
+    strong: [
+      /(검사|수치|전해질|혈액가스|abga|cbc|bmp|cmp|lft|coag|pt\/inr|troponin|lactate|crp|procalcitonin|creatinine|bun)/i,
+      /(칼륨|나트륨|염소|마그네슘|칼슘|헤모글로빈|혈소판|백혈구|bilirubin|anion gap|osmolar gap)/i,
+      /\b\d+(?:\.\d+)?\s*(?:mmol\/l|meq\/l|mg\/dl|ng\/ml|pg\/ml|g\/dl|iu\/l|sec|초|%)\b/i,
+    ],
+    medium: [
+      /(해석|정상\s*범위|critical value|panic value|재검|채혈 오류|hemolysis|delta check)/i,
+      /(lab|specimen|sample|검체|패널|수치상)/i,
+    ],
+    weak: [/(결과|검사값|value|result)/i],
+  },
+  device: {
+    strong: [
+      /(기구|장비|펌프|라인|카테터|튜브|ventilator|인공호흡기|모니터|알람|드레인|picc|central line|arterial line)/i,
+      /(fio2|peep|tidal volume|waveform|압력선|infusion pump|syringe pump|chest tube)/i,
+    ],
+    medium: [
+      /(세팅|설정|alarm|calibration|troubleshooting|누수|occlusion|삽입부|position)/i,
+      /(회로|회선|회로점검|장비 문제|기계 문제)/i,
+    ],
+    weak: [/(device|equipment|monitor)/i],
+  },
+  procedure: {
+    strong: [
+      /(절차|순서|프로토콜|체크리스트|준비물|세팅법|어떻게\s*해|무엇부터|step by step)/i,
+      /(삽입|제거|교체|드레싱|채혈|채뇨|흡인|소독|무균|aseptic|sterile|flush)/i,
+    ],
+    medium: [
+      /(간호중재|시행\s*순서|기록|체위|준비|후속 관찰|before you start)/i,
+      /(과정|절차상|workflow|handoff|sbar)/i,
+    ],
+    weak: [/(방법|순차|process|procedure)/i],
+  },
+};
+
+function deriveQuestionSignals(query: string): QuestionSignals {
+  return {
+    explicitCompare: /(차이|비교|구분|감별|둘\s*중|vs\b|versus|무엇이\s*더|어떤\s*걸\s*써)/i.test(query),
+    explicitGuideline: /(가이드라인|guideline|권고안|권고문|consensus|statement|practice advisory|position statement)/i.test(query),
+    yearOrUpdate: /(최신|업데이트|최근|현행|current|today|most recent|20\d{2}\s*년\s*기준|as of\s*20\d{2})/i.test(query),
+    asksTiming: /(언제|몇\s*시간|timing|when to|언제부터|언제까지|반복\s*시점|steady state|trough|peak|채혈\s*시점)/i.test(query),
+    asksInterpretation: /(해석|interpret|의미|무슨\s*뜻|어떻게\s*봐|어떻게\s*읽|판단)/i.test(query),
+    asksSelection: /(선택\s*기준|언제\s*.*대신|언제\s*.*써|언제\s*더\s*적합|어떤\s*상황.*선택|무엇이\s*더\s*낫|구분해서\s*생각)/i.test(query),
+    asksMonitoring: /(모니터링|monitor|follow up|follow-up|추적|재평가|반복\s*확인|observe|watch for)/i.test(query),
+    asksAdministration: /(투여|주입|희석|속도|농도|loading dose|maintenance dose|bolus|infusion|administration|mixing)/i.test(query),
+    asksHoldOrStop: /(보류|중단|끊어|hold|stop|skip|언제\s*멈추|투여\s*하면\s*안)/i.test(query),
+    asksCompatibility: /(compatib|혼합|같이\s*투여|같은\s*라인|라인\s*공유|희석액\s*선택|y-site)/i.test(query),
+    asksNumericThreshold: /\b\d+(?:\.\d+)?\s*(?:mmol\/l|meq\/l|mg\/dl|ng\/ml|pg\/ml|g\/dl|iu\/l|sec|초|%)\b/i.test(query),
+    asksTrendOrRecheck: /(추세|trend|재검|repeat|다시\s*확인|delta check|hemolysis|채혈 오류|오차)/i.test(query),
+    asksTroubleshooting: /(문제|오류|트러블슈팅|troubleshooting|막힘|누수|작동\s*안|이상|왜\s*안|occlusion)/i.test(query),
+    asksAlarmOrSetting: /(알람|alarm|세팅|설정|setting|fio2|peep|tidal volume|waveform|압력|mode)/i.test(query),
+    asksSequence: /(절차|순서|무엇부터|어떻게\s*해|step by step|체크리스트|준비물|workflow)/i.test(query),
+    mentionsDrugEntity: /(약물|투약|투여|tdm|auc|trough|항생제|승압제|진정제|항응고제|수혈|혈액제제|insulin|heparin|vancomycin|norepinephrine|dopamine|epinephrine|dobutamine|amiodarone|digoxin|warfarin|enoxaparin|linezolid|piperacillin|tazobactam)/i.test(query),
+    mentionsLabEntity: /(검사|수치|전해질|혈액가스|abga|cbc|bmp|cmp|lft|coag|pt\/inr|troponin|lactate|crp|procalcitonin|creatinine|bun|칼륨|나트륨|염소|마그네슘|칼슘|헤모글로빈|혈소판|백혈구|bilirubin|anion gap|osmolar gap)/i.test(query),
+    mentionsDeviceEntity: /(기구|장비|펌프|라인|카테터|튜브|ventilator|인공호흡기|모니터|드레인|picc|central line|arterial line|infusion pump|syringe pump|chest tube)/i.test(query),
+    mentionsProcedureEntity: /(절차|프로토콜|체크리스트|삽입|제거|교체|드레싱|채혈|채뇨|흡인|소독|무균|aseptic|sterile|flush|handoff|sbar)/i.test(query),
+  };
 }
 
-function isGuidelineQuery(query: string) {
-  return /(가이드라인|guideline|권고|recommendation|최신|업데이트|권장)/i.test(query);
+function countPatternHits(query: string, patterns: RegExp[]) {
+  return patterns.reduce((count, pattern) => count + (pattern.test(query) ? 1 : 0), 0);
 }
 
-function isLabQuery(query: string) {
-  return /(수치|전해질|검사|lab|cbc|bmp|cmp|abga|혈액가스|칼륨|나트륨|크레아티닌|troponin|lactate|inr)/i.test(query);
+function buildQuestionTypeScores(query: string, signals: QuestionSignals) {
+  const scores: Record<RankedQuestionType, number> = {
+    compare: 0,
+    guideline: 0,
+    drug: 0,
+    lab: 0,
+    device: 0,
+    procedure: 0,
+  };
+
+  for (const type of QUESTION_TYPE_PRIORITY) {
+    const rule = QUESTION_TYPE_RULES[type];
+    scores[type] += countPatternHits(query, rule.strong) * 6;
+    scores[type] += countPatternHits(query, rule.medium) * 3;
+    scores[type] += countPatternHits(query, rule.weak);
+  }
+
+  if (signals.explicitCompare) scores.compare += 5;
+  if (signals.explicitGuideline) scores.guideline += 6;
+  if (signals.yearOrUpdate) scores.guideline += 2;
+  if (signals.asksMonitoring) scores.drug += 2;
+  if (signals.asksAdministration) scores.drug += 4;
+  if (signals.asksHoldOrStop) scores.drug += 3;
+  if (signals.asksCompatibility) scores.drug += 4;
+  if (signals.mentionsDrugEntity) scores.drug += 4;
+  if (signals.asksInterpretation) scores.lab += 2;
+  if (signals.asksNumericThreshold) scores.lab += 4;
+  if (signals.asksTrendOrRecheck) scores.lab += 3;
+  if (signals.mentionsLabEntity) scores.lab += 4;
+  if (signals.asksAlarmOrSetting) scores.device += 4;
+  if (signals.asksTroubleshooting) scores.device += 4;
+  if (signals.mentionsDeviceEntity) scores.device += 4;
+  if (signals.asksSequence) scores.procedure += 5;
+  if (signals.mentionsProcedureEntity) scores.procedure += 4;
+  if (signals.asksSelection) scores.compare += 2;
+  if (signals.asksTiming && signals.mentionsDrugEntity) scores.drug += 3;
+  if (signals.asksTiming && signals.mentionsLabEntity) scores.lab += 2;
+  if (signals.asksSelection && (signals.mentionsDrugEntity || signals.mentionsLabEntity || signals.mentionsDeviceEntity)) {
+    scores.compare += 2;
+  }
+
+  return scores;
 }
 
-function isDrugQuery(query: string) {
-  return /(약|투여|용량|희석|속도|부작용|금기|상호작용|insulin|heparin|vancomycin|norepinephrine|dopamine|항생제|수혈)/i.test(query);
-}
+function chooseQuestionType(query: string): MedSafetyStructuredAnswer["question_type"] {
+  const signals = deriveQuestionSignals(query);
+  const scores = buildQuestionTypeScores(query, signals);
+  const ranked = QUESTION_TYPE_PRIORITY
+    .map((type) => ({ type, score: scores[type] }))
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : QUESTION_TYPE_PRIORITY.indexOf(a.type) - QUESTION_TYPE_PRIORITY.indexOf(b.type)));
 
-function isDeviceQuery(query: string) {
-  return /(기구|장비|펌프|라인|카테터|튜브|ventilator|기계환기|모니터|알람|드레인)/i.test(query);
-}
+  const best = ranked[0];
+  const second = ranked[1];
+  if (!best || best.score < 4) return "general";
 
-function isProcedureQuery(query: string) {
-  return /(절차|순서|프로토콜|체크리스트|준비|세팅|중재|어떻게\s*해|무엇부터)/i.test(query);
+  if (signals.explicitGuideline && scores.guideline >= (second?.score ?? 0) - 1) {
+    return "guideline";
+  }
+
+  if (best.type === "guideline" && !signals.explicitGuideline && second && second.score >= best.score - 1) {
+    return second.type;
+  }
+
+  if (signals.asksSequence && scores.procedure >= best.score - 1) {
+    return "procedure";
+  }
+
+  if ((signals.asksMonitoring || signals.asksAdministration || signals.asksHoldOrStop || signals.asksCompatibility) && scores.drug >= best.score - 1) {
+    return "drug";
+  }
+
+  if ((signals.asksNumericThreshold || signals.asksTrendOrRecheck) && scores.lab >= best.score - 1) {
+    return "lab";
+  }
+
+  if ((signals.asksAlarmOrSetting || signals.asksTroubleshooting) && scores.device >= best.score - 1) {
+    return "device";
+  }
+
+  if (best.type === "compare" && !signals.explicitCompare && second && second.score >= best.score) {
+    return second.type;
+  }
+
+  if (signals.explicitCompare) {
+    const nextNonCompare = ranked.find((item) => item.type !== "compare");
+    if (best.type === "compare" && nextNonCompare && nextNonCompare.score >= best.score - 1 && !signals.asksSelection) {
+      return nextNonCompare.type;
+    }
+  }
+
+  return best.type;
 }
 
 function isCriticalQuery(query: string) {
@@ -570,20 +722,14 @@ function isUrgentQuery(query: string) {
 }
 
 function isFreshnessSensitiveQuery(query: string) {
-  return /(최신|most recent|today|current|업데이트|최근|가이드라인|권고안|권고)/i.test(query);
+  return /(최신|most recent|today|current|업데이트|최근|가이드라인|권고안|권고|20\d{2}\s*년\s*기준|as of\s*20\d{2}|현행)/i.test(query);
 }
 
 function buildGroundingDecision(query: string, imageDataUrl?: string): GroundingDecision {
   const normalized = normalizeText(query);
   const questionType: MedSafetyStructuredAnswer["question_type"] =
     imageDataUrl ? "image" :
-    isCompareQuery(normalized) ? "compare" :
-    isGuidelineQuery(normalized) ? "guideline" :
-    isLabQuery(normalized) ? "lab" :
-    isDrugQuery(normalized) ? "drug" :
-    isDeviceQuery(normalized) ? "device" :
-    isProcedureQuery(normalized) ? "procedure" :
-    "general";
+    chooseQuestionType(normalized);
 
   const triageLevel: MedSafetyStructuredAnswer["triage_level"] = isCriticalQuery(normalized)
     ? "critical"
@@ -594,16 +740,15 @@ function buildGroundingDecision(query: string, imageDataUrl?: string): Grounding
   return {
     question_type: questionType,
     triage_level: triageLevel,
-    needs_grounding: true,
-    needs_verification: triageLevel !== "routine" || questionType === "compare" || questionType === "guideline" || Boolean(imageDataUrl),
     high_risk: triageLevel !== "routine",
     freshness_sensitive: isFreshnessSensitiveQuery(normalized) || questionType === "guideline",
   };
 }
 
-function buildWebSearchProfile(searchType: SearchCreditType): MedSafetyWebSearchProfile {
+function buildWebSearchProfile(searchType: SearchCreditType): MedSafetyWebSearchProfile | null {
+  if (searchType !== "premium") return null;
   return {
-    searchContextSize: searchType === "premium" ? "high" : "medium",
+    searchContextSize: "high",
     toolChoice: "required",
     includeSourceList: true,
   };
@@ -645,93 +790,150 @@ function describeOutputLanguage(locale: Locale) {
   return locale === "en" ? "자연스러운 임상 영어" : "자연스러운 한국어 존댓말";
 }
 
-function buildQuestionFocusPrompt(decision: GroundingDecision) {
+function buildQuestionFocusPrompt(decision: GroundingDecision, query?: string) {
+  const normalized = normalizeText(query);
+  const signals = deriveQuestionSignals(normalized);
   switch (decision.question_type) {
     case "drug":
-      return "이 질문의 초점은 약물/투약 안전이다. 적응증, 금기, 모니터링, 투여 전 확인사항, 즉시 보고 기준을 우선 정리하라.";
+      return [
+        "이 질문의 핵심은 '이 약 또는 투여 방식이 지금 안전한가, 간호사가 무엇을 먼저 확인해야 하는가'이다. 교과서식 설명보다 투여 전 확인, 금기·주의, 상호작용, 모니터링, 보류 또는 즉시 보고 기준, 간호사 단독 수행 가능 행동을 우선 정리하라.",
+        signals.asksTiming || /(tdm|auc|trough|steady state)/i.test(normalized)
+          ? "특히 채혈·재평가 시점이나 TDM 질문이면 언제 확인하고 무엇을 기준으로 해석하는지, trough 중심 사고와 AUC 중심 사고가 실제 실무에서 어떻게 달라지는지까지 연결해서 설명하라."
+          : "",
+        signals.asksAdministration || signals.asksCompatibility
+          ? "희석, 주입 속도, 라인 공유, compatibility가 걸린 질문이면 투여 가능 여부보다 먼저 확인해야 할 희석액·라인·주입 조건과 보류 기준을 분리해서 제시하라."
+          : "",
+        signals.asksHoldOrStop
+          ? "보류·중단 판단 질문이면 간호사가 스스로 할 수 있는 중단·보류·모니터링 행동과, 처방 변경이나 대체 약제 선택처럼 반드시 의사·약사 확인이 필요한 행동을 분리하라."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
     case "lab":
-      return "이 질문의 초점은 수치/검사 해석이다. 수치 자체보다 임상적 의미, 먼저 확인할 것, 재검·보고 필요성을 우선 정리하라.";
+      return [
+        "이 질문의 핵심은 숫자 자체가 아니라 환자 상태와 연결된 해석이다. 정상범위 반복보다 임상적 의미, 검체 오류 가능성, 먼저 다시 볼 항목, 재검 또는 추가 확인, 즉시 보고 기준과 위험 신호를 우선 정리하라.",
+        signals.asksNumericThreshold
+          ? "숫자가 제시된 질문이면 절대값만 읽지 말고 증상, 활력징후, ECG, 소변량, 추세처럼 실제 위험도를 바꾸는 동반 소견을 함께 묶어 해석하라."
+          : "",
+        signals.asksTrendOrRecheck
+          ? "재검 또는 오류 가능성이 걸린 질문이면 hemolysis, 검체 채취 위치, 수액 혼입, 검사 간격처럼 수치를 왜곡할 수 있는 실무 변수를 함께 짚어라."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
     case "compare":
-      return "이 질문의 초점은 비교다. 핵심 차이, 선택 기준, 주 추천이 깨지는 조건과 예외를 분리해서 보여줘야 한다.";
+      return [
+        "이 질문의 핵심은 단순 우열이 아니라 '언제 무엇을 선택해야 하는가'이다. 핵심 차이, 선택 기준, 한계, 예외, 추천이 바뀌는 조건을 분리해서 보여주고, 현장에서 헷갈리기 쉬운 포인트를 먼저 풀어라.",
+        signals.asksSelection
+          ? "비교 대상마다 기본 추천 상황, 추천이 깨지는 예외, 오해하기 쉬운 반례를 나눠서 보여주고 단순 pros/cons 나열로 끝내지 마라."
+          : "",
+        /(lr|ns|normal saline|lactated ringer|auc|trough|crystalloid|vasopressor)/i.test(normalized)
+          ? "비교 질문이어도 실제 임상 선택에서 중요한 것은 목적, 환자 상태, 동반 질환, 모니터링 포인트이므로 그 기준이 먼저 보이게 써라."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
     case "guideline":
-      return "이 질문의 초점은 최신 권고/가이드라인이다. 문서 날짜와 최신성 한계를 분명히 반영하고, 오래된 근거는 단정하지 마라.";
+      return [
+        "이 질문의 핵심은 최신 공식 권고를 실제 임상 판단에 어떻게 적용할지다. 문서 날짜, 권고 범위, 적용 대상, 예외, 현장 적용 시 주의점과 최신성 한계를 분명히 반영하고, 오래된 근거나 지역·기관 차이를 단정하지 마라.",
+        signals.yearOrUpdate
+          ? "특히 최신성 질문이면 언제 발표·개정된 문서인지, 여전히 현행으로 볼 수 있는지, 더 최근 공식 문서가 없는지도 분리해서 반영하라."
+          : "",
+        "권고를 복붙하지 말고 간호사가 bedside에서 무엇을 바꿔야 하는지로 번역해서 설명하라.",
+      ]
+        .filter(Boolean)
+        .join(" ");
     case "device":
-      return "이 질문의 초점은 기구/장비 실무다. 설정, 경고, 확인 포인트, 즉시 중단 또는 보고 기준을 우선하라.";
+      return [
+        "이 질문의 핵심은 장비·라인·기구를 안전하게 다루는 실무 판단이다. 원리 설명보다 설정 전 확인 순서, 경고 신호, 흔한 오류, 즉시 중단·교체·보고 기준과 환자 안전에 직접 연결되는 포인트를 우선하라.",
+        signals.asksAlarmOrSetting
+          ? "알람이나 설정 질문이면 장비를 만지기 전에 먼저 확인할 환자 상태, 라인/회로 상태, 설정값 검토 순서를 분리해서 제시하라."
+          : "",
+        signals.asksTroubleshooting
+          ? "트러블슈팅 질문이면 환자 문제와 장비 문제를 혼동하지 않도록 환자 우선 확인, 기계 확인, 도움 요청 순서를 분명히 하라."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
     case "procedure":
-      return "이 질문의 초점은 절차/실무 순서다. 현장에서 바로 적용할 수 있게 우선순위와 체크포인트를 간결하게 정리하라.";
+      return [
+        "이 질문의 핵심은 절차를 안전하게 실행하는 순서와 체크포인트다. 준비, 시행, 시행 중 관찰, 시행 후 재평가·기록까지 흐름을 잡고, 빠뜨리면 위험한 멸균·안전·보고 포인트를 먼저 정리하라.",
+        signals.asksSequence
+          ? "순서 질문이면 실제 현장에서 헷갈리는 준비-시행-후속관찰 흐름이 한 번에 보이게 정리하라."
+          : "",
+        "멸균, 환자 확인, 금기, 중단 기준, 시행 후 관찰 중 빠뜨리면 위험한 항목만 남기고 과도한 교과서 설명은 줄여라.",
+      ]
+        .filter(Boolean)
+        .join(" ");
     case "image":
-      return "이 질문의 초점은 이미지 해석이다. 보이는 소견과 추정을 구분하고, 확정 진단처럼 단정하지 말며 위험 징후와 추가 확인 항목을 우선하라.";
+      return "이 질문의 핵심은 이미지에서 보이는 사실과 해석을 분리하는 것이다. 확정 진단처럼 단정하지 말고, 관찰 가능한 소견, 위험 징후, 즉시 추가 확인이 필요한 항목, 영상 한계와 escalation 필요성을 우선 정리하라.";
     default:
-      return "이 질문은 일반 임상 질문이다. 교과서식 나열보다 지금 이해해야 할 핵심과 바로 취할 행동을 우선하라.";
+      return "이 질문은 일반 임상 질문이지만, 답변은 여전히 실무형이어야 한다. 배경 설명보다 지금 판단을 바꾸는 핵심, 바로 확인할 것, 행동 또는 보고 기준을 우선 정리하라.";
   }
 }
 
-function buildRetrievalPriorityPrompt(decision: GroundingDecision) {
-  switch (decision.question_type) {
-    case "drug":
-      return "약물 질문이므로 승인 라벨, 규제기관 안전성 정보, 공공 약물 정보, 금기·상호작용·모니터링에 직접 연결되는 자료를 우선하라.";
-    case "lab":
-      return "수치 질문이므로 해석 기준, 위험 수치, 즉시 보고/재평가, 초기 대응에 직접 연결되는 자료를 우선하라.";
-    case "compare":
-      return "비교 질문이므로 각 선택지의 역할, 언제 쓰는지, 한계, 예외를 직접 비교할 수 있는 근거를 우선하라.";
-    case "guideline":
-      return "가이드라인 질문이므로 가장 최신의 권고문, 공식 기관 문서, 문서 날짜가 분명한 자료를 최우선으로 하라.";
-    case "device":
-      return "기구/장비 질문이므로 공식 사용 지침, 공공기관 안전 문서, 경고/주의사항과 직접 연결되는 자료를 우선하라.";
-    case "procedure":
-      return "절차 질문이므로 단계, 금기, 확인 포인트, 중단 기준과 직접 연결되는 자료를 우선하라.";
-    case "image":
-      return "이미지 질문이므로 이미지 자체를 단정적으로 판독하기보다, 관련 공식 해설이나 안전 경고를 우선하라.";
-    default:
-      return "핵심 판단과 실제 행동을 직접 바꾸는 근거를 우선하라.";
-  }
-}
-
-function buildAnswerPriorityPrompt(decision: GroundingDecision) {
+function buildAnswerPriorityPrompt(decision: GroundingDecision, query?: string) {
   const urgencyRule =
     decision.triage_level === "critical"
       ? "critical 질문이므로 bottom_line 첫 문장에서 즉시 행동과 보고/에스컬레이션을 분명히 하라."
       : decision.triage_level === "urgent"
         ? "urgent 질문이므로 관찰, 재평가, 보고 필요성을 초반에 분명히 하라."
         : "routine 질문이므로 과도한 경고보다 실무 판단 포인트를 간결하게 정리하라.";
-  return [buildQuestionFocusPrompt(decision), urgencyRule].join(" ");
+  return [buildQuestionFocusPrompt(decision, query), urgencyRule].join(" ");
 }
 
-function buildRetrievalQualityPrompt(decision: GroundingDecision) {
-  const balancedRule =
-    decision.question_type === "compare"
-      ? "비교 질문이므로 한쪽 선택지에 치우치지 말고 양쪽 선택지를 모두 직접 뒷받침하는 자료를 모아라."
-      : "";
-  const freshnessRule = decision.freshness_sensitive
-    ? "최신성 민감 질문이므로 같은 기관의 유사 문서가 여러 개면 날짜가 가장 최신인 문서를 우선하라."
-    : "";
-  return [
-    "claim_scope는 '이 출처가 정확히 어떤 주장이나 판단을 지지하는지'가 보이도록 한 문장으로 구체적으로 써라.",
-    "너무 넓은 배경 설명이나 일반론보다, 실제 답변의 핵심 문장에 바로 연결될 수 있는 범위로 claim_scope를 좁혀라.",
-    balancedRule,
-    freshnessRule,
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function buildAnswerFieldRequirementsPrompt(decision: GroundingDecision) {
+function buildAnswerFieldRequirementsPrompt(decision: GroundingDecision, query?: string) {
+  const normalized = normalizeText(query);
+  const signals = deriveQuestionSignals(normalized);
   const typeRule = (() => {
     switch (decision.question_type) {
       case "drug":
-        return "약물 질문이므로 key_points에는 적응증/핵심 차이보다도 안전성, 모니터링, 금기, 흔한 함정을 우선 반영하라. do_not_do와 patient_specific_caveats가 비어 있지 않도록 우선 검토하라.";
+        return [
+          "약물 질문이므로 bottom_line에서 먼저 투여 가능/보류/주의 방향을 분명히 하고, key_points에는 안전성, 모니터링, 금기, 흔한 함정을 우선 반영하라. do_not_do와 patient_specific_caveats가 비어 있지 않도록 우선 검토하라.",
+          signals.asksTiming || /(tdm|auc|trough|steady state)/i.test(normalized)
+            ? "TDM·타이밍 질문이면 recommended_actions에 언제 확인하고 어떤 결과를 누구에게 보고할지 넣고, key_points에는 해석 기준의 방향을 넣어라."
+            : "",
+          signals.asksCompatibility
+            ? "compatibility·라인 질문이면 do_not_do에는 혼합·라인 공유 관련 위험 행동을, recommended_actions에는 라인 분리·희석 확인·약사 확인 필요성을 반영하라."
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
       case "lab":
-        return "수치 질문이므로 key_points는 숫자 자체의 반복보다 임상적 의미와 왜 지금 중요해지는지를 담아라. recommended_actions와 when_to_escalate에 재평가·보고 판단을 실무형으로 반영하라.";
+        return [
+          "수치 질문이므로 key_points는 숫자 자체의 반복보다 임상적 의미, 위양성/채혈 오류 가능성, 왜 지금 중요한지를 담아라. recommended_actions와 when_to_escalate에는 재평가, 재검, 동반 소견 확인, 보고 판단을 실무형으로 반영하라.",
+          signals.asksNumericThreshold
+            ? "숫자와 단위가 제시된 질문이면 key_points 또는 when_to_escalate에 실제로 위험도를 바꾸는 동반 소견을 같이 묶어라."
+            : "",
+          signals.asksTrendOrRecheck
+            ? "재검이 핵심이면 recommended_actions에 언제 재검을 고려하는지와 표본 오류 확인 포인트를 넣어라."
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
       case "compare":
-        return "비교 질문이므로 bottom_line에서 선택 기준을 먼저 요약하고, comparison_table에는 역할/언제 쓰는지/효과 시작/한계/실무 포인트 차이를 분명히 나눠라.";
+        return [
+          "비교 질문이므로 bottom_line에서 추천 방향과 선택 기준을 먼저 요약하고, comparison_table에는 역할, 언제 쓰는지, 한계, 실무 포인트, 추천이 뒤집히는 조건을 분명히 나눠라.",
+          "comparison_table은 단순 장단점 표가 아니라 bedside에서 의사결정을 바꾸는 차이를 보여주는 데만 사용하라.",
+        ].join(" ");
       case "guideline":
-        return "가이드라인 질문이므로 freshness와 uncertainty에 문서 날짜와 최신성 한계를 반영하라. 오래된 문서나 상충 근거가 있으면 단정하지 마라.";
+        return "가이드라인 질문이므로 freshness와 uncertainty에 문서 날짜, 최신성, 권고 적용 범위와 한계를 반영하라. 문서가 오래됐거나 근거가 상충하면 단정하지 말고 적용 시 주의점을 함께 남겨라.";
       case "device":
-        return "기구 질문이므로 recommended_actions에는 설정 전 확인, 경고 대응, 중단·보고 기준을 우선 넣어라.";
+        return [
+          "기구 질문이므로 recommended_actions에는 설정 전 확인, 작동 상태 확인, 알람 대응, 사용 중지·교체·보고 기준을 우선 넣어라.",
+          signals.asksTroubleshooting
+            ? "트러블슈팅 질문이면 do_not_do에는 환자 평가 없이 기계만 조작하는 행동이나 무분별한 리셋을 넣어라."
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
       case "procedure":
-        return "절차 질문이므로 recommended_actions를 순서감 있게 쓰고, key_points에는 빠뜨리면 위험한 체크포인트만 남겨라.";
+        return [
+          "절차 질문이므로 recommended_actions를 실제 시행 순서가 보이게 쓰고, key_points에는 준비물, 멸균, 환자 확인, 시행 후 재평가처럼 빠뜨리면 위험한 체크포인트만 남겨라.",
+          "절차를 길게 늘어놓지 말고, 실패·오염·환자 악화로 바로 이어질 수 있는 포인트만 추려라.",
+        ].join(" ");
       case "image":
-        return "이미지 질문이므로 key_points에는 관찰 사실과 추정을 구분하고, uncertainty에 이미지 한계나 추가 확인 필요성을 분명히 남겨라.";
+        return "이미지 질문이므로 key_points에는 관찰 사실과 추정을 분리하고, recommended_actions나 when_to_escalate에는 추가 확인이나 보고가 필요한 이유를 넣어라. uncertainty에는 이미지 한계와 추가 검사 필요성을 분명히 남겨라.";
       default:
         return "일반 질문이므로 bottom_line과 key_points가 중복되지 않게 하고, 실제 행동을 바꾸는 정보만 남겨라.";
     }
@@ -759,89 +961,58 @@ function buildAnswerStylePrompt(decision: GroundingDecision) {
   ].join(" ");
 }
 
-function buildVerifierPriorityPrompt(decision: GroundingDecision) {
-  switch (decision.question_type) {
-    case "compare":
-      return "비교 질문이므로 각 선택지의 차이와 선택 기준이 흐려지지 않았는지 특히 확인하라.";
-    case "drug":
-      return "약물 질문이므로 근거 없는 용량, 속도, 적응증, 금기 단정이 없는지 특히 확인하라.";
-    case "lab":
-      return "수치 질문이므로 수치 해석의 과도한 단정, 위험도/보고 기준 누락이 없는지 특히 확인하라.";
-    case "guideline":
-      return "가이드라인 질문이므로 최신성, 문서 날짜, 권고 강도의 과장 여부를 특히 확인하라.";
-    case "image":
-      return "이미지 질문이므로 확정 진단처럼 단정한 표현과 위험 징후 누락을 특히 확인하라.";
-    default:
-      return "주장-근거 일치와 즉시 행동 필요성 누락 여부를 특히 확인하라.";
-  }
-}
-
-function buildRetrievalDeveloperPrompt(locale: Locale, searchType: SearchCreditType, decision: GroundingDecision) {
-  const sourceCountRule =
-    searchType === "premium" ? "가능하면 근거 패킷을 3~6개까지 반환하라." : "가능하면 근거 패킷을 1~3개까지 반환하라.";
+function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType, decision: GroundingDecision, query: string) {
+  const groundingRule =
+    searchType === "premium"
+      ? [
+          "[검색과 근거 사용]",
+          "이번 응답은 웹 검색과 최종 답변 작성을 한 번에 수행한다.",
+          "검색을 했다면 검색 결과를 소화해서 질문에 직접 답하라. 출처 목록만 길게 늘어놓는 답변은 금지한다.",
+          "허용된 도메인 안의 공식·공공 출처를 우선 사용하라.",
+          "규제기관, 정부기관, 공공보건기관, 승인 라벨, DailyMed, PubMed 같은 공공 의학 출처를 일반 배경자료보다 우선하라.",
+          "문서 날짜, 기관명, URL, 수치, 용량, claim은 실제로 확인된 경우만 써라.",
+          "citations 배열에는 실제로 답변에 사용한 핵심 출처만 남겨라.",
+          "citation id는 src_1, src_2 같은 형식으로 일관되게 써라.",
+          "citations에는 실제로 답변을 뒷받침한 핵심 출처를 3~6개까지 넣어라.",
+        ]
+      : [
+          "[근거 사용]",
+          "이번 응답에서는 웹 검색 도구를 사용하지 않는다.",
+          "실시간 최신 문서, 가이드라인 날짜, URL, citation, 공식 출처를 확인한 것처럼 쓰지 마라.",
+          "확인하지 않은 출처, 문서 날짜, 수치 근거를 만들어 넣지 마라.",
+          "standard 모드에서는 citations 배열을 비워 두고, 출처 id나 URL을 임의로 만들지 마라.",
+          "최신성이나 기관별 차이가 중요하면 '기관 프로토콜 확인 필요' 또는 '의사·약사와 확인하세요'를 분명히 남겨라.",
+        ];
   return [
-    "너는 간호사 전용 임상 검색 시스템의 공식 근거 수집 단계다.",
-    "목표는 지금 질문에 실제로 도움이 되는 공식·공공 근거만 추려서, 후속 답변이 안전하고 실무적으로 되도록 만드는 것이다.",
-    "허용된 도메인 안의 공식·공공 출처만 사용하라.",
-    "규제기관, 정부기관, 공공보건기관, 공공 의학 레퍼런스를 일반 배경자료보다 우선하라.",
-    "문서 날짜, 기관명, URL, claim_scope를 추정하거나 만들어 넣지 마라.",
-    "간호 실무 판단을 직접 바꾸는 정보, 즉 보고 기준, 위험 신호, 금기, 주의, 모니터링, 선택 기준과 직접 연결되는 근거를 우선하라.",
-    buildRetrievalPriorityPrompt(decision),
-    buildRetrievalQualityPrompt(decision),
-    "support_strength는 핵심 주장을 직접 지지하면 direct, 배경 설명이면 background로 표시하라.",
-    "근거가 부족하면 억지로 채우지 말고 부족하다고 남겨라.",
-    sourceCountRule,
-    `grounding_note는 ${describeOutputLanguage(locale)}로 작성하라.`,
-    "반드시 JSON만 반환하라.",
-  ].join("\n");
-}
-
-function buildRetrievalUserPrompt(args: {
-  query: string;
-  locale: Locale;
-  decision: GroundingDecision;
-  continuationMemory?: string;
-}) {
-  const memory = normalizeText(args.continuationMemory);
-  return [
-    `질문: ${sanitizeMedSafetyTextUrls(args.query)}`,
-    `질문유형(question_type): ${args.decision.question_type} - ${describeQuestionType(args.decision.question_type)}`,
-    `긴급도(triage_level): ${args.decision.triage_level} - ${describeTriageLevel(args.decision.triage_level)}`,
-    args.decision.freshness_sensitive ? "최신성 민감 질문이므로 가능하면 최신 문서와 문서 날짜가 분명한 자료를 우선하라." : "",
-    memory ? `직전 문맥:\n${memory}` : "",
-    "이 질문의 핵심 답변을 뒷받침할 공식/공공 근거를 찾아라.",
-    "특히 간호사가 보고, 재평가, 관찰, 안전 판단에 바로 써야 할 정보가 우선이다.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function buildAnswerDeveloperPrompt(locale: Locale, decision: GroundingDecision) {
-  return [
-    "너는 간호사 전용 임상 AI 어시스턴트다.",
+    "[역할과 원칙]",
+    "너는 간호사를 위한 전문 임상 AI 어시스턴트다.",
     "모든 답변의 최우선 목표는 간호사가 지금 이 상황에서 무엇을 이해해야 하고 무엇을 해야 하는지 빠르고 명확하게 전달하는 것이다.",
-    "교과서식 나열보다 임상 실무에서 바로 쓸 수 있는 정보를 우선하되, 핵심 차이와 판단 포인트가 기억되도록 실무형이면서 교육적인 답변을 작성하라.",
+    "교과서식 나열보다 임상 실무에서 바로 쓸 수 있는 정보를 우선하되, 핵심 차이와 판단 포인트가 기억되도록 실무형이면서 학습형으로 작성하라.",
     "위험 상황에서는 설명보다 행동과 escalation을 먼저 제시하라.",
-    "약물 용량, 수치 기준, 시간 기준, 적응증, 금기, 모니터링 기준은 evidence packet이 직접 뒷받침할 때만 단정형으로 써라.",
-    "근거가 약하거나 기관·환자별로 달라질 수 있는 내용은 단정하지 말고 uncertainty 또는 evidence_status=needs_review로 낮춰라.",
-    "필요하면 기관 프로토콜 확인 필요, 의사 확인 필요, 약사 확인 필요를 구체적으로 명시하라.",
-    "근거가 상충하거나 부족하면 하나를 사실처럼 확정하지 말고, 현재 더 안전한 일반 원칙과 추가 확인 필요성을 함께 제시하라.",
-    "간호사가 독자적으로 할 수 있는 확인·관찰·보고·중단·재평가 행동과, 의사 지시 또는 약사 확인이 필요한 행위를 혼동하지 마라.",
+    "약물 용량, 수치 기준, 시간 기준, 가이드라인 출처는 확실한 근거가 있을 때만 명시하고, 추정하거나 만들어 넣지 마라.",
+    "불확실하거나 기관·환자별로 달라질 수 있는 내용은 단정하지 말고 '기관 프로토콜 확인 필요' 또는 '의사·약사와 확인하세요'를 구체적으로 명시하라.",
+    "근거가 약하거나 상충하면 하나를 사실처럼 확정하지 말고, 현재 더 안전한 일반 원칙과 추가 확인 필요성을 함께 제시하라.",
+    "간호사가 독자적으로 할 수 있는 확인·관찰·보고·중단·재평가 행동과, 의사 지시 또는 약사 확인이 필요한 행위를 항상 명확히 구분하라.",
     "병원 내부 프로토콜, 임의의 처방, 환자별 확정 지시를 만들어 넣지 마라.",
+    ...groundingRule,
+    "[이 질문의 초점]",
+    buildQuestionFocusPrompt(decision, query),
+    "[출력 형태]",
     "답변은 구조화된 JSON이지만, 각 필드는 실제 간호 현장에서 바로 쓸 수 있게 채워라.",
-    "bottom_line에는 제목 없는 결론 1~3문장을 넣고, urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
-    "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 항상 첫 항목을 소제목 아래 들어가는 핵심 요약 1문장으로 써라.",
-    "각 섹션의 2번째 항목부터는 세부 bullet이다. 기본은 2개 이내 bullet로 제한하고, 위험도·보고 필요·예외 경계 때문에 꼭 필요할 때만 3번째 bullet을 허용하라.",
+    "bottom_line에는 제목 없는 결론 문단 1~3문장을 넣고, urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
+    "질문에 직접 답한 뒤 필요한 범위에서만 구조화하라. 답보다 출처 설명이 더 길어지지 않게 하라.",
+    "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 첫 항목을 핵심 요약 1문장으로 쓰고, 그 다음 항목들만 bullet 세부 내용으로 사용하라.",
+    "각 섹션의 세부 bullet은 기본 2개 이내로 제한하고, 위험도·보고 필요·예외 경계 때문에 꼭 필요할 때만 3번째 bullet을 허용하라.",
     "각 bullet은 기본 1문장으로 쓰고, 임상적으로 중요한 내용이 빠질 때만 2문장까지 허용하라.",
-    "질문에 비해 과하지도 빈약하지도 않게, 필요한 범위에서만 구조화하라.",
     "key_points에는 핵심 판단 포인트만 넣어라. recommended_actions에는 간호사가 지금 할 수 있는 행동을 우선 넣어라.",
-    "do_not_do에는 흔하지만 위험한 행동이나 근거 없는 단정을 넣어라. when_to_escalate에는 즉시 보고/에스컬레이션 기준을 넣어라.",
+    "do_not_do에는 흔하지만 위험한 행동이나 잘못된 해석을 넣어라. when_to_escalate에는 즉시 보고/에스컬레이션 기준을 넣어라.",
     "patient_specific_caveats에는 실제로 판단을 바꿀 수 있는 예외만 넣어라.",
     "comparison_table은 진짜 비교 질문일 때만 사용하라.",
     "같은 경고나 근거를 여러 필드에 반복하지 말고 가장 적절한 위치에 한 번만 넣어라.",
+    "마크다운 강조, 표, 코드블록은 쓰지 마라.",
     "내부 설계 용어(route, pack, artifact, contract)는 절대 출력하지 마라.",
-    buildAnswerPriorityPrompt(decision),
-    buildAnswerFieldRequirementsPrompt(decision),
+    buildAnswerPriorityPrompt(decision, query),
+    buildAnswerFieldRequirementsPrompt(decision, query),
     buildAnswerStylePrompt(decision),
     `모든 사용자 노출 문구는 ${describeOutputLanguage(locale)}로 작성하라.`,
     "반드시 JSON만 반환하라.",
@@ -852,7 +1023,7 @@ function buildAnswerUserPrompt(args: {
   query: string;
   locale: Locale;
   decision: GroundingDecision;
-  evidence: EvidenceRetrievalResult;
+  searchType: SearchCreditType;
   continuationMemory?: string;
 }) {
   const memory = normalizeText(args.continuationMemory);
@@ -860,11 +1031,14 @@ function buildAnswerUserPrompt(args: {
     `질문: ${sanitizeMedSafetyTextUrls(args.query)}`,
     `질문유형(question_type): ${args.decision.question_type} - ${describeQuestionType(args.decision.question_type)}`,
     `긴급도(triage_level): ${args.decision.triage_level} - ${describeTriageLevel(args.decision.triage_level)}`,
-    buildQuestionFocusPrompt(args.decision),
+    buildQuestionFocusPrompt(args.decision, args.query),
     memory ? `직전 문맥:\n${memory}` : "",
-    "근거 패킷(JSON):",
-    JSON.stringify(args.evidence, null, 2),
-    "위 근거를 바탕으로 간호 실무에서 바로 쓸 수 있는 답변을 만들어라.",
+    args.decision.freshness_sensitive ? "최신성 민감 질문이므로 문서 날짜와 확인 시점을 반영하라." : "",
+    args.searchType === "premium"
+      ? "웹 검색 내용을 바탕으로 간호 실무에서 바로 쓸 수 있는 답변을 한 번에 완성하라."
+      : "이번 모드에서는 웹 검색 없이 답하므로, 최신 문서나 실시간 근거를 확인한 것처럼 쓰지 말고 안전한 일반 원칙과 불확실성을 분명히 반영하라.",
+    "질문에 직접 답하고, 간호사가 지금 해야 할 행동·관찰·보고 기준을 분명히 적어라.",
+    "출처만 길게 나열하는 답변은 금지한다.",
     "시스템 출력 규칙상, 비어 있지 않은 각 섹션 배열의 첫 항목은 소제목 아래 첫 줄 요약이고, 그 다음 항목들만 bullet 세부 내용으로 사용된다.",
     "따라서 각 섹션은 필요할 때만 채우고, 첫 항목은 요약 1문장, 이후 항목은 기본 2개 이내의 짧은 bullet로 구성하라.",
     "출처가 없는 세부사항은 만들어 넣지 말고 uncertainty 또는 needs_review로 처리하라.",
@@ -874,54 +1048,26 @@ function buildAnswerUserPrompt(args: {
     .join("\n\n");
 }
 
-function buildVerifierDeveloperPrompt(locale: Locale, decision: GroundingDecision) {
-  return [
-    "너는 간호사 전용 임상 답변의 최종 안전 검증 단계다.",
-    "다음 이슈만 검사하라: claim_citation_mismatch, unsupported_specificity, missing_urgency, self_contradiction, overlong_indirect.",
-    "특히 근거 없는 수치·용량·강한 단정, 긴급 상황에서 에스컬레이션 누락, 자기모순, 핵심이 흐려지는 장황함을 엄격하게 본다.",
-    buildVerifierPriorityPrompt(decision),
-    "문제가 있으면 corrected_answer를 보수적으로 수정하라.",
-    "수정할 때는 사실을 덧붙이기보다 unsupported specificity를 줄이고, 즉시 행동/보고를 분명히 하고, 근거가 약한 항목은 uncertainty 또는 needs_review로 낮춰라.",
-    "간호사에게 처방권이 필요한 행동을 직접 지시하는 표현이 있으면 제거하거나 더 안전한 확인/보고 방식으로 바꿔라.",
-    "비어 있지 않은 각 섹션은 첫 항목이 소제목 아래 요약 1문장인지, 이후 항목이 bullet 세부사항인지 확인하라.",
-    "각 섹션이 과도하게 길거나 bullet이 너무 많으면 줄여라. 기본은 세부 bullet 2개 이내이며, 꼭 필요할 때만 3개까지 허용한다.",
-    decision.triage_level === "routine"
-      ? "routine 질문은 과도한 경고를 줄이고 핵심 판단을 남겨라."
-      : "urgent 또는 critical 질문은 when_to_escalate 누락, recommended_actions의 미온적 표현, bottom_line 초반의 우선순위 누락을 엄격하게 잡아라.",
-    "key_points가 bottom_line을 반복만 하거나, recommended_actions가 실제 행동이 아니라 배경설명으로 채워졌으면 더 실무형으로 다듬어라.",
-    "문제가 없으면 passed=true로 명확히 표시하라.",
-    `corrected_answer 안의 사용자 노출 문구는 ${describeOutputLanguage(locale)}로 유지하라.`,
-    "notes는 한국어로 간결하게 작성하라.",
-    "반드시 JSON만 반환하라.",
-  ].join("\n");
-}
-
-function buildVerifierUserPrompt(args: {
-  query: string;
-  answer: MedSafetyStructuredAnswer;
-  evidence: EvidenceRetrievalResult;
-}) {
-  return [
-    `질문: ${sanitizeMedSafetyTextUrls(args.query)}`,
-    `질문유형: ${args.answer.question_type}`,
-    `긴급도: ${args.answer.triage_level}`,
-    "근거 패킷(JSON):",
-    JSON.stringify(args.evidence, null, 2),
-    "현재 답변(JSON):",
-    JSON.stringify(args.answer, null, 2),
-    "과도한 단정, 근거 없는 수치, 보고 기준 누락, 간호사 역할 경계 혼동, 장황함을 점검하고 corrected_answer를 반환하라.",
-  ].join("\n\n");
-}
-
-function buildFallbackStructuredAnswer(query: string, locale: Locale, sources: MedSafetySource[], groundingFailed: boolean) {
+function buildFallbackStructuredAnswer(
+  query: string,
+  locale: Locale,
+  sources: MedSafetySource[],
+  groundingFailed: boolean,
+  searchType: SearchCreditType
+) {
+  const groundedMode = searchType === "premium";
   const answer = normalizeMedSafetyStructuredAnswer(
     {
       question_type: "general",
       triage_level: "routine",
       bottom_line:
         locale === "en"
-          ? "I could not fully complete the evidence-grounded answer, so only a safe summary is shown."
-          : "공식 근거를 끝까지 확인하지 못해 안전한 요약만 먼저 보여드립니다.",
+          ? groundedMode
+            ? "I could not fully complete the web-grounded answer, so only a safe summary is shown."
+            : "I could not fully complete the answer, so only a safe summary is shown."
+          : groundedMode
+            ? "공식 근거 기반 답변을 끝까지 완료하지 못해 안전한 요약만 먼저 보여드립니다."
+            : "답변을 끝까지 완료하지 못해 안전한 요약만 먼저 보여드립니다.",
       bottom_line_citation_ids: [],
       key_points: [],
       recommended_actions: [
@@ -949,14 +1095,22 @@ function buildFallbackStructuredAnswer(query: string, locale: Locale, sources: M
       uncertainty: {
         summary:
           locale === "en"
-            ? "The evidence-grounded path did not complete, so specific details may be missing."
-            : "근거 수집 또는 검증 단계가 끝까지 완료되지 않아 구체 항목이 부족할 수 있습니다.",
+            ? groundedMode
+              ? "The web-grounded path did not complete, so specific details may be missing."
+              : "The answer generation did not complete, so specific details may be missing."
+            : groundedMode
+              ? "검색 기반 답변 생성이 끝까지 완료되지 않아 구체 항목이 부족할 수 있습니다."
+              : "답변 생성이 끝까지 완료되지 않아 구체 항목이 부족할 수 있습니다.",
         needs_verification: true,
         reasons: [
           groundingFailed
             ? locale === "en"
-              ? "Official evidence retrieval failed."
-              : "공식 근거 검색이 실패했습니다."
+              ? groundedMode
+                ? "Official web-grounded answer generation failed."
+                : "Answer generation failed."
+              : groundedMode
+                ? "공식 근거 기반 답변 생성이 실패했습니다."
+                : "답변 생성이 실패했습니다."
             : locale === "en"
               ? "Answer generation was incomplete."
               : "답변 생성이 불완전했습니다.",
@@ -967,16 +1121,69 @@ function buildFallbackStructuredAnswer(query: string, locale: Locale, sources: M
         newest_effective_date: sources.map((source) => source.effectiveDate).filter(Boolean).sort().at(-1) ?? null,
         note:
           locale === "en"
-            ? "Freshness verification was incomplete."
-            : "최신성 확인이 완전하지 않았습니다.",
-        verification_status: groundingFailed ? "dated" : "unknown",
+            ? groundedMode
+              ? "Freshness verification was incomplete."
+              : "Web freshness verification was not run."
+            : groundedMode
+              ? "최신성 확인이 완전하지 않았습니다."
+              : "웹 최신성 확인은 수행되지 않았습니다.",
+        verification_status: groundedMode && groundingFailed ? "dated" : "unknown",
       },
-      citations: sources,
+      citations: groundedMode ? sources : [],
       comparison_table: [],
     },
-    sources
+    groundedMode ? sources : []
   );
   return answer;
+}
+
+function sanitizeGeneratedAnswerForSearchType(raw: Record<string, unknown> | null, searchType: SearchCreditType, locale: Locale) {
+  if (!raw || searchType === "premium") return raw;
+  return {
+    ...raw,
+    bottom_line_citation_ids: [],
+    key_points: Array.isArray(raw.key_points)
+      ? raw.key_points.map((item) =>
+          item && typeof item === "object" ? { ...(item as Record<string, unknown>), citation_ids: [] } : item
+        )
+      : raw.key_points,
+    recommended_actions: Array.isArray(raw.recommended_actions)
+      ? raw.recommended_actions.map((item) =>
+          item && typeof item === "object" ? { ...(item as Record<string, unknown>), citation_ids: [] } : item
+        )
+      : raw.recommended_actions,
+    do_not_do: Array.isArray(raw.do_not_do)
+      ? raw.do_not_do.map((item) =>
+          item && typeof item === "object" ? { ...(item as Record<string, unknown>), citation_ids: [] } : item
+        )
+      : raw.do_not_do,
+    when_to_escalate: Array.isArray(raw.when_to_escalate)
+      ? raw.when_to_escalate.map((item) =>
+          item && typeof item === "object" ? { ...(item as Record<string, unknown>), citation_ids: [] } : item
+        )
+      : raw.when_to_escalate,
+    patient_specific_caveats: Array.isArray(raw.patient_specific_caveats)
+      ? raw.patient_specific_caveats.map((item) =>
+          item && typeof item === "object" ? { ...(item as Record<string, unknown>), citation_ids: [] } : item
+        )
+      : raw.patient_specific_caveats,
+    comparison_table: Array.isArray(raw.comparison_table)
+      ? raw.comparison_table.map((item) =>
+          item && typeof item === "object" ? { ...(item as Record<string, unknown>), citation_ids: [] } : item
+        )
+      : raw.comparison_table,
+    citations: [],
+    freshness: {
+      ...(raw.freshness && typeof raw.freshness === "object" ? (raw.freshness as Record<string, unknown>) : {}),
+      retrieved_at: null,
+      newest_effective_date: null,
+      note:
+        locale === "en"
+          ? "Web search was not used, so latest-document verification was not completed."
+          : "웹 검색을 사용하지 않아 최신 문서 확인은 완료되지 않았습니다.",
+      verification_status: "unknown",
+    },
+  };
 }
 
 async function callStructuredModel<T>(args: {
@@ -1118,47 +1325,6 @@ async function callStructuredModel<T>(args: {
   }
 }
 
-function normalizeEvidenceRetrieval(raw: unknown, fallbackSources: MedSafetySource[], decision: GroundingDecision): EvidenceRetrievalResult {
-  const node = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-  const evidencePackets = mergeMedSafetySources(
-    [
-      ...(Array.isArray(node.evidence_packets) ? (node.evidence_packets as Record<string, unknown>[]) : []),
-      ...fallbackSources,
-    ],
-    12
-  );
-  return {
-    question_type: decision.question_type,
-    triage_level: decision.triage_level,
-    grounding_note:
-      normalizeText(node.grounding_note) ||
-      (evidencePackets.length ? "공식 또는 공공 근거를 기준으로 정리했습니다." : "공식 근거를 충분히 확보하지 못했습니다."),
-    evidence_packets: evidencePackets.map((source: MedSafetySource, index: number) => ({
-      ...source,
-      id: source.id || `src_${index + 1}`,
-      supportStrength: source.supportStrength ?? "direct",
-      official: source.official !== false,
-      retrievedAt: source.retrievedAt ?? new Date().toISOString(),
-    })),
-  };
-}
-
-function normalizeVerification(raw: unknown, fallbackAnswer: MedSafetyStructuredAnswer): MedSafetyVerificationReport {
-  const node = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-  const issues = Array.isArray(node.issues)
-    ? (node.issues
-        .map((item) => normalizeText(item))
-        .filter(Boolean) as MedSafetyVerificationIssueCode[])
-    : [];
-  return {
-    ran: true,
-    passed: node.passed === true,
-    issues,
-    notes: Array.isArray(node.notes) ? node.notes.map((item) => normalizeText(item)).filter(Boolean).slice(0, 6) : [],
-    corrected_answer: normalizeMedSafetyStructuredAnswer(node.corrected_answer, fallbackAnswer.citations),
-  };
-}
-
 export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyStructuredOutput> {
   const startedAt = Date.now();
   const apiKey = normalizeApiKey();
@@ -1166,7 +1332,7 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
   const model = resolveModel(params.searchType);
   const storeResponses = resolveStoreResponses();
   const decision = buildGroundingDecision(params.query, params.imageDataUrl);
-  const webSearchProfile = buildWebSearchProfile(params.searchType);
+  const webSearchProfile = buildWebSearchProfile(params.searchType) ?? undefined;
   const timeoutMs = resolveUpstreamTimeoutMs();
   const timeoutController = new AbortController();
   const relayAbort = () => timeoutController.abort();
@@ -1179,127 +1345,48 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       question_type: decision.question_type,
     });
 
-    let retrievalNote = "";
-    let retrievalUsage: ResponsesUsage | null = null;
-    let retrievalSources: MedSafetySource[] = [];
-    let groundingStatus: MedSafetyGroundingStatus = "none";
-    let groundingError: string | null = null;
-    let evidence: EvidenceRetrievalResult = {
-      question_type: decision.question_type,
-      triage_level: decision.triage_level,
-      grounding_note: "",
-      evidence_packets: [],
-    };
-
-    if (decision.needs_grounding) {
-      await params.onStage?.("retrieving");
-      const retrieval = await callStructuredModel<Record<string, unknown>>({
-        apiKey,
-        model,
-        apiBaseUrl,
-        developerPrompt: buildRetrievalDeveloperPrompt(params.locale, params.searchType, decision),
-        userPrompt: buildRetrievalUserPrompt({
-          query: params.query,
-          locale: params.locale,
-          decision,
-          continuationMemory: params.continuationMemory,
-        }),
-        schemaName: "med_safety_retrieval",
-        schema: RETRIEVAL_SCHEMA as unknown as Record<string, unknown>,
-        signal: timeoutController.signal,
-        maxOutputTokens: params.searchType === "premium" ? 3600 : 2400,
-        storeResponses,
-        reasoningEffort: "low",
-        webSearchProfile,
-      });
-      retrievalUsage = retrieval.usage;
-      retrievalSources = retrieval.sources;
-      const hasEvidencePackets =
-        !retrieval.error &&
-        Array.isArray((retrieval.data as Record<string, unknown> | null)?.evidence_packets) &&
-        ((retrieval.data as Record<string, unknown>).evidence_packets as unknown[]).length > 0;
-      groundingStatus = retrieval.error ? "failed" : (retrieval.sources.length > 0 || hasEvidencePackets) ? "ok" : "failed";
-      groundingError = retrieval.error;
-      evidence = normalizeEvidenceRetrieval(retrieval.data, retrieval.sources, decision);
-      retrievalNote = evidence.grounding_note;
-    }
-
     await params.onStage?.("generating");
     const generated = await callStructuredModel<Record<string, unknown>>({
       apiKey,
       model,
       apiBaseUrl,
-      developerPrompt: buildAnswerDeveloperPrompt(params.locale, decision),
+      developerPrompt: buildAnswerDeveloperPrompt(params.locale, params.searchType, decision, params.query),
       userPrompt: buildAnswerUserPrompt({
         query: params.query,
         locale: params.locale,
         decision,
-        evidence,
+        searchType: params.searchType,
         continuationMemory: params.continuationMemory,
       }),
       schemaName: "med_safety_answer",
       schema: ANSWER_SCHEMA as unknown as Record<string, unknown>,
       signal: timeoutController.signal,
-      maxOutputTokens: params.searchType === "premium" ? 4600 : 3800,
+      maxOutputTokens: params.searchType === "premium" ? 4200 : 3200,
       storeResponses,
       reasoningEffort: decision.high_risk ? "medium" : "low",
+      webSearchProfile,
+      imageDataUrl: params.imageDataUrl,
     });
 
-    let answer = normalizeMedSafetyStructuredAnswer(generated.data, evidence.evidence_packets);
-    let verification: MedSafetyVerificationReport | null = null;
-    let verificationUsage: ResponsesUsage | null = null;
-
-    if (decision.needs_verification && params.searchType === "premium") {
-      await params.onStage?.("verifying");
-      const verifyResult = await callStructuredModel<Record<string, unknown>>({
-        apiKey,
-        model: resolveModel("standard"),
-        apiBaseUrl,
-        developerPrompt: buildVerifierDeveloperPrompt(params.locale, decision),
-        userPrompt: buildVerifierUserPrompt({
-          query: params.query,
-          answer,
-          evidence,
-        }),
-        schemaName: "med_safety_verifier",
-        schema: VERIFIER_SCHEMA as unknown as Record<string, unknown>,
-        signal: timeoutController.signal,
-        maxOutputTokens: 3000,
-        storeResponses: false,
-        reasoningEffort: "low",
-      });
-      verificationUsage = verifyResult.usage;
-      if (verifyResult.data) {
-        verification = normalizeVerification(verifyResult.data, answer);
-        if (!verification.passed && verification.corrected_answer) {
-          answer = verification.corrected_answer;
-        }
-      } else {
-        verification = {
-          ran: true,
-          passed: false,
-          issues: ["unsupported_specificity"],
-          notes: ["검증 결과를 파싱하지 못해 안전하게 축약된 답변을 사용합니다."],
-          corrected_answer: answer,
-        };
-      }
-    }
-
+    const sanitizedGeneratedData = sanitizeGeneratedAnswerForSearchType(generated.data, params.searchType, params.locale);
     const mergedSources = mergeMedSafetySources(
       [
-        ...answer.citations,
-        ...evidence.evidence_packets,
-        ...retrievalSources,
-        ...generated.sources,
+        ...(sanitizedGeneratedData ? normalizeMedSafetyStructuredAnswer(sanitizedGeneratedData, []).citations : []),
+        ...(params.searchType === "premium" ? generated.sources : []),
       ],
       12
     );
-    const grounded = groundingStatus === "ok" && mergedSources.length > 0;
-    if (!grounded && decision.needs_grounding) {
-      answer = buildFallbackStructuredAnswer(params.query, params.locale, mergedSources, true);
-    } else {
-      answer = normalizeMedSafetyStructuredAnswer(answer, mergedSources);
-    }
+    const grounded = params.searchType === "premium" && mergedSources.length > 0;
+    const answer = sanitizedGeneratedData
+      ? normalizeMedSafetyStructuredAnswer(sanitizedGeneratedData, mergedSources)
+      : buildFallbackStructuredAnswer(params.query, params.locale, mergedSources, Boolean(generated.error), params.searchType);
+    const verification: MedSafetyVerificationReport | null = null;
+    const retrievalNote =
+      params.searchType === "premium"
+        ? grounded
+          ? `공식 또는 공공 출처 ${mergedSources.length}개를 바탕으로 질문에 직접 답하도록 통합 정리했습니다.`
+          : ""
+        : "standard 모드에서는 웹 검색을 사용하지 않았습니다.";
 
     const quality = buildMedSafetyQualitySnapshot({
       answer,
@@ -1307,8 +1394,10 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       grounded,
     });
     const answerText = buildMedSafetyAnswerText(answer);
-    const fallbackReason =
-      generated.error || (verification && !verification.passed ? verification.issues.join("|") || "verification_failed" : null);
+    const fallbackReason = generated.error;
+    const groundingStatus: MedSafetyGroundingStatus =
+      params.searchType === "premium" ? (generated.error ? "failed" : grounded ? "ok" : "failed") : "none";
+    const groundingError = params.searchType === "premium" ? generated.error : null;
 
     return {
       query: normalizeText(params.query),
@@ -1316,21 +1405,21 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       answer,
       model,
       fallbackReason,
-      sources: mergedSources,
-      groundingMode: decision.needs_grounding ? "official_search" : "none",
-      groundingStatus: grounded ? "ok" : decision.needs_grounding ? "failed" : "none",
+      sources: params.searchType === "premium" ? mergedSources : [],
+      groundingMode: params.searchType === "premium" ? "official_search" : "none",
+      groundingStatus,
       groundingError,
       quality,
       verification,
       latencyMs: Date.now() - startedAt,
-      usage: sumUsage(retrievalUsage, generated.usage, verificationUsage),
+      usage: generated.usage,
       routeDecision: decision,
       debug: {
         retrievalNote,
       },
     };
   } catch (error) {
-    const fallback = buildFallbackStructuredAnswer(params.query, params.locale, [], true);
+    const fallback = buildFallbackStructuredAnswer(params.query, params.locale, [], true, params.searchType);
     return {
       query: normalizeText(params.query),
       answerText: buildMedSafetyAnswerText(fallback),
@@ -1338,9 +1427,9 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       model: resolveModel(params.searchType),
       fallbackReason: normalizeText(error) || "med_safety_structured_failed",
       sources: [],
-      groundingMode: "official_search",
-      groundingStatus: "failed",
-      groundingError: normalizeText(error) || "med_safety_structured_failed",
+      groundingMode: params.searchType === "premium" ? "official_search" : "none",
+      groundingStatus: params.searchType === "premium" ? "failed" : "none",
+      groundingError: params.searchType === "premium" ? normalizeText(error) || "med_safety_structured_failed" : null,
       quality: buildMedSafetyQualitySnapshot({
         answer: fallback,
         verification: null,

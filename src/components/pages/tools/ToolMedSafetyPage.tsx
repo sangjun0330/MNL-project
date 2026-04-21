@@ -860,42 +860,6 @@ function StructuredComparisonTable({
   );
 }
 
-function StructuredSourceCards({ sources }: { sources: MedSafetySource[] }) {
-  if (!sources.length) return null;
-  return (
-    <section className="rounded-[24px] border border-[#E6E8ED] bg-white px-5 py-5">
-      <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
-        출처 카드
-      </div>
-      <div className="mt-3 grid gap-3">
-        {sources.map((source: MedSafetySource) => (
-          <div key={source.url} className="rounded-[18px] border border-[#EEF0F3] bg-[#FCFCFD] px-4 py-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-[14px] font-semibold text-ios-text">{source.title}</div>
-              <div className="inline-flex items-center rounded-full border border-[#E6E8ED] bg-white px-2.5 py-1 text-[10.5px] font-semibold text-ios-sub">
-                {source.organization ?? source.domain}
-              </div>
-              {source.official !== false ? (
-                <div className="inline-flex items-center rounded-full border border-[#D4E0F3] bg-[#EEF4FF] px-2.5 py-1 text-[10.5px] font-semibold text-[#31598B]">
-                  공식기관
-                </div>
-              ) : null}
-            </div>
-            <div className="mt-2 text-[12.5px] leading-6 text-ios-sub">
-              {source.effectiveDate ? `문서 날짜 ${source.effectiveDate}` : "문서 날짜 확인 불가"}
-              {source.retrievedAt ? ` · 확인 ${new Date(source.retrievedAt).toLocaleString("ko-KR")}` : ""}
-            </div>
-            {source.claimScope ? <div className="mt-1 text-[12.5px] leading-6 text-ios-sub">{source.claimScope}</div> : null}
-            <div className="mt-3">
-              <MedSafetySourceButton source={source} variant="rail" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function StructuredAssistantAnswer({
   answer,
   sources,
@@ -915,7 +879,7 @@ function StructuredAssistantAnswer({
 }) {
   const badge = structuredTriageBadge(answer);
   const citationLookup = citationLookupFromAnswer(answer, sources);
-  const sourceCards = mergeMedSafetySources([...answer.citations, ...sources], 12);
+  const sourceRailSources = mergeMedSafetySources([...answer.citations, ...sources], 12);
 
   return (
     <div className="space-y-4">
@@ -963,7 +927,21 @@ function StructuredAssistantAnswer({
       <StructuredAnswerItems title="즉시 보고 상황" items={answer.when_to_escalate} citationLookup={citationLookup} />
       <StructuredAnswerItems title="환자별 예외" items={answer.patient_specific_caveats} citationLookup={citationLookup} />
       <StructuredComparisonTable answer={answer} citationLookup={citationLookup} />
-      <StructuredSourceCards sources={sourceCards} />
+      {sourceRailSources.length ? (
+        <section className="rounded-[24px] border border-[#E6E8ED] bg-white px-5 py-5">
+          <div className="inline-flex items-center rounded-[14px] border border-[#E0E3E8] bg-[#F3F4F6] px-3 py-1.5 text-[11.5px] font-semibold text-ios-sub">
+            출처
+          </div>
+          <div className="mt-3">
+            <MedSafetySourceRail
+              sources={sourceRailSources}
+              groundingMode={groundingMode}
+              groundingStatus={groundingStatus}
+              groundingError={groundingError ?? null}
+            />
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
