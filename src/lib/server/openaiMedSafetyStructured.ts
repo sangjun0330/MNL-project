@@ -108,7 +108,7 @@ const ALLOWED_DOMAINS = [...OFFICIAL_TIER_1_DOMAINS, ...OFFICIAL_TIER_2_DOMAINS]
 
 const CITATION_SCHEMA = {
   type: "array",
-  maxItems: 6,
+  maxItems: 3,
   items: {
     type: "object",
     additionalProperties: false,
@@ -913,7 +913,8 @@ function buildAnswerFieldRequirementsPrompt(decision: GroundingDecision, query?:
           .join(" ");
       case "compare":
         return [
-          "비교 질문이므로 bottom_line에서 추천 방향과 선택 기준을 먼저 요약하고, comparison_table에는 역할, 언제 쓰는지, 한계, 실무 포인트, 추천이 뒤집히는 조건을 분명히 나눠라.",
+          "비교 질문이므로 bottom_line 첫 문장은 반드시 실행형 선택 기준으로 시작하라. (예: 'ECG 변화·부정맥이 있으면 A를 먼저, 급성 이동은 B가 표준, C는 X 동반 시에만 추가 고려한다.' 형식처럼) 나열 설명이 아닌 지금 바로 판단에 쓸 수 있는 결론 방향이어야 한다.",
+          "comparison_table에는 역할, 언제 쓰는지, 한계, 실무 포인트, 추천이 뒤집히는 조건을 분명히 나눠라.",
           "comparison_table은 단순 장단점 표가 아니라 bedside에서 의사결정을 바꾸는 차이를 보여주는 데만 사용하라.",
         ].join(" ");
       case "guideline":
@@ -973,7 +974,8 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
           "문서 날짜, 기관명, URL, 수치, 용량, claim은 실제로 확인된 경우만 써라.",
           "citations 배열에는 실제로 답변에 사용한 핵심 출처만 남겨라.",
           "citation id는 src_1, src_2 같은 형식으로 일관되게 써라.",
-          "citations에는 실제로 답변을 뒷받침한 핵심 출처를 3~6개까지 넣어라.",
+          "같은 URL 또는 같은 문서는 반드시 하나의 citation ID만 사용하라. 동일 문서에서 여러 claim이 나왔더라도 하나의 entry로 통합하고 claim_scope에 포괄 설명을 넣어라.",
+          "citations는 unique URL 기준으로 2~3개만 넣어라. 출처 나열이 답변 내용보다 길어지지 않게 하라.",
         ]
       : [
           "[근거 사용]",
@@ -999,7 +1001,7 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
     buildQuestionFocusPrompt(decision, query),
     "[출력 형태]",
     "답변은 구조화된 JSON이지만, 각 필드는 실제 간호 현장에서 바로 쓸 수 있게 채워라.",
-    "bottom_line에는 제목 없는 결론 문단 1~3문장을 넣고, urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
+    "bottom_line에는 제목 없는 결론 문단 1~3문장을 넣어라. compare·drug 질문이면 반드시 '어떤 상황에서 무엇을 먼저 해야 하는가'의 실행 방향이 첫 문장에 나와야 한다. 나열형·메타형 요약으로 시작하지 마라. urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
     "질문에 직접 답한 뒤 필요한 범위에서만 구조화하라. 답보다 출처 설명이 더 길어지지 않게 하라.",
     "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 첫 항목을 핵심 요약 1문장으로 쓰고, 그 다음 항목들만 bullet 세부 내용으로 사용하라.",
     "각 섹션의 세부 bullet은 기본 2개 이내로 제한하고, 위험도·보고 필요·예외 경계 때문에 꼭 필요할 때만 3번째 bullet을 허용하라.",
@@ -1039,6 +1041,8 @@ function buildAnswerUserPrompt(args: {
       : "이번 모드에서는 웹 검색 없이 답하므로, 최신 문서나 실시간 근거를 확인한 것처럼 쓰지 말고 안전한 일반 원칙과 불확실성을 분명히 반영하라.",
     "질문에 직접 답하고, 간호사가 지금 해야 할 행동·관찰·보고 기준을 분명히 적어라.",
     "출처만 길게 나열하는 답변은 금지한다.",
+    "같은 문서(같은 URL)를 여러 citation ID로 나누지 마라. 동일 문서에서 여러 claim이 나왔더라도 하나의 entry로 통합하라.",
+    "citations는 unique URL 기준 최대 3개로 제한하라.",
     "시스템 출력 규칙상, 비어 있지 않은 각 섹션 배열의 첫 항목은 소제목 아래 첫 줄 요약이고, 그 다음 항목들만 bullet 세부 내용으로 사용된다.",
     "따라서 각 섹션은 필요할 때만 채우고, 첫 항목은 요약 1문장, 이후 항목은 기본 2개 이내의 짧은 bullet로 구성하라.",
     "출처가 없는 세부사항은 만들어 넣지 말고 uncertainty 또는 needs_review로 처리하라.",
@@ -1247,6 +1251,10 @@ async function callStructuredModel<T>(args: {
     store: args.storeResponses,
   };
 
+  if (args.reasoningEffort) {
+    body.reasoning = { effort: args.reasoningEffort };
+  }
+
   if (args.webSearchProfile) {
     body.tools = [
       {
@@ -1361,7 +1369,14 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       schemaName: "med_safety_answer",
       schema: ANSWER_SCHEMA as unknown as Record<string, unknown>,
       signal: timeoutController.signal,
-      maxOutputTokens: params.searchType === "premium" ? 4200 : 3200,
+      maxOutputTokens:
+        params.searchType === "premium"
+          ? decision.question_type === "compare" ||
+            decision.question_type === "guideline" ||
+            decision.triage_level !== "routine"
+            ? 5000
+            : 4200
+          : 3200,
       storeResponses,
       reasoningEffort: decision.high_risk ? "medium" : "low",
       webSearchProfile,
