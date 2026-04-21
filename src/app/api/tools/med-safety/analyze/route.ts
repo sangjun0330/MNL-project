@@ -790,7 +790,6 @@ export async function POST(req: NextRequest) {
       headers: buildPrivateNoStoreHeaders({
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "private, no-store, no-cache, no-transform, max-age=0",
-        Connection: "keep-alive",
       }),
     });
   } catch {
