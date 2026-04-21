@@ -148,16 +148,16 @@ const ANSWER_SCHEMA = {
   properties: {
     question_type: { type: "string", enum: ["general", "drug", "lab", "compare", "guideline", "device", "procedure", "image"] },
     triage_level: { type: "string", enum: ["routine", "urgent", "critical"] },
-    bottom_line: { type: "string", maxLength: 320 },
+    bottom_line: { type: "string", maxLength: 520 },
     bottom_line_citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
     key_points: {
       type: "array",
-      maxItems: 4,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", maxLength: 220 },
+          text: { type: "string", maxLength: 420 },
           citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
@@ -166,12 +166,12 @@ const ANSWER_SCHEMA = {
     },
     recommended_actions: {
       type: "array",
-      maxItems: 4,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", maxLength: 220 },
+          text: { type: "string", maxLength: 420 },
           citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
@@ -180,12 +180,12 @@ const ANSWER_SCHEMA = {
     },
     do_not_do: {
       type: "array",
-      maxItems: 4,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", maxLength: 220 },
+          text: { type: "string", maxLength: 420 },
           citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
@@ -194,12 +194,12 @@ const ANSWER_SCHEMA = {
     },
     when_to_escalate: {
       type: "array",
-      maxItems: 4,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", maxLength: 220 },
+          text: { type: "string", maxLength: 420 },
           citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
@@ -208,12 +208,12 @@ const ANSWER_SCHEMA = {
     },
     patient_specific_caveats: {
       type: "array",
-      maxItems: 4,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", maxLength: 220 },
+          text: { type: "string", maxLength: 420 },
           citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
@@ -224,9 +224,9 @@ const ANSWER_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        summary: { type: "string", maxLength: 240 },
+        summary: { type: "string", maxLength: 320 },
         needs_verification: { type: "boolean" },
-        reasons: { type: "array", items: { type: "string", maxLength: 140 }, maxItems: 4 },
+        reasons: { type: "array", items: { type: "string", maxLength: 180 }, maxItems: 5 },
       },
       required: ["summary", "needs_verification", "reasons"],
     },
@@ -236,7 +236,7 @@ const ANSWER_SCHEMA = {
       properties: {
         retrieved_at: { type: ["string", "null"], maxLength: 40 },
         newest_effective_date: { type: ["string", "null"], maxLength: 40 },
-        note: { type: "string", maxLength: 200 },
+        note: { type: "string", maxLength: 240 },
         verification_status: { type: "string", enum: ["verified", "dated", "unknown"] },
       },
       required: ["retrieved_at", "newest_effective_date", "note", "verification_status"],
@@ -244,16 +244,16 @@ const ANSWER_SCHEMA = {
     citations: CITATION_SCHEMA,
     comparison_table: {
       type: "array",
-      maxItems: 4,
+      maxItems: 5,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          role: { type: "string", maxLength: 80 },
-          when_to_use: { type: "string", maxLength: 180 },
-          effect_onset: { type: "string", maxLength: 160 },
-          limitations: { type: "string", maxLength: 180 },
-          bedside_points: { type: "string", maxLength: 180 },
+          role: { type: "string", maxLength: 120 },
+          when_to_use: { type: "string", maxLength: 240 },
+          effect_onset: { type: "string", maxLength: 220 },
+          limitations: { type: "string", maxLength: 240 },
+          bedside_points: { type: "string", maxLength: 240 },
           citation_ids: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
           evidence_status: { type: "string", enum: ["supported", "needs_review"] },
         },
@@ -1025,11 +1025,12 @@ function buildAnswerStylePrompt(decision: GroundingDecision) {
       ? "과도하게 겁주지 말고 차분하게 설명하라."
       : "긴급도에 맞게 단호하고 짧게 쓰되, 공포를 조장하는 표현은 쓰지 마라.";
   return [
-    "bottom_line은 짧고 직접적으로 써라. 첫 문장만 읽어도 결론과 우선순위가 보이게 하라.",
-    "recommended_actions와 when_to_escalate는 가능하면 동사로 시작하고, 지금 바로 할 수 있는 행동처럼 읽히게 써라.",
-    "key_points는 단순 반복이 아니라 왜 중요한지 또는 무엇을 구분해야 하는지가 드러나야 한다.",
-    "한 항목에 여러 메시지를 밀어 넣지 말고, 항목 하나에는 하나의 판단이나 행동만 담아라.",
-    "각 배열은 꼭 필요한 항목만 채우고, 충분하면 2~3개에서 멈춰라. 반복 항목으로 maxItems를 억지로 채우지 마라.",
+    "bottom_line은 짧은 표어가 아니라 직접 답하는 설명 문단으로 써라. 첫 문장에 결론과 우선순위를 두고, 뒤 문장에서 왜 그런 판단인지와 가장 먼저 확인할 포인트를 붙여라.",
+    "recommended_actions와 when_to_escalate는 가능하면 동사로 시작하되, 단순 지시문으로 끝내지 말고 무엇을 보고 왜 그렇게 해야 하는지까지 드러나게 써라.",
+    "key_points는 단순 반복이나 교과서 정의가 아니라, 질문에 대한 설명이 되게 써라. 적응증, 임상적 의미, 주의점, 예외가 왜 중요한지 읽는 사람이 이해할 수 있어야 한다.",
+    "한 줄 메모처럼 끊어진 문장을 여러 개 나열하지 말고, 같은 근거로 설명할 수 있는 내용은 하나의 항목 안에서 자연스럽게 통합하라.",
+    "각 배열은 꼭 필요한 항목만 채우되, 설명이 필요한 질문에서는 3~4개 항목까지 충분히 사용해도 된다. 억지 반복은 금지하지만 지나친 압축도 금지한다.",
+    "각 항목은 원칙적으로 질문에 대한 해설이 되어야 하며, 짧은 구호나 단답형 문장만 남기지 마라.",
     escalationRule,
   ].join(" ");
 }
@@ -1043,7 +1044,7 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
           "이번 응답은 웹 검색과 최종 답변 작성을 한 번에 수행한다.",
           `웹 검색은 최대 ${maxToolCalls}회까지만 사용하라. 가능하면 1~2회의 고신호 검색으로 끝내고, 답에 필요한 공식 근거가 확보되면 즉시 검색을 중단하라.`,
           "같은 의미의 검색을 반복하지 말고, 이미 충분한 근거가 있으면 추가 검색 대신 바로 구조화된 답변을 완성하라.",
-          "검색을 했다면 검색 결과를 소화해서 질문에 직접 답하라. 출처 목록만 길게 늘어놓는 답변은 금지한다.",
+          "검색을 했다면 검색 결과를 소화해서 질문에 직접 답하라. 검색 결과 요약본이나 출처 목록만 늘어놓지 말고, 확인한 근거를 바탕으로 질문에 대한 해설을 재구성하라.",
           "허용된 도메인 안의 공식·공공 출처를 우선 사용하라.",
           "규제기관, 정부기관, 공공보건기관, 승인 라벨, DailyMed, PubMed 같은 공공 의학 출처를 일반 배경자료보다 우선하라.",
           "문서 날짜, 기관명, URL, 수치, 용량, claim은 실제로 확인된 경우만 써라.",
@@ -1076,16 +1077,18 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
     buildQuestionFocusPrompt(decision, query),
     "[출력 형태]",
     "답변은 구조화된 JSON이지만, 각 필드는 실제 간호 현장에서 바로 쓸 수 있게 채워라.",
-    "bottom_line에는 제목 없는 결론 문단 1~3문장을 넣어라. compare·drug 질문이면 반드시 '어떤 상황에서 무엇을 먼저 해야 하는가'의 실행 방향이 첫 문장에 나와야 한다. 나열형·메타형 요약으로 시작하지 마라. urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
-    "질문에 직접 답한 뒤 필요한 범위에서만 구조화하라. 답보다 출처 설명이 더 길어지지 않게 하라.",
-    "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 첫 항목을 핵심 요약 1문장으로 쓰고, 그 다음 항목들만 bullet 세부 내용으로 사용하라.",
-    "각 섹션의 세부 bullet은 기본 2개 이내로 제한하고, 위험도·보고 필요·예외 경계 때문에 꼭 필요할 때만 3번째 bullet을 허용하라.",
-    "각 bullet은 기본 1문장으로 쓰고, 임상적으로 중요한 내용이 빠질 때만 2문장까지 허용하라.",
+    "bottom_line에는 제목 없는 결론 문단 2~4문장을 넣어라. compare·drug 질문이면 반드시 '어떤 상황에서 무엇을 먼저 해야 하는가'의 실행 방향이 첫 문장에 나와야 하고, 뒤 문장에서는 왜 그런지와 먼저 확인할 변수를 설명하라. 나열형·메타형 요약으로 시작하지 마라. urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
+    "질문에 직접 답한 뒤 필요한 범위에서만 구조화하라. 답보다 출처 설명이 더 길어지지 않게 하되, 설명이 필요한 핵심은 요약하지 말고 실제 판단 이유와 예외까지 풀어라.",
+    "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 첫 항목을 섹션 리드 설명으로 사용하라. 이 첫 항목은 요약 한 줄이 아니라, 섹션 전체의 핵심 판단과 그 이유를 설명하는 밀도 있는 문단이어야 한다.",
+    "그 다음 항목들은 단답 bullet이 아니라 세부 해설 bullet로 사용하라. 각 항목은 왜 중요한지, 무엇을 먼저 봐야 하는지, 어떤 예외에서 판단이 달라지는지를 드러내는 설명이어야 한다.",
+    "각 섹션은 기본 2~4개 항목을 목표로 하고, 설명할 내용이 충분하면 5개까지 사용할 수 있다. 내용이 없을 때만 비워라.",
+    "같은 뜻의 짧은 줄을 여러 개 만들지 말고, 서로 다른 판단 축(예: 적응증, 투여 전 확인, 신기능, 혼합 금기, 보고 기준)으로 묶어라.",
     "key_points에는 핵심 판단 포인트만 넣어라. recommended_actions에는 간호사가 지금 할 수 있는 행동을 우선 넣어라.",
     "do_not_do에는 흔하지만 위험한 행동이나 잘못된 해석을 넣어라. when_to_escalate에는 즉시 보고/에스컬레이션 기준을 넣어라.",
     "patient_specific_caveats에는 실제로 판단을 바꿀 수 있는 예외만 넣어라.",
     "comparison_table은 진짜 비교 질문일 때만 사용하라.",
     "같은 경고나 근거를 여러 필드에 반복하지 말고 가장 적절한 위치에 한 번만 넣어라.",
+    "한 줄 주장 뒤에 출처만 붙는 식의 응답은 금지한다. 근거는 설명을 뒷받침해야지, 설명을 대체하면 안 된다.",
     "마크다운 강조, 표, 코드블록은 쓰지 마라.",
     "내부 설계 용어(route, pack, artifact, contract)는 절대 출력하지 마라.",
     buildAnswerPriorityPrompt(decision, query),
@@ -1115,11 +1118,13 @@ function buildAnswerUserPrompt(args: {
       ? "웹 검색 내용을 바탕으로 간호 실무에서 바로 쓸 수 있는 답변을 한 번에 완성하라."
       : "이번 모드에서는 웹 검색 없이 답하므로, 최신 문서나 실시간 근거를 확인한 것처럼 쓰지 말고 안전한 일반 원칙과 불확실성을 분명히 반영하라.",
     "질문에 직접 답하고, 간호사가 지금 해야 할 행동·관찰·보고 기준을 분명히 적어라.",
+    "이 답변의 목표는 요약이 아니라 설명이다. 검색하거나 알고 있는 내용을 질문 의도에 맞게 재구성해서, 왜 그런지, 어디에 쓰는지, 무엇을 먼저 확인해야 하는지, 예외는 무엇인지까지 풀어서 설명하라.",
     "출처만 길게 나열하는 답변은 금지한다.",
+    "짧은 한 줄 주장 여러 개로 쪼개지 말고, 같은 논리와 같은 근거로 연결되는 내용은 하나의 항목 안에서 충분히 설명하라.",
     "같은 문서(같은 URL)를 여러 citation ID로 나누지 마라. 동일 문서에서 여러 claim이 나왔더라도 하나의 entry로 통합하라.",
     "citations는 unique URL 기준 최대 3개로 제한하라.",
-    "시스템 출력 규칙상, 비어 있지 않은 각 섹션 배열의 첫 항목은 소제목 아래 첫 줄 요약이고, 그 다음 항목들만 bullet 세부 내용으로 사용된다.",
-    "따라서 각 섹션은 필요할 때만 채우고, 첫 항목은 요약 1문장, 이후 항목은 기본 2개 이내의 짧은 bullet로 구성하라.",
+    "시스템 출력 규칙상, 비어 있지 않은 각 섹션 배열의 첫 항목은 소제목 아래 가장 먼저 보이는 리드 문장이다. 이 첫 항목은 섹션의 직접 답변과 해설을 함께 담는 설명 문단이어야 한다.",
+    "그 다음 항목들은 세부 bullet로 보이므로, 각 항목은 단답형 문장이 아니라 실제로 도움이 되는 설명형 문장으로 작성하라.",
     "출처가 없는 세부사항은 만들어 넣지 말고 uncertainty 또는 needs_review로 처리하라.",
     "환자 악화 가능성, 즉시 보고 기준, 중단/재평가 기준이 있으면 when_to_escalate 또는 recommended_actions에 우선 반영하라.",
   ]

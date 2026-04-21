@@ -781,16 +781,43 @@ function renderCitationButtons(ids: string[], citationLookup: Map<string, MedSaf
   );
 }
 
+function collectUniqueCitationIds(items: Array<{ citation_ids: string[] }>) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  items.forEach((item) => {
+    item.citation_ids.forEach((id) => {
+      const normalized = String(id ?? "").trim();
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      out.push(normalized);
+    });
+  });
+  return out;
+}
+
+function takeNewCitationIds(ids: string[], seen: Set<string>) {
+  const out: string[] = [];
+  ids.forEach((id) => {
+    const normalized = String(id ?? "").trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  return out;
+}
+
 function StructuredAnswerItems({
   title,
   items,
   citationLookup,
   titleClass,
+  displayCitationIds,
 }: {
   title: string;
   items: Array<{ text: string; citation_ids: string[]; evidence_status: "supported" | "needs_review" }>;
   citationLookup: Map<string, MedSafetySource>;
   titleClass?: string;
+  displayCitationIds: string[];
 }) {
   if (!items.length) return null;
   return (
@@ -804,19 +831,16 @@ function StructuredAnswerItems({
             <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-ios-text/30" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-ios-text">{item.text}</div>
-              {item.citation_ids.length > 0 ? (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {item.citation_ids.map((id) => {
-                    const src = citationLookup.get(id);
-                    if (!src) return null;
-                    return <MedSafetySourceButton key={id} source={src} variant="inline" />;
-                  })}
+              {item.evidence_status === "needs_review" ? (
+                <div className="mt-1 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2 py-0.5 text-[10.5px] font-semibold text-[#9A5B1B]">
+                  근거 확인 필요
                 </div>
               ) : null}
             </div>
           </div>
         ))}
       </div>
+      {displayCitationIds.length ? renderCitationButtons(displayCitationIds, citationLookup) : null}
     </div>
   );
 }
@@ -824,9 +848,11 @@ function StructuredAnswerItems({
 function StructuredComparisonTable({
   answer,
   citationLookup,
+  displayCitationIds,
 }: {
   answer: MedSafetyStructuredAnswer;
   citationLookup: Map<string, MedSafetySource>;
+  displayCitationIds: string[];
 }) {
   if (!answer.comparison_table.length) return null;
   return (
@@ -842,18 +868,15 @@ function StructuredComparisonTable({
               {row.limitations ? <p><span className="font-semibold text-ios-text">한계:</span> {row.limitations}</p> : null}
               {row.bedside_points ? <p><span className="font-semibold text-ios-text">실무:</span> {row.bedside_points}</p> : null}
             </div>
-            {row.citation_ids.length > 0 ? (
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {row.citation_ids.map((id) => {
-                  const src = citationLookup.get(id);
-                  if (!src) return null;
-                  return <MedSafetySourceButton key={id} source={src} variant="inline" />;
-                })}
+            {row.evidence_status === "needs_review" ? (
+              <div className="mt-1.5 inline-flex items-center rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2 py-0.5 text-[10.5px] font-semibold text-[#9A5B1B]">
+                근거 확인 필요
               </div>
             ) : null}
           </div>
         ))}
       </div>
+      {displayCitationIds.length ? renderCitationButtons(displayCitationIds, citationLookup) : null}
     </div>
   );
 }
@@ -879,6 +902,25 @@ function StructuredAssistantAnswer({
   const badge = structuredTriageBadge(answer);
   const citationLookup = citationLookupFromAnswer(answer, sources);
   const allSources = mergeMedSafetySources([...answer.citations, ...sources], 12);
+  const displayedInlineCitationIds = new Set<string>(answer.bottom_line_citation_ids);
+  const keyPointCitationIds = takeNewCitationIds(collectUniqueCitationIds(answer.key_points), displayedInlineCitationIds);
+  const recommendedActionCitationIds = takeNewCitationIds(
+    collectUniqueCitationIds(answer.recommended_actions),
+    displayedInlineCitationIds
+  );
+  const doNotDoCitationIds = takeNewCitationIds(collectUniqueCitationIds(answer.do_not_do), displayedInlineCitationIds);
+  const whenToEscalateCitationIds = takeNewCitationIds(
+    collectUniqueCitationIds(answer.when_to_escalate),
+    displayedInlineCitationIds
+  );
+  const patientSpecificCitationIds = takeNewCitationIds(
+    collectUniqueCitationIds(answer.patient_specific_caveats),
+    displayedInlineCitationIds
+  );
+  const comparisonCitationIds = takeNewCitationIds(
+    collectUniqueCitationIds(answer.comparison_table),
+    displayedInlineCitationIds
+  );
 
   const hasAnySections =
     answer.key_points.length > 0 ||
@@ -939,11 +981,38 @@ function StructuredAssistantAnswer({
       {/* Answer sections */}
       {hasAnySections ? (
         <div className="space-y-5">
-          <StructuredAnswerItems title="핵심 포인트" items={answer.key_points} citationLookup={citationLookup} />
-          <StructuredAnswerItems title="지금 할 일" items={answer.recommended_actions} citationLookup={citationLookup} />
-          <StructuredAnswerItems title="하지 말아야 할 것" items={answer.do_not_do} citationLookup={citationLookup} titleClass="text-[#9A5B1B]" />
-          <StructuredAnswerItems title="즉시 보고 상황" items={answer.when_to_escalate} citationLookup={citationLookup} titleClass="text-[#A33636]" />
-          <StructuredAnswerItems title="환자별 주의사항" items={answer.patient_specific_caveats} citationLookup={citationLookup} />
+          <StructuredAnswerItems
+            title="핵심 포인트"
+            items={answer.key_points}
+            citationLookup={citationLookup}
+            displayCitationIds={keyPointCitationIds}
+          />
+          <StructuredAnswerItems
+            title="지금 할 일"
+            items={answer.recommended_actions}
+            citationLookup={citationLookup}
+            displayCitationIds={recommendedActionCitationIds}
+          />
+          <StructuredAnswerItems
+            title="하지 말아야 할 것"
+            items={answer.do_not_do}
+            citationLookup={citationLookup}
+            titleClass="text-[#9A5B1B]"
+            displayCitationIds={doNotDoCitationIds}
+          />
+          <StructuredAnswerItems
+            title="즉시 보고 상황"
+            items={answer.when_to_escalate}
+            citationLookup={citationLookup}
+            titleClass="text-[#A33636]"
+            displayCitationIds={whenToEscalateCitationIds}
+          />
+          <StructuredAnswerItems
+            title="환자별 주의사항"
+            items={answer.patient_specific_caveats}
+            citationLookup={citationLookup}
+            displayCitationIds={patientSpecificCitationIds}
+          />
         </div>
       ) : null}
 
@@ -951,7 +1020,7 @@ function StructuredAssistantAnswer({
       {answer.comparison_table.length > 0 ? (
         <div className={hasAnySections ? "mt-5" : "mt-4"}>
           {!hasAnySections ? <div className="mb-4 border-t border-[#EAECF0]" /> : null}
-          <StructuredComparisonTable answer={answer} citationLookup={citationLookup} />
+          <StructuredComparisonTable answer={answer} citationLookup={citationLookup} displayCitationIds={comparisonCitationIds} />
         </div>
       ) : null}
 
