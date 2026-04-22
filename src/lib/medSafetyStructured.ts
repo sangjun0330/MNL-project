@@ -237,7 +237,7 @@ function dedupeCitations(values: unknown, fallbackSources: MedSafetySource[]) {
     });
   });
 
-  return normalized.slice(0, 12);
+  return normalized.slice(0, 3);
 }
 
 function normalizeAnswerItem(value: unknown): MedSafetyAnswerItem | null {
@@ -261,7 +261,7 @@ function normalizeAnswerItem(value: unknown): MedSafetyAnswerItem | null {
   };
 }
 
-function normalizeAnswerItems(value: unknown, limit = 4) {
+function normalizeAnswerItems(value: unknown, limit = 5) {
   if (!Array.isArray(value)) return [] as MedSafetyAnswerItem[];
   const out: MedSafetyAnswerItem[] = [];
   for (const item of value) {
@@ -293,7 +293,7 @@ function normalizeComparisonRow(value: unknown): MedSafetyComparisonTableRow | n
   };
 }
 
-function normalizeComparisonTable(value: unknown, limit = 8) {
+function normalizeComparisonTable(value: unknown, limit = 5) {
   if (!Array.isArray(value)) return [] as MedSafetyComparisonTableRow[];
   const out: MedSafetyComparisonTableRow[] = [];
   for (const item of value) {
@@ -351,13 +351,7 @@ function normalizeFreshness(value: unknown, citations: Array<MedSafetySource & {
   return {
     retrieved_at: retrievedAt,
     newest_effective_date: newestEffectiveDate,
-    note:
-      normalizeText(node.note) ||
-      (citations.length
-        ? verificationStatus === "verified"
-          ? "공식 또는 공공 근거를 확인한 뒤 정리했습니다."
-          : "검색 시점 기준으로 확인했지만 문서 날짜는 일부 확인되지 않았습니다."
-        : "공식 근거를 충분히 확보하지 못했습니다."),
+    note: normalizeText(node.note) || (verificationStatus === "dated" ? "최신성 확인이 충분하지 않았습니다." : ""),
     verification_status: verificationStatus,
   };
 }
@@ -367,9 +361,7 @@ function normalizeUncertainty(value: unknown, hasMissingSupport: boolean): MedSa
   const reasons = uniqueStrings(node.reasons, 6);
   const needsVerification = node.needs_verification === true || hasMissingSupport;
   return {
-    summary:
-      normalizeText(node.summary) ||
-      (needsVerification ? "일부 내용은 공식 근거 연결이 약해 추가 확인이 필요합니다." : "핵심 내용은 확보한 근거 범위 안에서 정리했습니다."),
+    summary: normalizeText(node.summary) || (needsVerification ? "일부 내용은 추가 확인이 필요합니다." : ""),
     needs_verification: needsVerification,
     reasons: reasons.length ? reasons : needsVerification ? ["근거 연결이 약한 항목이 있습니다."] : [],
   };
@@ -431,16 +423,17 @@ export function normalizeMedSafetyStructuredAnswer(raw: unknown, fallbackSources
     row.evidence_status = normalizeEvidenceStatus(row.evidence_status, row.citation_ids);
   });
 
-  const missingSupport =
-    !answer.bottom_line_citation_ids.length ||
-    [
-      ...answer.key_points,
-      ...answer.recommended_actions,
-      ...answer.do_not_do,
-      ...answer.when_to_escalate,
-      ...answer.patient_specific_caveats,
-    ].some((item) => item.evidence_status !== "supported") ||
-    answer.comparison_table.some((row) => row.evidence_status !== "supported");
+  const claimItems = [
+    ...answer.key_points,
+    ...answer.recommended_actions,
+    ...answer.do_not_do,
+    ...answer.when_to_escalate,
+    ...answer.patient_specific_caveats,
+    ...answer.comparison_table,
+  ];
+  const hasSupportedClaim = answer.bottom_line_citation_ids.length > 0 || claimItems.some((item) => item.evidence_status === "supported");
+  const hasNeedsReviewClaim = claimItems.some((item) => item.evidence_status !== "supported");
+  const missingSupport = !hasSupportedClaim || hasNeedsReviewClaim;
 
   return {
     schema_version: MED_SAFETY_SCHEMA_VERSION,

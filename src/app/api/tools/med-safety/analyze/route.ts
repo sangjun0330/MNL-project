@@ -476,8 +476,6 @@ async function safeAppendMedSafetyRecent(params: {
 }
 
 function pickLocale(raw: unknown): "ko" | "en" {
-  const value = String(raw ?? "").trim().toLowerCase();
-  if (value === "en") return "en";
   return "ko";
 }
 

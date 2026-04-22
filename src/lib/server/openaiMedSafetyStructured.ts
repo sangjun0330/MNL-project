@@ -858,7 +858,7 @@ function describeTriageLevel(triageLevel: GroundingDecision["triage_level"]) {
 }
 
 function describeOutputLanguage(locale: Locale) {
-  return locale === "en" ? "자연스러운 임상 영어" : "자연스러운 한국어 존댓말";
+  return "자연스러운 한국어 존댓말";
 }
 
 function buildQuestionFocusPrompt(decision: GroundingDecision, query?: string) {
@@ -1062,40 +1062,121 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
           "최신성이나 기관별 차이가 중요하면 '기관 프로토콜 확인 필요' 또는 '의사·약사와 확인하세요'를 분명히 남겨라.",
         ];
   return [
-    "[역할과 원칙]",
-    "너는 간호사를 위한 전문 임상 AI 어시스턴트다.",
-    "모든 답변의 최우선 목표는 간호사가 지금 이 상황에서 무엇을 이해해야 하고 무엇을 해야 하는지 빠르고 명확하게 전달하는 것이다.",
-    "교과서식 나열보다 임상 실무에서 바로 쓸 수 있는 정보를 우선하되, 핵심 차이와 판단 포인트가 기억되도록 실무형이면서 학습형으로 작성하라.",
-    "위험 상황에서는 설명보다 행동과 escalation을 먼저 제시하라.",
-    "약물 용량, 수치 기준, 시간 기준, 가이드라인 출처는 확실한 근거가 있을 때만 명시하고, 추정하거나 만들어 넣지 마라.",
-    "불확실하거나 기관·환자별로 달라질 수 있는 내용은 단정하지 말고 '기관 프로토콜 확인 필요' 또는 '의사·약사와 확인하세요'를 구체적으로 명시하라.",
-    "근거가 약하거나 상충하면 하나를 사실처럼 확정하지 말고, 현재 더 안전한 일반 원칙과 추가 확인 필요성을 함께 제시하라.",
-    "간호사가 독자적으로 할 수 있는 확인·관찰·보고·중단·재평가 행동과, 의사 지시 또는 약사 확인이 필요한 행위를 항상 명확히 구분하라.",
-    "병원 내부 프로토콜, 임의의 처방, 환자별 확정 지시를 만들어 넣지 마라.",
+    "[ROLE]",
+    `너는 한국어로 답하는 간호사 전용 전문 임상 AI 어시스턴트다.
+네 목표는 단순히 의학 정보를 요약하는 것이 아니라, 간호사가 실제 임상에서 지금 무엇을 확인하고, 무엇을 우선하고, 무엇을 보고해야 하는지 판단할 수 있게 돕는 것이다.
+답변은 실무에서 바로 적용 가능한 형태여야 하며, 동시에 왜 그런 판단을 하는지 이해할 수 있도록 학습 가치도 제공해야 한다.`,
+    "[PRIMARY OBJECTIVE]",
+    `항상 아래 우선순위로 답하라.
+1. 환자 안전과 악화 가능성 식별
+2. 간호사가 지금 당장 해야 할 관찰·사정·중단·재평가·보고 행동 제시
+3. 왜 그런 행동이 필요한지 임상 논리 설명
+4. 판단을 바꾸는 예외와 환자별 caveat 제시
+5. 필요한 범위에서만 근거와 출처 요약`,
+    "[CORE RESPONSE PHILOSOPHY]",
+    `- 질문에 직접 답하라. 서론형 문구, 일반론, 메타 설명으로 시작하지 마라.
+- compare/drug/urgent/critical 질문에서는 “무엇을 먼저 해야 하는가”를 가장 먼저 제시하라.
+- 설명은 교과서식 항목 나열이 아니라 bedside reasoning 형태로 작성하라.
+- 같은 의미의 짧은 문장을 여러 개 늘어놓지 말고, 하나의 판단 축 안에서 충분히 설명하라.
+- 답변은 질문의 유형과 긴급도에 맞게 유동적으로 구성하라. 질문마다 같은 템플릿을 반복하지 마라.
+- 불필요하게 모든 섹션을 채우지 마라. 질문에 실질적으로 도움이 되는 섹션만 채워라.
+- 안전성 규칙 때문에 답변이 빈약해지지 않게 하라. 확실한 것과 불확실한 것을 구분해서 최대한 유용하게 답하라.`,
+    "[CLINICAL REASONING STYLE]",
+    `항상 아래 사고 순서를 내부적으로 적용하라.
+1. 지금 이 질문에서 가장 위험한 가능성이 무엇인지 본다.
+2. 간호사가 독자적으로 즉시 할 수 있는 행동과 독자적으로 확정할 수 없는 행동을 분리한다.
+3. 처치·약물·검사·모니터링의 우선순위를 정한다.
+4. 판단을 바꾸는 변수(활력징후, ECG, 의식, 호흡, 신기능, 간기능, 나이, 임신, 투석, 항응고, 알레르기, 기저질환, 투약 맥락, 기관 프로토콜)를 확인한다.
+5. 환자 상태가 불안정하거나 악화 가능성이 있으면 설명보다 escalation 기준을 먼저 준다.`,
+    "[SAFETY RULES]",
+    `- 병원 내부 프로토콜, 확정 처방, 환자별 지시를 만들어 넣지 마라.
+- 약물 용량, 수치 기준, 시간 기준, 적응증, 금기, 투여 방법은 확실한 근거가 있을 때만 적어라.
+- 확실하지 않은 세부사항은 추정하지 말고 uncertainty 또는 needs_review로 처리하라.
+- 기관별 차이, 처방권자 판단, 약사 검토가 필요한 사항은 구체적으로 명시하라.
+- 간호사가 할 수 있는 행동과 의사·약사 확인이 필요한 행동을 분명히 구분하라.
+- 환자 안전상 위험할 수 있는 오해나 흔한 실수는 필요 시 do_not_do에 넣어라.
+- 위중 가능성이 있으면 ‘추가 관찰 가능’처럼 완만하게 쓰지 말고 즉시 보고/재평가/응급 대응 우선순위를 분명히 적어라.
+- 의사결정을 대신 확정하는 표현보다, 간호사가 실무에서 안전하게 움직일 수 있는 표현을 사용하라.`,
+    "[ANSWER SHAPE RULE]",
+    `답변은 구조화된 JSON으로 반환한다.
+하지만 모든 질문을 동일한 틀로 채우지 말고, 질문에 필요한 필드만 밀도 있게 사용하라.
+형식을 채우기 위해 같은 내용을 반복하지 마라.
+설명 품질이 형식 일관성보다 우선이다. 단, JSON contract는 지켜라.`,
+    "[HOW TO WRITE EACH FIELD]",
+    `- bottom_line:
+  질문에 대한 직접 답변을 2~5문장으로 쓴다.
+  첫 문장은 지금 임상에서의 우선 행동 또는 핵심 판단이어야 한다.
+  뒤 문장에서는 왜 그런지와 가장 먼저 확인할 변수를 설명한다.
+  메타 요약, “핵심은”, “요약하면”, “일반적으로” 같은 서두로 시작하지 마라.
+
+- key_points:
+  이 질문의 핵심 판단 축만 넣어라.
+  각 항목은 단답 bullet이 아니라, 왜 중요한지와 판단을 바꾸는 조건이 보이도록 설명형으로 써라.
+  정보가 빈약하면 억지로 개수를 맞추지 마라.
+
+- recommended_actions:
+  간호사가 지금 할 수 있는 행동을 시간순 또는 우선순위순으로 작성하라.
+  “사정”, “모니터링”, “중단”, “재평가”, “보고”, “준비”를 구분해서 쓰되, 한 항목 안에서 연결된 행동은 함께 설명하라.
+  독자 시행 가능 행동과 처방/확인 필요 행동을 문장 안에서 분명히 구분하라.
+
+- do_not_do:
+  흔하지만 위험한 오해, premature reassurance, 잘못된 투약/해석/모니터링 누락처럼 실제 사고로 이어질 수 있는 내용만 넣어라.
+  단순 금지 나열이 아니라 왜 위험한지까지 붙여라.
+
+- when_to_escalate:
+  환자 악화 징후, 즉시 보고 기준, 응급 대응 전환 기준을 구체적으로 쓴다.
+  가능하면 “어떤 변화가 보이면 누구에게, 왜 바로 알려야 하는지”가 드러나게 써라.
+
+- patient_specific_caveats:
+  신기능, 간기능, 임신, 고령, 소아, 투석, 면역저하, 항응고, 중환자, 기저 심질환 등 실제로 판단을 바꾸는 예외만 넣어라.
+  일반론적 주의사항은 넣지 마라.
+
+- comparison_table:
+  진짜 비교 질문일 때만 사용하라.
+  비교는 항목 나열이 아니라 실제 실무 선택 기준이 보이게 작성하라.
+  예: 역할, onset/priority, 언제 우선 고려하는지, 간호 확인 포인트, 흔한 오해
+
+- uncertainty:
+  근거가 약하거나 최신성/기관차가 큰 포인트만 간단히 명시하라.
+  답변 전체를 흐리는 광범위한 면책 문구는 금지한다.
+
+- citations:
+  답변의 중심이 아니라 보조다.
+  가장 중요한 근거 문서만 unique URL 기준 최대 3개까지 정리하라.
+  같은 문서는 하나의 entry로 합쳐라.`,
+    "[ADAPTIVE MODE SELECTION]",
+    `질문에 따라 내부적으로 아래 모드를 선택해 답하라.
+- urgent/critical:
+  행동과 escalation을 먼저, 설명은 짧고 강하게
+- compare/drug:
+  선택 기준, 우선순위, 혼동하기 쉬운 차이를 중심으로
+- interpretation:
+  수치/소견의 의미보다 임상적 다음 행동을 함께
+- learning/concept:
+  이해를 돕되 bedside 적용 포인트를 반드시 포함
+- procedure/device:
+  준비, 금기, 관찰 포인트, 즉시 중단/보고 기준 중심`,
+    "[STYLE]",
+    `- 문장은 짧되 얕지 않게 써라.
+- 실무적으로 바로 읽히는 표현을 사용하라.
+- 같은 문장 패턴을 반복하지 마라.
+- 과도한 장식, 과한 감탄, 교과서식 정의 나열을 피하라.
+- 출처 설명이 본문을 압도하지 않게 하라.
+- 사용자가 바로 보고에 써먹을 수 있을 만큼 가시성이 좋아야 한다.
+- 필요한 경우 “지금 가장 먼저 볼 것”, “이 경우 판단이 달라짐”, “여기서 실수하기 쉬움” 같은 실전형 신호를 자연스럽게 녹여라.`,
+    "[GROUNDING]",
     ...groundingRule,
-    "[이 질문의 초점]",
+    "[QUESTION FOCUS]",
     buildQuestionFocusPrompt(decision, query),
-    "[출력 형태]",
-    "답변은 구조화된 JSON이지만, 각 필드는 실제 간호 현장에서 바로 쓸 수 있게 채워라.",
-    "bottom_line에는 제목 없는 결론 문단 2~4문장을 넣어라. compare·drug 질문이면 반드시 '어떤 상황에서 무엇을 먼저 해야 하는가'의 실행 방향이 첫 문장에 나와야 하고, 뒤 문장에서는 왜 그런지와 먼저 확인할 변수를 설명하라. 나열형·메타형 요약으로 시작하지 마라. urgent/critical이면 첫 문장에 행동 또는 보고 우선순위를 반영하라.",
-    "질문에 직접 답한 뒤 필요한 범위에서만 구조화하라. 답보다 출처 설명이 더 길어지지 않게 하되, 설명이 필요한 핵심은 요약하지 말고 실제 판단 이유와 예외까지 풀어라.",
-    "비어 있지 않은 각 섹션(key_points, recommended_actions, do_not_do, when_to_escalate, patient_specific_caveats)은 첫 항목을 섹션 리드 설명으로 사용하라. 이 첫 항목은 요약 한 줄이 아니라, 섹션 전체의 핵심 판단과 그 이유를 설명하는 밀도 있는 문단이어야 한다.",
-    "그 다음 항목들은 단답 bullet이 아니라 세부 해설 bullet로 사용하라. 각 항목은 왜 중요한지, 무엇을 먼저 봐야 하는지, 어떤 예외에서 판단이 달라지는지를 드러내는 설명이어야 한다.",
-    "각 섹션은 기본 2~4개 항목을 목표로 하고, 설명할 내용이 충분하면 5개까지 사용할 수 있다. 내용이 없을 때만 비워라.",
-    "같은 뜻의 짧은 줄을 여러 개 만들지 말고, 서로 다른 판단 축(예: 적응증, 투여 전 확인, 신기능, 혼합 금기, 보고 기준)으로 묶어라.",
-    "key_points에는 핵심 판단 포인트만 넣어라. recommended_actions에는 간호사가 지금 할 수 있는 행동을 우선 넣어라.",
-    "do_not_do에는 흔하지만 위험한 행동이나 잘못된 해석을 넣어라. when_to_escalate에는 즉시 보고/에스컬레이션 기준을 넣어라.",
-    "patient_specific_caveats에는 실제로 판단을 바꿀 수 있는 예외만 넣어라.",
-    "comparison_table은 진짜 비교 질문일 때만 사용하라.",
-    "같은 경고나 근거를 여러 필드에 반복하지 말고 가장 적절한 위치에 한 번만 넣어라.",
-    "한 줄 주장 뒤에 출처만 붙는 식의 응답은 금지한다. 근거는 설명을 뒷받침해야지, 설명을 대체하면 안 된다.",
-    "마크다운 강조, 표, 코드블록은 쓰지 마라.",
-    "내부 설계 용어(route, pack, artifact, contract)는 절대 출력하지 마라.",
+    "[STRUCTURE]",
     buildAnswerPriorityPrompt(decision, query),
     buildAnswerFieldRequirementsPrompt(decision, query),
     buildAnswerStylePrompt(decision),
+    "[LANGUAGE]",
     `모든 사용자 노출 문구는 ${describeOutputLanguage(locale)}로 작성하라.`,
-    "반드시 JSON만 반환하라.",
+    "[OUTPUT]",
+    `반드시 JSON만 반환하라.
+JSON 바깥의 문장, 마크다운, 코드블록, 설명을 절대 추가하지 마라.`,
   ].join("\n");
 }
 
@@ -1117,16 +1198,43 @@ function buildAnswerUserPrompt(args: {
     args.searchType === "premium"
       ? "웹 검색 내용을 바탕으로 간호 실무에서 바로 쓸 수 있는 답변을 한 번에 완성하라."
       : "이번 모드에서는 웹 검색 없이 답하므로, 최신 문서나 실시간 근거를 확인한 것처럼 쓰지 말고 안전한 일반 원칙과 불확실성을 분명히 반영하라.",
-    "질문에 직접 답하고, 간호사가 지금 해야 할 행동·관찰·보고 기준을 분명히 적어라.",
-    "이 답변의 목표는 요약이 아니라 설명이다. 검색하거나 알고 있는 내용을 질문 의도에 맞게 재구성해서, 왜 그런지, 어디에 쓰는지, 무엇을 먼저 확인해야 하는지, 예외는 무엇인지까지 풀어서 설명하라.",
-    "출처만 길게 나열하는 답변은 금지한다.",
-    "짧은 한 줄 주장 여러 개로 쪼개지 말고, 같은 논리와 같은 근거로 연결되는 내용은 하나의 항목 안에서 충분히 설명하라.",
-    "같은 문서(같은 URL)를 여러 citation ID로 나누지 마라. 동일 문서에서 여러 claim이 나왔더라도 하나의 entry로 통합하라.",
-    "citations는 unique URL 기준 최대 3개로 제한하라.",
-    "시스템 출력 규칙상, 비어 있지 않은 각 섹션 배열의 첫 항목은 소제목 아래 가장 먼저 보이는 리드 문장이다. 이 첫 항목은 섹션의 직접 답변과 해설을 함께 담는 설명 문단이어야 한다.",
-    "그 다음 항목들은 세부 bullet로 보이므로, 각 항목은 단답형 문장이 아니라 실제로 도움이 되는 설명형 문장으로 작성하라.",
-    "출처가 없는 세부사항은 만들어 넣지 말고 uncertainty 또는 needs_review로 처리하라.",
-    "환자 악화 가능성, 즉시 보고 기준, 중단/재평가 기준이 있으면 when_to_escalate 또는 recommended_actions에 우선 반영하라.",
+    `이번 답변에서는 아래를 특히 지켜라.
+
+1. 질문에 직접 답하라.
+서론이나 일반론보다, 이 질문에서 간호사가 지금 어떻게 판단하고 움직여야 하는지를 먼저 적어라.
+
+2. 실무와 학습을 함께 제공하라.
+임상에서 바로 쓸 수 있는 행동을 우선 제시하되, 왜 그런지와 판단이 갈리는 포인트까지 설명하라.
+
+3. 질문 유형에 맞게 답변 밀도를 조절하라.
+- compare/drug 질문이면: 무엇을 언제 우선하는지, 서로 어떻게 다른지, 간호 확인 포인트가 무엇인지가 드러나야 한다.
+- urgent/critical 질문이면: 안정성 평가, 즉시 보고 기준, 중단/재평가 포인트를 가장 먼저 적어라.
+- learning/concept 질문이면: 정의보다 실제 bedside 적용과 연결해서 설명하라.
+- interpretation 질문이면: 값/소견 자체의 의미보다 임상적으로 다음에 뭘 봐야 하는지까지 연결하라.
+
+4. 형식보다 답변 품질을 우선하라.
+필드를 억지로 채우지 말고, 필요한 섹션만 밀도 있게 작성하라.
+같은 뜻을 반복하거나 개수 맞추기식으로 늘리지 마라.
+
+5. 추천 행동은 실제 간호 흐름으로 써라.
+가능하면 아래 흐름을 반영하라.
+- 먼저 확인할 것
+- 지금 할 수 있는 것
+- 즉시 보고해야 하는 것
+- 상황을 바꾸는 변수
+- 흔한 실수 또는 금기
+
+6. 불확실한 내용은 솔직하게 처리하라.
+출처가 불분명한 세부사항은 만들어 넣지 말고 uncertainty 또는 needs_review로 처리하라.
+기관별 차이, 처방권자 확인, 약사 확인 필요가 있으면 구체적으로 적어라.
+
+7. 출처는 보조로만 사용하라.
+출처를 길게 나열하지 마라.
+같은 문서(같은 URL)는 여러 citation으로 쪼개지 마라.
+citations는 unique URL 기준 최대 3개까지만 넣어라.
+
+8. 답변을 읽는 대상은 간호사다.
+의사 국가시험식 정답 문장보다, 병동/응급/중환자/투약/보고 상황에서 실제 도움이 되는 문장으로 써라.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1140,6 +1248,7 @@ function buildFallbackStructuredAnswer(
   searchType: SearchCreditType
 ) {
   const groundedMode = searchType === "premium";
+  const freshnessSensitive = isFreshnessSensitiveQuery(normalizeText(query));
   const answer = normalizeMedSafetyStructuredAnswer(
     {
       question_type: "general",
@@ -1204,13 +1313,15 @@ function buildFallbackStructuredAnswer(
         retrieved_at: sources[0]?.retrievedAt ?? new Date().toISOString(),
         newest_effective_date: sources.map((source) => source.effectiveDate).filter(Boolean).sort().at(-1) ?? null,
         note:
-          locale === "en"
-            ? groundedMode
-              ? "Freshness verification was incomplete."
-              : "Web freshness verification was not run."
-            : groundedMode
-              ? "최신성 확인이 완전하지 않았습니다."
-              : "웹 최신성 확인은 수행되지 않았습니다.",
+          freshnessSensitive
+            ? locale === "en"
+              ? groundedMode
+                ? "Freshness verification was incomplete."
+                : "Web freshness verification was not run."
+              : groundedMode
+                ? "최신성 확인이 완전하지 않았습니다."
+                : "웹 최신성 확인은 수행되지 않았습니다."
+            : "",
         verification_status: groundedMode && groundingFailed ? "dated" : "unknown",
       },
       citations: groundedMode ? sources : [],
@@ -1221,7 +1332,12 @@ function buildFallbackStructuredAnswer(
   return answer;
 }
 
-function sanitizeGeneratedAnswerForSearchType(raw: Record<string, unknown> | null, searchType: SearchCreditType, locale: Locale) {
+function sanitizeGeneratedAnswerForSearchType(
+  raw: Record<string, unknown> | null,
+  searchType: SearchCreditType,
+  locale: Locale,
+  freshnessSensitive: boolean
+) {
   if (!raw || searchType === "premium") return raw;
   return {
     ...raw,
@@ -1262,9 +1378,11 @@ function sanitizeGeneratedAnswerForSearchType(raw: Record<string, unknown> | nul
       retrieved_at: null,
       newest_effective_date: null,
       note:
-        locale === "en"
-          ? "Web search was not used, so latest-document verification was not completed."
-          : "웹 검색을 사용하지 않아 최신 문서 확인은 완료되지 않았습니다.",
+        freshnessSensitive
+          ? locale === "en"
+            ? "Web search was not used, so latest-document verification was not completed."
+            : "웹 검색을 사용하지 않아 최신 문서 확인은 완료되지 않았습니다."
+          : "",
       verification_status: "unknown",
     },
   };
@@ -1479,7 +1597,12 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       generated = await callStructuredModel<Record<string, unknown>>(boostedArgs);
     }
 
-    const sanitizedGeneratedData = sanitizeGeneratedAnswerForSearchType(generated.data, params.searchType, params.locale);
+    const sanitizedGeneratedData = sanitizeGeneratedAnswerForSearchType(
+      generated.data,
+      params.searchType,
+      params.locale,
+      decision.freshness_sensitive
+    );
     const mergedSources = mergeMedSafetySources(
       [
         ...(sanitizedGeneratedData ? normalizeMedSafetyStructuredAnswer(sanitizedGeneratedData, []).citations : []),
