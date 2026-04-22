@@ -376,7 +376,7 @@ function resolveMedSafetyBaseMaxOutputTokens(searchType: SearchCreditType, decis
       ? decision.question_type === "compare" ||
         decision.question_type === "guideline" ||
         decision.triage_level !== "routine"
-        ? 7000
+        ? 9000
         : 5200
       : 3200;
   const raw = Number(
@@ -1840,7 +1840,7 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
         await sleep(retryDelayMs);
       }
       if (!timeoutController.signal.aborted) {
-        generated = await callStructuredModel<Record<string, unknown>>(callArgs);
+        generated = await callStructuredModel<string>(callArgs);
       }
     }
     if (allowStructuredRetry && needsMoreOutputTokensStructuredError(generated.error) && !timeoutController.signal.aborted) {
