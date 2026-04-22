@@ -48,7 +48,7 @@ type MedSafetyResponseData = {
   creditBucket: "included" | "extra" | null;
   result: {
     schema_version: string;
-    answer: MedSafetyStructuredAnswer;
+    answer: MedSafetyStructuredAnswer | null;
     sources: MedSafetySource[];
     quality: MedSafetyQualitySnapshot;
     verification: MedSafetyVerificationReport | null;
@@ -375,7 +375,7 @@ function normalizeRecentRecords(value: unknown, limit = MED_SAFETY_RECENT_LIMIT_
         result: isRecord(resultNode.result)
           ? {
               schema_version: String(resultNode.result.schema_version ?? "med_safety_answer_v2"),
-              answer: resultNode.result.answer as MedSafetyStructuredAnswer,
+              answer: isRecord(resultNode.result.answer) ? (resultNode.result.answer as MedSafetyStructuredAnswer) : null,
               sources: mergeMedSafetySources(Array.isArray(resultNode.result.sources) ? (resultNode.result.sources as MedSafetySource[]) : []),
               quality: (resultNode.result.quality ?? {}) as MedSafetyQualitySnapshot,
               verification: (resultNode.result.verification ?? null) as MedSafetyVerificationReport | null,
@@ -556,7 +556,7 @@ function buildResponseData(params: {
     creditBucket: params.creditBucket,
     result: {
       schema_version: params.analyzed.answer.schema_version,
-      answer: params.analyzed.answer,
+      answer: null,
       sources: params.analyzed.sources,
       quality: params.analyzed.quality,
       verification: params.analyzed.verification,

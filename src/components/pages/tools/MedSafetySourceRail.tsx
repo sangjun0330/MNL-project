@@ -38,13 +38,15 @@ export function MedSafetySourceRail(props: MedSafetySourceRailProps) {
   if (!sources.length) return null;
 
   return (
-    <div className={joinClassNames("space-y-2.5", className)}>
+    <div className={joinClassNames("space-y-3", className)}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center rounded-full border border-[#E6E8ED] bg-[#F7F7F8] px-3 py-1.5 text-[11px] font-semibold text-ios-sub">
           {t("근거 출처 {count}개", { count: sources.length })}
         </span>
+      </div>
+      <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1">
         {sources.map((source) => (
-          <MedSafetySourceButton key={source.url} source={source} variant="rail" />
+          <MedSafetySourceButton key={source.url} source={source} variant="card" />
         ))}
       </div>
     </div>
