@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import type { SubscriptionApi } from "@/lib/billing/client";
 import { getPlanDefinition, getSearchCreditMeta, type SearchCreditType } from "@/lib/billing/plans";
@@ -417,12 +417,181 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
   };
 }
 
+type StreamingStructuredPreview = {
+  questionType: MedSafetyStructuredAnswer["question_type"] | null;
+  triageLevel: MedSafetyStructuredAnswer["triage_level"] | null;
+  bottomLine: string;
+  keyPoints: string[];
+  recommendedActions: string[];
+  doNotDo: string[];
+  whenToEscalate: string[];
+  patientSpecificCaveats: string[];
+  uncertaintySummary: string;
+};
+
+const STREAMING_FIELD_ORDER = [
+  "question_type",
+  "triage_level",
+  "bottom_line",
+  "bottom_line_citation_ids",
+  "key_points",
+  "recommended_actions",
+  "do_not_do",
+  "when_to_escalate",
+  "patient_specific_caveats",
+  "uncertainty",
+  "freshness",
+  "citations",
+  "comparison_table",
+] as const;
+
+function readJsonStringValue(input: string, quoteIndex: number) {
+  if (input[quoteIndex] !== "\"") return null;
+  let i = quoteIndex + 1;
+  let value = "";
+  while (i < input.length) {
+    const ch = input[i];
+    if (ch === "\"") {
+      return {
+        value,
+        complete: true,
+        end: i + 1,
+      };
+    }
+    if (ch === "\\") {
+      const next = input[i + 1];
+      if (next == null) {
+        return {
+          value,
+          complete: false,
+          end: input.length,
+        };
+      }
+      if (next === "u") {
+        const code = input.slice(i + 2, i + 6);
+        if (code.length < 4 || /[^0-9a-f]/i.test(code)) {
+          return {
+            value,
+            complete: false,
+            end: input.length,
+          };
+        }
+        value += String.fromCharCode(Number.parseInt(code, 16));
+        i += 6;
+        continue;
+      }
+      const escapeMap: Record<string, string> = {
+        "\"": "\"",
+        "\\": "\\",
+        "/": "/",
+        b: "\b",
+        f: "\f",
+        n: "\n",
+        r: "\r",
+        t: "\t",
+      };
+      value += escapeMap[next] ?? next;
+      i += 2;
+      continue;
+    }
+    value += ch;
+    i += 1;
+  }
+  return {
+    value,
+    complete: false,
+    end: input.length,
+  };
+}
+
+function findJsonStringProperty(input: string, property: string, startIndex = 0) {
+  const token = JSON.stringify(property);
+  let searchIndex = startIndex;
+  while (searchIndex < input.length) {
+    const keyIndex = input.indexOf(token, searchIndex);
+    if (keyIndex < 0) return null;
+    let cursor = keyIndex + token.length;
+    while (cursor < input.length && /\s/.test(input[cursor] ?? "")) cursor += 1;
+    if (input[cursor] !== ":") {
+      searchIndex = keyIndex + token.length;
+      continue;
+    }
+    cursor += 1;
+    while (cursor < input.length && /\s/.test(input[cursor] ?? "")) cursor += 1;
+    if (input[cursor] !== "\"") {
+      searchIndex = cursor;
+      continue;
+    }
+    const parsed = readJsonStringValue(input, cursor);
+    if (!parsed) return null;
+    return {
+      ...parsed,
+      start: keyIndex,
+    };
+  }
+  return null;
+}
+
+function getStructuredFieldSlice(input: string, key: (typeof STREAMING_FIELD_ORDER)[number]) {
+  const start = input.indexOf(JSON.stringify(key));
+  if (start < 0) return "";
+  const currentIndex = STREAMING_FIELD_ORDER.indexOf(key);
+  const nextKey = STREAMING_FIELD_ORDER.slice(currentIndex + 1).find((candidate) => input.indexOf(JSON.stringify(candidate), start + 1) >= 0);
+  const end = nextKey ? input.indexOf(JSON.stringify(nextKey), start + 1) : input.length;
+  return input.slice(start, end > start ? end : input.length);
+}
+
+function extractStructuredArrayTextItems(input: string, key: "key_points" | "recommended_actions" | "do_not_do" | "when_to_escalate" | "patient_specific_caveats") {
+  const fieldSlice = getStructuredFieldSlice(input, key);
+  if (!fieldSlice) return [];
+  const values: string[] = [];
+  let cursor = 0;
+  while (cursor < fieldSlice.length) {
+    const parsed = findJsonStringProperty(fieldSlice, "text", cursor);
+    if (!parsed) break;
+    const trimmed = parsed.value.trim();
+    if (trimmed) values.push(trimmed);
+    cursor = parsed.end;
+  }
+  return values.slice(0, 5);
+}
+
+function parseStreamingStructuredPreview(raw: string): StreamingStructuredPreview {
+  const questionTypeNode = findJsonStringProperty(raw, "question_type");
+  const triageLevelNode = findJsonStringProperty(raw, "triage_level");
+  const bottomLineNode = findJsonStringProperty(raw, "bottom_line");
+  const uncertaintySlice = getStructuredFieldSlice(raw, "uncertainty");
+  const uncertaintySummaryNode = uncertaintySlice ? findJsonStringProperty(uncertaintySlice, "summary") : null;
+
+  const questionType = questionTypeNode?.value as MedSafetyStructuredAnswer["question_type"] | undefined;
+  const triageLevel = triageLevelNode?.value as MedSafetyStructuredAnswer["triage_level"] | undefined;
+
+  return {
+    questionType:
+      questionType && ["general", "drug", "lab", "compare", "guideline", "device", "procedure", "image"].includes(questionType)
+        ? questionType
+        : null,
+    triageLevel:
+      triageLevel && ["routine", "urgent", "critical"].includes(triageLevel)
+        ? triageLevel
+        : null,
+    bottomLine: bottomLineNode?.value.trim() ?? "",
+    keyPoints: extractStructuredArrayTextItems(raw, "key_points"),
+    recommendedActions: extractStructuredArrayTextItems(raw, "recommended_actions"),
+    doNotDo: extractStructuredArrayTextItems(raw, "do_not_do"),
+    whenToEscalate: extractStructuredArrayTextItems(raw, "when_to_escalate"),
+    patientSpecificCaveats: extractStructuredArrayTextItems(raw, "patient_specific_caveats"),
+    uncertaintySummary: uncertaintySummaryNode?.value.trim() ?? "",
+  };
+}
+
 async function parseAnalyzeStreamResponse(args: {
   response: Response;
   onStatus?: (stage: "routing" | "retrieving" | "generating" | "verifying") => void;
   onWarning?: (warning: string) => void;
+  onDelta?: (delta: string) => void;
 }): Promise<{ data: AnalyzePayload | null; error: string | null }> {
-  const { response, onStatus, onWarning } = args;
+  const { response, onStatus, onWarning, onDelta } = args;
   const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("text/event-stream")) {
     const payloadRaw = (await response.json().catch(() => null)) as unknown;
@@ -468,6 +637,11 @@ async function parseAnalyzeStreamResponse(args: {
     if (eventType === "warning") {
       const warning = typeof (payload as any)?.message === "string" ? (payload as any).message : "";
       if (warning) onWarning?.(warning);
+      return;
+    }
+    if (eventType === "delta") {
+      const delta = typeof (payload as any)?.delta === "string" ? (payload as any).delta : "";
+      if (delta) onDelta?.(delta);
       return;
     }
     if (eventType === "error") {
@@ -1046,6 +1220,129 @@ function StructuredAssistantAnswer({
   );
 }
 
+function streamingPreviewBadge(triageLevel: MedSafetyStructuredAnswer["triage_level"] | null) {
+  if (triageLevel === "critical") {
+    return {
+      label: "즉시 대응 초안",
+      className: "border-[#F2C9C9] bg-[#FFF1F1] text-[#A33636]",
+    };
+  }
+  if (triageLevel === "urgent") {
+    return {
+      label: "우선 확인 초안",
+      className: "border-[#F0DEC4] bg-[#FFF7EE] text-[#9A5B1B]",
+    };
+  }
+  return {
+    label: "생성 중",
+    className: "border-[#D8E0EC] bg-[#F1F5FA] text-[#48627E]",
+  };
+}
+
+function StreamingRevealText({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  if (!text.trim()) return null;
+  return (
+    <div className={cn("relative overflow-hidden", className)}>
+      <div className={cn("relative z-10 whitespace-pre-wrap break-words transition-opacity duration-300", className)}>{text}</div>
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-white via-white/82 to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 -right-10 w-24 bg-[linear-gradient(110deg,rgba(255,255,255,0)_0%,rgba(255,255,255,0.18)_28%,rgba(255,255,255,0.92)_50%,rgba(255,255,255,0.18)_72%,rgba(255,255,255,0)_100%)] animate-[pulse_1.8s_ease-in-out_infinite]" />
+    </div>
+  );
+}
+
+function StreamingPreviewSection({
+  title,
+  items,
+  titleClass,
+}: {
+  title: string;
+  items: string[];
+  titleClass?: string;
+}) {
+  if (!items.length) return null;
+  return (
+    <div>
+      <div className={cn("mb-2 text-[11.5px] font-bold uppercase tracking-[0.06em] text-ios-sub", titleClass)}>{title}</div>
+      <div className="space-y-2.5">
+        {items.map((item, index) => (
+          <div key={`${title}-${index}`} className="flex items-start gap-2.5">
+            <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-ios-text/30" aria-hidden="true" />
+            <StreamingRevealText text={item} className="min-w-0 flex-1 text-[15px] leading-7 text-ios-text" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StreamingAssistantPreview({
+  preview,
+  streamPhase,
+  query,
+}: {
+  preview: StreamingStructuredPreview;
+  streamPhase: "idle" | "routing" | "retrieving" | "generating" | "verifying";
+  query: string;
+}) {
+  const badge = streamingPreviewBadge(preview.triageLevel);
+  const hasText =
+    Boolean(preview.bottomLine) ||
+    preview.keyPoints.length > 0 ||
+    preview.recommendedActions.length > 0 ||
+    preview.doNotDo.length > 0 ||
+    preview.whenToEscalate.length > 0 ||
+    preview.patientSpecificCaveats.length > 0;
+
+  if (!hasText) {
+    return <ThinkingIndicator streamPhase={streamPhase} query={query} />;
+  }
+
+  return (
+    <div className="min-w-0 py-1">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badge.className}`}>
+          {badge.label}
+        </span>
+        <span className="inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
+          {streamPhase === "retrieving"
+            ? "공식 근거 확인 중"
+            : streamPhase === "verifying"
+              ? "최종 정리 중"
+              : "실시간 반영 중"}
+        </span>
+      </div>
+
+      <StreamingRevealText text={preview.bottomLine} className="text-[16.5px] font-semibold leading-[1.8] tracking-[-0.01em] text-ios-text" />
+
+      {preview.keyPoints.length ||
+      preview.recommendedActions.length ||
+      preview.doNotDo.length ||
+      preview.whenToEscalate.length ||
+      preview.patientSpecificCaveats.length ? <div className="my-5 border-t border-[#EAECF0]" /> : null}
+
+      <div className="space-y-5">
+        <StreamingPreviewSection title="핵심 포인트" items={preview.keyPoints} />
+        <StreamingPreviewSection title="지금 할 일" items={preview.recommendedActions} />
+        <StreamingPreviewSection title="하지 말아야 할 것" items={preview.doNotDo} titleClass="text-[#9A5B1B]" />
+        <StreamingPreviewSection title="즉시 보고 상황" items={preview.whenToEscalate} titleClass="text-[#A33636]" />
+        <StreamingPreviewSection title="환자별 주의사항" items={preview.patientSpecificCaveats} />
+      </div>
+
+      {preview.uncertaintySummary ? (
+        <div className="mt-4">
+          <StreamingRevealText text={preview.uncertaintySummary} className="text-[12.5px] leading-[1.7] text-ios-sub/75" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SectionBodyLines({
   section,
   sources,
@@ -1307,6 +1604,7 @@ export function ToolMedSafetyPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamPhase, setStreamPhase] = useState<"idle" | "routing" | "retrieving" | "generating" | "verifying">("idle");
+  const [streamingAnswerRaw, setStreamingAnswerRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
@@ -1323,6 +1621,8 @@ export function ToolMedSafetyPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const searchTypeMenuRef = useRef<HTMLDivElement | null>(null);
+  const streamingAnswerBufferRef = useRef("");
+  const streamingAnswerFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const subscriptionMedSafetyQuota = subscription?.medSafetyQuota ?? null;
   useEffect(() => {
@@ -1351,6 +1651,15 @@ export function ToolMedSafetyPage() {
   const hasConversation = messages.length > 0;
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user") ?? null;
+  const deferredStreamingAnswerRaw = useDeferredValue(streamingAnswerRaw);
+  const streamingPreview = useMemo(() => parseStreamingStructuredPreview(deferredStreamingAnswerRaw), [deferredStreamingAnswerRaw]);
+  const hasStreamingPreview =
+    Boolean(streamingPreview.bottomLine) ||
+    streamingPreview.keyPoints.length > 0 ||
+    streamingPreview.recommendedActions.length > 0 ||
+    streamingPreview.doNotDo.length > 0 ||
+    streamingPreview.whenToEscalate.length > 0 ||
+    streamingPreview.patientSpecificCaveats.length > 0;
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
@@ -1381,6 +1690,15 @@ export function ToolMedSafetyPage() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (streamingAnswerFlushTimerRef.current) {
+        clearTimeout(streamingAnswerFlushTimerRef.current);
+        streamingAnswerFlushTimerRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1448,8 +1766,9 @@ export function ToolMedSafetyPage() {
   // Auto-scroll to the newest message unless the user has deliberately scrolled away.
   useEffect(() => {
     if (!threadEndRef.current) return;
+    if (userHasScrolledUpRef.current) return;
     threadEndRef.current.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages, error]);
+  }, [messages, error, deferredStreamingAnswerRaw]);
 
   useEffect(() => {
     const textarea = composerInputRef.current;
@@ -1553,6 +1872,34 @@ export function ToolMedSafetyPage() {
     setOptimisticQuota((prev) => consumeOptimisticQuota(prev, searchType));
   }
 
+  function flushStreamingAnswerBuffer() {
+    if (streamingAnswerFlushTimerRef.current) {
+      clearTimeout(streamingAnswerFlushTimerRef.current);
+      streamingAnswerFlushTimerRef.current = null;
+    }
+    const nextValue = streamingAnswerBufferRef.current;
+    startTransition(() => {
+      setStreamingAnswerRaw(nextValue);
+    });
+  }
+
+  function scheduleStreamingAnswerFlush() {
+    if (streamingAnswerFlushTimerRef.current) return;
+    streamingAnswerFlushTimerRef.current = setTimeout(() => {
+      streamingAnswerFlushTimerRef.current = null;
+      flushStreamingAnswerBuffer();
+    }, 72);
+  }
+
+  function resetStreamingPreview() {
+    if (streamingAnswerFlushTimerRef.current) {
+      clearTimeout(streamingAnswerFlushTimerRef.current);
+      streamingAnswerFlushTimerRef.current = null;
+    }
+    streamingAnswerBufferRef.current = "";
+    setStreamingAnswerRaw("");
+  }
+
   async function copyLatestAnswer() {
     if (!latestCopyText) return;
     try {
@@ -1604,6 +1951,7 @@ export function ToolMedSafetyPage() {
     userHasScrolledUpRef.current = false;
     setIsLoading(true);
     setStreamPhase("routing");
+    resetStreamingPreview();
     setError(null);
     setShowSessionDecisionPrompt(false);
     setLastSubmittedQuery(question);
@@ -1636,6 +1984,15 @@ export function ToolMedSafetyPage() {
               onStatus: (stage) => {
                 setStreamPhase(stage);
               },
+              onDelta: (delta) => {
+                if (!delta) return;
+                streamingAnswerBufferRef.current += delta;
+                if (streamingAnswerBufferRef.current.length >= 420) {
+                  flushStreamingAnswerBuffer();
+                  return;
+                }
+                scheduleStreamingAnswerFlush();
+              },
               onWarning: () => {
                 // The structured answer card already shows grounding/fallback warnings inline.
                 // Avoid promoting transient upstream warnings to a global hard-error banner.
@@ -1655,10 +2012,10 @@ export function ToolMedSafetyPage() {
             }
             finalError = parsedPayload.ok ? "invalid_response_payload" : parsedPayload.error;
           }
-          if (!shouldRetryAnalyzeError(response.status, finalError) || attempt >= maxClientRetries) break;
+          if (streamingAnswerBufferRef.current.trim() || !shouldRetryAnalyzeError(response.status, finalError) || attempt >= maxClientRetries) break;
         } catch (cause: any) {
           finalError = String(cause?.message ?? "network_error");
-          if (attempt >= maxClientRetries) break;
+          if (streamingAnswerBufferRef.current.trim() || attempt >= maxClientRetries) break;
         }
 
         setStreamPhase("routing");
@@ -1667,6 +2024,7 @@ export function ToolMedSafetyPage() {
 
       if (!response?.ok || !normalizedData) {
         setStreamPhase("idle");
+        resetStreamingPreview();
         if (String(finalError).toLowerCase().includes("insufficient_med_safety_credits")) {
           setError(
             alternateQuotaRemaining > 0
@@ -1679,6 +2037,7 @@ export function ToolMedSafetyPage() {
         return;
       }
 
+      flushStreamingAnswerBuffer();
       setStreamPhase("idle");
       const assistantMessage: Message = {
         id: `assistant-${normalizedData.analyzedAt.toString(36)}`,
@@ -1696,6 +2055,7 @@ export function ToolMedSafetyPage() {
         verification: normalizedData.verification,
       };
       setMessages((prev) => [...prev, assistantMessage]);
+      resetStreamingPreview();
       setShowSessionDecisionPrompt(true);
 
       if (normalizedData.source !== "openai_fallback") {
@@ -1704,6 +2064,7 @@ export function ToolMedSafetyPage() {
       setError(null);
     } catch (cause: any) {
       setStreamPhase("idle");
+      resetStreamingPreview();
       setError(parseErrorMessage(String(cause?.message ?? "med_safety_analyze_failed"), t));
     } finally {
       setIsLoading(false); setStreamPhase("idle");
@@ -2082,7 +2443,11 @@ export function ToolMedSafetyPage() {
                             <span className="absolute inset-0 animate-ping rounded-full border-2 border-[color:var(--rnest-accent)] opacity-30" />
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
                           </div>
-                          <ThinkingIndicator streamPhase={streamPhase} query={lastSubmittedQuery} />
+                          {hasStreamingPreview ? (
+                            <StreamingAssistantPreview preview={streamingPreview} streamPhase={streamPhase} query={lastSubmittedQuery} />
+                          ) : (
+                            <ThinkingIndicator streamPhase={streamPhase} query={lastSubmittedQuery} />
+                          )}
                         </div>
                       </div>
                     </div>

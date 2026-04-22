@@ -27,6 +27,7 @@ type AnalyzeParams = {
   imageDataUrl?: string;
   continuationMemory?: string;
   onStage?: (stage: AnalyzeStage, payload?: Record<string, unknown>) => void | Promise<void>;
+  onPreviewDelta?: (delta: string) => void | Promise<void>;
   signal: AbortSignal;
 };
 
@@ -52,6 +53,25 @@ type StructuredCallResult<T> = {
   usage: ResponsesUsage | null;
   sources: MedSafetySource[];
   error: string | null;
+};
+
+type StructuredModelCallArgs = {
+  apiKey: string;
+  model: string;
+  apiBaseUrl: string;
+  developerPrompt: string;
+  userPrompt: string;
+  schemaName: string;
+  schema: Record<string, unknown>;
+  signal: AbortSignal;
+  maxOutputTokens: number;
+  storeResponses: boolean;
+  webSearchProfile?: MedSafetyWebSearchProfile;
+  reasoningEffort?: "low" | "medium";
+  imageDataUrl?: string;
+  onTextDelta?: (delta: string) => void | Promise<void>;
+  onSearchStart?: () => void | Promise<void>;
+  onTextStart?: () => void | Promise<void>;
 };
 
 export type OpenAIMedSafetyStructuredOutput = {
@@ -347,7 +367,7 @@ function resolveMaxToolCalls() {
       3
   );
   if (!Number.isFinite(raw)) return 3;
-  return Math.max(1, Math.min(12, Math.round(raw)));
+  return Math.max(1, Math.min(3, Math.round(raw)));
 }
 
 function resolveMedSafetyBaseMaxOutputTokens(searchType: SearchCreditType, decision: GroundingDecision) {
@@ -539,6 +559,224 @@ function extractUsageNode(value: unknown): ResponsesUsage | null {
     cachedInputTokens,
     reasoningTokens,
   };
+}
+
+function parseResponsesSseBlock(block: string): { event: string; data: string } | null {
+  if (!block.trim()) return null;
+  let eventName = "";
+  const dataLines: string[] = [];
+  for (const rawLine of block.split(/\r?\n/g)) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(":")) continue;
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  if (!dataLines.length) return null;
+  return {
+    event: eventName,
+    data: dataLines.join("\n"),
+  };
+}
+
+function buildStructuredModelRequestBody(args: StructuredModelCallArgs) {
+  const input = [
+    {
+      role: "developer",
+      content: [{ type: "input_text", text: args.developerPrompt }],
+    },
+    {
+      role: "user",
+      content: [
+        { type: "input_text", text: args.userPrompt },
+        ...(args.imageDataUrl ? [{ type: "input_image", image_url: args.imageDataUrl }] : []),
+      ],
+    },
+  ];
+
+  const body: Record<string, unknown> = {
+    model: args.model,
+    input,
+    text: {
+      format: {
+        type: "json_schema",
+        name: args.schemaName,
+        schema: args.schema,
+        strict: true,
+      },
+    },
+    max_output_tokens: args.maxOutputTokens,
+    store: args.storeResponses,
+  };
+
+  if (args.reasoningEffort) {
+    body.reasoning = { effort: args.reasoningEffort };
+  }
+
+  if (args.webSearchProfile) {
+    body.tools = [
+      {
+        type: args.webSearchProfile.toolType,
+        search_context_size: args.webSearchProfile.searchContextSize,
+      },
+    ];
+    body.tool_choice = args.webSearchProfile.toolChoice;
+    body.max_tool_calls = resolveMaxToolCalls();
+    if (args.webSearchProfile.includeSourceList) {
+      body.include = ["web_search_call.action.sources"];
+    }
+  }
+
+  return body;
+}
+
+async function readStructuredModelStream<T>(args: {
+  response: Response;
+  onTextDelta?: (delta: string) => void | Promise<void>;
+  onSearchStart?: () => void | Promise<void>;
+  onTextStart?: () => void | Promise<void>;
+}): Promise<StructuredCallResult<T>> {
+  if (!args.response.body) {
+    return {
+      data: null,
+      rawText: "",
+      responseId: null,
+      usage: null,
+      sources: [],
+      error: "openai_stream_parse_failed",
+    };
+  }
+
+  const reader = args.response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let rawText = "";
+  let completedResponse: any = null;
+  let streamError: string | null = null;
+  let retrievalStarted = false;
+  let textStarted = false;
+
+  const handleBlock = async (block: string) => {
+    const parsed = parseResponsesSseBlock(block);
+    if (!parsed) return;
+    const payloadText = parsed.data.trim();
+    if (!payloadText || payloadText === "[DONE]") return;
+
+    let payload: any = null;
+    try {
+      payload = JSON.parse(payloadText);
+    } catch {
+      return;
+    }
+
+    const type = parsed.event || String(payload?.type ?? "");
+    if (!type) return;
+
+    if (type.includes("web_search_call") && !retrievalStarted) {
+      retrievalStarted = true;
+      await args.onSearchStart?.();
+    }
+
+    if (type === "response.output_text.delta") {
+      const delta = typeof payload?.delta === "string" ? payload.delta : "";
+      if (!delta) return;
+      if (!textStarted) {
+        textStarted = true;
+        await args.onTextStart?.();
+      }
+      rawText += delta;
+      await args.onTextDelta?.(delta);
+      return;
+    }
+
+    if (type === "response.completed") {
+      completedResponse = payload?.response ?? payload;
+      return;
+    }
+
+    if (type === "response.failed" || type === "response.incomplete") {
+      completedResponse = payload?.response ?? payload;
+      streamError = buildIncompleteError(completedResponse);
+      return;
+    }
+
+    if (type === "error") {
+      const message = normalizeText(payload?.error?.message ?? payload?.message ?? payload?.error);
+      streamError = message || "openai_stream_parse_failed";
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    while (true) {
+      const blockEnd = buffer.indexOf("\n\n");
+      if (blockEnd < 0) break;
+      const block = buffer.slice(0, blockEnd);
+      buffer = buffer.slice(blockEnd + 2);
+      await handleBlock(block);
+    }
+  }
+
+  buffer += decoder.decode().replace(/\r\n/g, "\n");
+  while (true) {
+    const blockEnd = buffer.indexOf("\n\n");
+    if (blockEnd < 0) break;
+    const block = buffer.slice(0, blockEnd);
+    buffer = buffer.slice(blockEnd + 2);
+    await handleBlock(block);
+  }
+  if (buffer.trim()) {
+    await handleBlock(buffer);
+  }
+
+  const finalPayload = completedResponse;
+  const finalRawText = extractResponsesText(finalPayload) || rawText.trim();
+  const responseId = typeof finalPayload?.id === "string" ? finalPayload.id : null;
+  const usage = extractUsageNode(finalPayload?.usage);
+  const sources = extractMedSafetySourcesFromResponsesPayload(finalPayload);
+
+  if (finalPayload && typeof finalPayload?.status === "string" && finalPayload.status !== "completed" && !streamError) {
+    streamError = buildIncompleteError(finalPayload);
+  }
+
+  if (!finalRawText) {
+    return {
+      data: null,
+      rawText: "",
+      responseId,
+      usage,
+      sources,
+      error: streamError || buildIncompleteError(finalPayload) || "openai_empty_text",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(finalRawText) as T;
+    return {
+      data: parsed,
+      rawText: finalRawText,
+      responseId,
+      usage,
+      sources,
+      error: streamError,
+    };
+  } catch {
+    const incompleteReason = finalPayload ? readIncompleteReason(finalPayload) : "";
+    return {
+      data: null,
+      rawText: finalRawText,
+      responseId,
+      usage,
+      sources,
+      error: incompleteReason ? `structured_json_parse_failed:${incompleteReason}` : "structured_json_parse_failed",
+    };
+  }
 }
 
 function sumUsage(...values: Array<ResponsesUsage | null | undefined>): ResponsesUsage | null {
@@ -1388,21 +1626,7 @@ function sanitizeGeneratedAnswerForSearchType(
   };
 }
 
-async function callStructuredModel<T>(args: {
-  apiKey: string;
-  model: string;
-  apiBaseUrl: string;
-  developerPrompt: string;
-  userPrompt: string;
-  schemaName: string;
-  schema: Record<string, unknown>;
-  signal: AbortSignal;
-  maxOutputTokens: number;
-  storeResponses: boolean;
-  webSearchProfile?: MedSafetyWebSearchProfile;
-  reasoningEffort?: "low" | "medium";
-  imageDataUrl?: string;
-}): Promise<StructuredCallResult<T>> {
+async function callStructuredModel<T>(args: StructuredModelCallArgs): Promise<StructuredCallResult<T>> {
   const requestConfig = resolveOpenAIResponsesRequestConfig({
     apiBaseUrl: args.apiBaseUrl,
     apiKey: args.apiKey,
@@ -1419,52 +1643,13 @@ async function callStructuredModel<T>(args: {
       error: requestConfig.missingCredential,
     };
   }
-
-  const input = [
-    {
-      role: "developer",
-      content: [{ type: "input_text", text: args.developerPrompt }],
-    },
-    {
-      role: "user",
-      content: [
-        { type: "input_text", text: args.userPrompt },
-        ...(args.imageDataUrl ? [{ type: "input_image", image_url: args.imageDataUrl }] : []),
-      ],
-    },
-  ];
-
-  const body: Record<string, unknown> = {
+  const body = buildStructuredModelRequestBody({
+    ...args,
     model: requestConfig.model,
-    input,
-    text: {
-      format: {
-        type: "json_schema",
-        name: args.schemaName,
-        schema: args.schema,
-        strict: true,
-      },
-    },
-    max_output_tokens: args.maxOutputTokens,
-    store: args.storeResponses,
-  };
-
-  if (args.reasoningEffort) {
-    body.reasoning = { effort: args.reasoningEffort };
-  }
-
-  if (args.webSearchProfile) {
-    body.tools = [
-      {
-        type: args.webSearchProfile.toolType,
-        search_context_size: args.webSearchProfile.searchContextSize,
-      },
-    ];
-    body.tool_choice = args.webSearchProfile.toolChoice;
-    body.max_tool_calls = resolveMaxToolCalls();
-    if (args.webSearchProfile.includeSourceList) {
-      body.include = ["web_search_call.action.sources"];
-    }
+  });
+  const shouldStream = Boolean(args.onTextDelta);
+  if (shouldStream) {
+    body.stream = true;
   }
 
   let response: Response;
@@ -1484,6 +1669,26 @@ async function callStructuredModel<T>(args: {
       sources: [],
       error: `openai_network_${normalizeText(error) || "fetch_failed"}`,
     };
+  }
+
+  if (shouldStream) {
+    if (!response.ok) {
+      const json = await response.json().catch(() => null);
+      return {
+        data: null,
+        rawText: extractResponsesText(json),
+        responseId: typeof json?.id === "string" ? json.id : null,
+        usage: extractUsageNode(json?.usage),
+        sources: extractMedSafetySourcesFromResponsesPayload(json),
+        error: `openai_responses_${response.status}`,
+      };
+    }
+    return await readStructuredModelStream<T>({
+      response,
+      onTextDelta: args.onTextDelta,
+      onSearchStart: args.onSearchStart,
+      onTextStart: args.onTextStart,
+    });
   }
 
   const json = await response.json().catch(() => null);
@@ -1576,11 +1781,22 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       reasoningEffort,
       webSearchProfile,
       imageDataUrl: params.imageDataUrl,
+      onTextDelta: params.onPreviewDelta,
+      onSearchStart:
+        params.searchType === "premium"
+          ? async () => {
+              await params.onStage?.("retrieving");
+            }
+          : undefined,
+      onTextStart: async () => {
+        await params.onStage?.("generating");
+      },
     };
 
     await params.onStage?.("generating");
+    const allowStructuredRetry = !params.onPreviewDelta;
     let generated = await callStructuredModel<Record<string, unknown>>(callArgs);
-    if (isRetryableStructuredError(generated.error) && !timeoutController.signal.aborted) {
+    if (allowStructuredRetry && isRetryableStructuredError(generated.error) && !timeoutController.signal.aborted) {
       const retryDelayMs = 700;
       if (Date.now() - startedAt + retryDelayMs < timeoutMs) {
         await sleep(retryDelayMs);
@@ -1589,7 +1805,7 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
         generated = await callStructuredModel<Record<string, unknown>>(callArgs);
       }
     }
-    if (needsMoreOutputTokensStructuredError(generated.error) && !timeoutController.signal.aborted) {
+    if (allowStructuredRetry && needsMoreOutputTokensStructuredError(generated.error) && !timeoutController.signal.aborted) {
       const boostedArgs = {
         ...callArgs,
         maxOutputTokens: Math.min(baseMaxOutputTokens + 2500, 10000),
@@ -1603,6 +1819,7 @@ export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams
       params.locale,
       decision.freshness_sensitive
     );
+    await params.onStage?.("verifying");
     const mergedSources = mergeMedSafetySources(
       [
         ...(sanitizedGeneratedData ? normalizeMedSafetyStructuredAnswer(sanitizedGeneratedData, []).citations : []),

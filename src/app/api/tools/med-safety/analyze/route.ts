@@ -643,6 +643,7 @@ export async function POST(req: NextRequest) {
     const timeout = setTimeout(() => abort.abort(), timeoutMs);
     const runAnalyze = async (
       onStage?: (stage: "routing" | "retrieving" | "generating" | "verifying", payload?: Record<string, unknown>) => void | Promise<void>,
+      onPreviewDelta?: (delta: string) => void | Promise<void>,
     ) => {
       const analyzedAt = Date.now();
       const today = todayISO();
@@ -653,6 +654,7 @@ export async function POST(req: NextRequest) {
         imageDataUrl: imageDataUrl || undefined,
         continuationMemory,
         onStage,
+        onPreviewDelta,
         signal: abort.signal,
       });
 
@@ -739,6 +741,24 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        let currentStage: "routing" | "retrieving" | "generating" | "verifying" = "routing";
+        let pendingPreviewDelta = "";
+        let previewFlushTimer: ReturnType<typeof setTimeout> | null = null;
+        const heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(
+              encoder.encode(
+                sseLine("ping", {
+                  stage: currentStage,
+                  at: Date.now(),
+                })
+              )
+            );
+          } catch {
+            // ignore heartbeat enqueue failure after close/cancel
+          }
+        }, 10_000);
+
         const pushEvent = (event: string, payload: unknown) => {
           try {
             controller.enqueue(encoder.encode(sseLine(event, payload)));
@@ -746,17 +766,50 @@ export async function POST(req: NextRequest) {
             // ignore enqueue failure after close/cancel
           }
         };
+        const flushPreviewDelta = () => {
+          if (!pendingPreviewDelta) return;
+          pushEvent("delta", {
+            delta: pendingPreviewDelta,
+          });
+          pendingPreviewDelta = "";
+        };
+        const schedulePreviewFlush = () => {
+          if (previewFlushTimer) return;
+          previewFlushTimer = setTimeout(() => {
+            previewFlushTimer = null;
+            flushPreviewDelta();
+          }, 64);
+        };
 
         pushEvent("status", { stage: "routing" });
         try {
           const { responseData, shouldCommitCredit } = await runAnalyze(
             async (stage, payload) => {
+              currentStage = stage;
               pushEvent("status", {
                 stage,
                 ...(payload ?? {}),
               });
+            },
+            async (delta) => {
+              if (!delta) return;
+              pendingPreviewDelta += delta;
+              if (pendingPreviewDelta.length >= 320) {
+                if (previewFlushTimer) {
+                  clearTimeout(previewFlushTimer);
+                  previewFlushTimer = null;
+                }
+                flushPreviewDelta();
+                return;
+              }
+              schedulePreviewFlush();
             }
           );
+          if (previewFlushTimer) {
+            clearTimeout(previewFlushTimer);
+            previewFlushTimer = null;
+          }
+          flushPreviewDelta();
           if (!shouldCommitCredit) {
             await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
           }
@@ -771,12 +824,32 @@ export async function POST(req: NextRequest) {
             result: responseData,
           });
         } catch (error: any) {
+          if (previewFlushTimer) {
+            clearTimeout(previewFlushTimer);
+            previewFlushTimer = null;
+          }
+          flushPreviewDelta();
+          try {
+            console.error("[MedSafetyAnalyze] stream_failed", {
+              userId: userId.slice(0, 8),
+              stage: currentStage,
+              searchType,
+              message: String(error?.message ?? error ?? "med_safety_analyze_failed"),
+            });
+          } catch {
+            // ignore logging failure
+          }
           await safeRestoreConsumedMedSafetyCredit(userId, searchType, consumedBucket);
           pushEvent("error", {
             ok: false,
             error: safeErrorString(error?.message ?? error ?? "med_safety_analyze_failed"),
           });
         } finally {
+          clearInterval(heartbeat);
+          if (previewFlushTimer) {
+            clearTimeout(previewFlushTimer);
+            previewFlushTimer = null;
+          }
           clearTimeout(timeout);
           try {
             controller.close();
@@ -795,9 +868,17 @@ export async function POST(req: NextRequest) {
       headers: buildPrivateNoStoreHeaders({
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "private, no-store, no-cache, no-transform, max-age=0",
+        "X-Accel-Buffering": "no",
       }),
     });
-  } catch {
+  } catch (error) {
+    try {
+      console.error("[MedSafetyAnalyze] route_failed", {
+        message: String((error as Error)?.message ?? error ?? "med_safety_analyze_failed"),
+      });
+    } catch {
+      // ignore logging failure
+    }
     return bad(500, "med_safety_analyze_failed");
   }
 }
