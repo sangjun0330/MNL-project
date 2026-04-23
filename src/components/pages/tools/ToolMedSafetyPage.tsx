@@ -739,8 +739,13 @@ function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
   });
 }
 
-function sectionCardClass(_tone: AnswerSectionTone) {
-  return "py-2.5 sm:py-3";
+function sectionCardClass(tone: AnswerSectionTone) {
+  const base = "rounded-[22px] border bg-white/94 px-4 py-5 shadow-[0_12px_32px_rgba(15,23,42,0.045)] sm:px-5 sm:py-6";
+  if (tone === "warning") return `${base} border-[#F1D7B8] border-l-4 border-l-[#D97706]`;
+  if (tone === "action") return `${base} border-[#CFE7D5] border-l-4 border-l-[#2E7D45]`;
+  if (tone === "summary") return `${base} border-[#D6E2F3] border-l-4 border-l-[#3B6EA8]`;
+  if (tone === "compare") return `${base} border-[#D9E2EC] border-l-4 border-l-[#5B7188]`;
+  return `${base} border-[#E4E7EF] border-l-4 border-l-[#9CA3AF]`;
 }
 
 function sectionTitleClass(tone: AnswerSectionTone) {
@@ -749,6 +754,14 @@ function sectionTitleClass(tone: AnswerSectionTone) {
   if (tone === "summary") return "text-[#31598B]";
   if (tone === "compare") return "text-[#48627E]";
   return "text-ios-sub";
+}
+
+function sectionTitlePillClass(tone: AnswerSectionTone) {
+  if (tone === "warning") return "border-[#F1D7B8] bg-[#FFF8ED]";
+  if (tone === "action") return "border-[#CFE7D5] bg-[#F1FAF3]";
+  if (tone === "summary") return "border-[#D6E2F3] bg-[#F4F8FF]";
+  if (tone === "compare") return "border-[#D9E2EC] bg-[#F5F8FB]";
+  return "border-[#E3E7EF] bg-[#F7F9FC]";
 }
 
 function tokenizeStreamingText(value: string) {
@@ -1197,7 +1210,7 @@ function StreamingAssistantPreview({
 
   return (
     <div className="min-w-0 flex-1 py-1">
-      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+      <div className="mb-5 flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
           {streamPhase === "retrieving"
             ? "공식 근거 확인 중"
@@ -1225,10 +1238,10 @@ function SectionBodyLines({
   if (!section.bodyLines.length) return null;
   const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
   return (
-    <div className={section.lead ? "mt-5 flex flex-col gap-3" : "mt-2.5 flex flex-col gap-3"}>
+    <div className={section.lead ? "mt-4 flex flex-col gap-2.5" : "mt-2.5 flex flex-col gap-2.5"}>
       {displayLines.map((parsedLine, lineIndex) => {
         if (parsedLine.kind === "blank") {
-          return <div key={`${section.title}-${lineIndex}`} className="h-5" aria-hidden="true" />;
+          return <div key={`${section.title}-${lineIndex}`} className="h-4" aria-hidden="true" />;
         }
 
         const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
@@ -1253,7 +1266,7 @@ function SectionBodyLines({
               className={`flex items-start gap-3 ${bodyTextClass}`}
               style={indentStyle}
             >
-              <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
+              <span className="min-w-[24px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
               <InlineAnswerText text={parsedLine.content} sources={sources} reveal={reveal} />
             </div>
           );
@@ -1299,21 +1312,21 @@ function AssistantAnswerSections({
   const rawSections = parseMedSafetyAnswerSections(content);
   const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
-    return <InlineAnswerText text={content} sources={sources} className="text-[15px] leading-7 text-ios-text" reveal={reveal} />;
+    return <InlineAnswerText text={content} sources={sources} className="text-[15px] leading-[1.82] text-ios-text" reveal={reveal} />;
   }
 
-  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-[1.85] tracking-[-0.012em] text-ios-text";
-  const bodyTextClass = "text-[15px] leading-[1.85] text-ios-text/90";
+  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-[1.82] tracking-[-0.012em] text-ios-text";
+  const bodyTextClass = "text-[15px] leading-[1.78] text-ios-text/90";
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-5 sm:gap-6">
       {sections.map((section, sectionIndex) => {
         return (
           <div key={`${section.title}-${sectionIndex}`}>
-            {sectionIndex > 0 ? <div className="my-6 border-t border-[#E4E7EC] sm:my-7" /> : null}
-
             <section className={sectionCardClass(section.tone)}>
-              <div className={`text-[11.5px] font-bold uppercase tracking-[0.06em] ${sectionTitleClass(section.tone)}`}>
+              <div
+                className={`inline-flex items-center rounded-full border px-3 py-1.5 text-[12px] font-bold uppercase tracking-[0.06em] ${sectionTitlePillClass(section.tone)} ${sectionTitleClass(section.tone)}`}
+              >
                 {section.title}
               </div>
               <div className="mt-4">

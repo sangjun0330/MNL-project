@@ -29,8 +29,9 @@ const EXPLICIT_SECTION_TITLE_PATTERNS = [
   /^(주의|주의점|위험|경고|보고기준|호출기준|중단기준|보고예시|보고문구|sbar|sbar예시)$/i,
   /^(즉시보고신호|보고신호|즉시보고|노티전확인|노티포인트)$/i,
   /^(질문에대한직접답|직접답|직접답변)$/i,
-  /^(실무적으로는|실무적으로|실무정리|실무요약|실무포인트)$/i,
-  /^(핵심관찰포인트|관찰포인트|모니터링포인트)$/i,
+  /^(왜그런가|왜이렇게보나|임상적의미|실제의미|다음판단|판단흐름)$/i,
+  /^(실무적으로는|실무적으로|실무정리|실무요약|실무포인트|간호판단|간호포인트|적용포인트)$/i,
+  /^(핵심관찰포인트|관찰포인트|모니터링포인트|확인포인트|무엇을볼까|어떻게볼까)$/i,
   /^.+(포인트|확인할것|예시|기준|주의|설명|정리|대응|할일|점|신호|의미)$/i,
 ];
 
@@ -187,8 +188,8 @@ function trimBlankLines(lines: string[]) {
 
 function inferSectionTone(title: string, index: number): MedSafetyAnswerSectionTone {
   const normalized = normalizeHeadingKey(title);
-  if (index === 0 || /(핵심|요약|결론|정의|임상의미|정리)/.test(normalized)) return "summary";
-  if (/(지금할일|즉시대응|조치|확인|실무포인트|실무적으로|간호포인트|노티|보고예시|보고문구|sbar|예시)/.test(normalized)) return "action";
+  if (index === 0 || /(핵심|요약|결론|정의|임상의미|실제의미|정리)/.test(normalized)) return "summary";
+  if (/(지금할일|즉시대응|조치|확인|확인포인트|실무포인트|실무적으로|간호판단|간호포인트|적용포인트|다음판단|노티|보고예시|보고문구|sbar|예시)/.test(normalized)) return "action";
   if (/(주의|위험|경고|보고신호|즉시보고|호출|중단|stop)/.test(normalized)) return "warning";
   if (/(비교|차이|선택기준|구분포인트|감별포인트|직접답)/.test(normalized)) return "compare";
   return "neutral";
