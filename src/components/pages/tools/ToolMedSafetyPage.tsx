@@ -740,7 +740,7 @@ function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
 }
 
 function sectionCardClass(_tone: AnswerSectionTone) {
-  return "py-1";
+  return "py-2.5 sm:py-3";
 }
 
 function sectionTitleClass(tone: AnswerSectionTone) {
@@ -1197,7 +1197,7 @@ function StreamingAssistantPreview({
 
   return (
     <div className="min-w-0 flex-1 py-1">
-      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
           {streamPhase === "retrieving"
             ? "공식 근거 확인 중"
@@ -1225,10 +1225,10 @@ function SectionBodyLines({
   if (!section.bodyLines.length) return null;
   const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
   return (
-    <div className={section.lead ? "mt-4 flex flex-col gap-1.5" : "mt-0.5 flex flex-col gap-1.5"}>
+    <div className={section.lead ? "mt-5 flex flex-col gap-3" : "mt-2.5 flex flex-col gap-3"}>
       {displayLines.map((parsedLine, lineIndex) => {
         if (parsedLine.kind === "blank") {
-          return <div key={`${section.title}-${lineIndex}`} className="h-3" aria-hidden="true" />;
+          return <div key={`${section.title}-${lineIndex}`} className="h-5" aria-hidden="true" />;
         }
 
         const indentStyle = parsedLine.level ? { marginLeft: `${parsedLine.level * 18}px` } : undefined;
@@ -1302,21 +1302,21 @@ function AssistantAnswerSections({
     return <InlineAnswerText text={content} sources={sources} className="text-[15px] leading-7 text-ios-text" reveal={reveal} />;
   }
 
-  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text";
-  const bodyTextClass = "text-[15px] leading-7 text-ios-text/90";
+  const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-[1.85] tracking-[-0.012em] text-ios-text";
+  const bodyTextClass = "text-[15px] leading-[1.85] text-ios-text/90";
 
   return (
     <div className="flex flex-col">
       {sections.map((section, sectionIndex) => {
         return (
           <div key={`${section.title}-${sectionIndex}`}>
-            {sectionIndex > 0 ? <div className="border-t border-[#EAECF0] my-4" /> : null}
+            {sectionIndex > 0 ? <div className="my-6 border-t border-[#E4E7EC] sm:my-7" /> : null}
 
             <section className={sectionCardClass(section.tone)}>
               <div className={`text-[11.5px] font-bold uppercase tracking-[0.06em] ${sectionTitleClass(section.tone)}`}>
                 {section.title}
               </div>
-              <div className="mt-3">
+              <div className="mt-4">
                 {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} reveal={reveal} /> : null}
                 <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} reveal={reveal} />
               </div>
