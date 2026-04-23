@@ -126,6 +126,10 @@ function normalizeMultilineText(value: unknown) {
   return canonicalizeMedSafetyAnswerText(normalizeMedSafetyAnswerText(value));
 }
 
+function normalizeStreamingPreviewText(value: unknown) {
+  return canonicalizeMedSafetyAnswerText(normalizeMedSafetyAnswerText(value));
+}
+
 function formatTime(value: number) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
@@ -1745,7 +1749,7 @@ export function ToolMedSafetyPage() {
       clearTimeout(streamingAnswerFlushTimerRef.current);
       streamingAnswerFlushTimerRef.current = null;
     }
-    const nextValue = streamingAnswerBufferRef.current;
+    const nextValue = normalizeStreamingPreviewText(streamingAnswerBufferRef.current);
     setStreamingAnswerRaw(nextValue);
   }
 
