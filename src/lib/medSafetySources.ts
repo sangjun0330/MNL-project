@@ -43,21 +43,155 @@ type MedSafetySourceInput = {
   official?: unknown;
 };
 
-const COMMON_LABEL_MAP: Array<[RegExp, string]> = [
-  [/pubmed/i, "PubMed"],
-  [/clinicaltrials/i, "ClinicalTrials"],
-  [/(^|\.)fda\.gov$/i, "FDA"],
-  [/(^|\.)cdc\.gov$/i, "CDC"],
-  [/(^|\.)who\.int$/i, "WHO"],
-  [/(^|\.)nih\.gov$/i, "NIH"],
-  [/(^|\.)medlineplus\.gov$/i, "MedlinePlus"],
-  [/(^|\.)nice\.org\.uk$/i, "NICE"],
-  [/(^|\.)nhs\.uk$/i, "NHS"],
-  [/(^|\.)ema\.europa\.eu$/i, "EMA"],
-  [/(^|\.)cochranelibrary\.com$/i, "Cochrane"],
-  [/(^|\.)mfds\.go\.kr$/i, "MFDS"],
-  [/(^|\.)kdca\.go\.kr$/i, "KDCA"],
+type MedSafetySourceDomainTier =
+  | "korea_official"
+  | "global_official"
+  | "public_medical"
+  | "trusted_professional";
+
+type MedSafetySourceDomainEntry = {
+  domain: string;
+  label: string;
+  tier: MedSafetySourceDomainTier;
+};
+
+export const MED_SAFETY_SOURCE_DOMAIN_ENTRIES: readonly MedSafetySourceDomainEntry[] = [
+  { domain: "health.kdca.go.kr", label: "KDCA Health", tier: "korea_official" },
+  { domain: "kdca.go.kr", label: "KDCA", tier: "korea_official" },
+  { domain: "mohw.go.kr", label: "MOHW", tier: "korea_official" },
+  { domain: "hcdl.mohw.go.kr", label: "MOHW HCDL", tier: "korea_official" },
+  { domain: "nedrug.mfds.go.kr", label: "MFDS NEDRUG", tier: "korea_official" },
+  { domain: "mfds.go.kr", label: "MFDS", tier: "korea_official" },
+  { domain: "hira.or.kr", label: "HIRA", tier: "korea_official" },
+  { domain: "hi.nhis.or.kr", label: "NHIS Health iN", tier: "korea_official" },
+  { domain: "nhis.or.kr", label: "NHIS", tier: "korea_official" },
+  { domain: "neca.re.kr", label: "NECA", tier: "korea_official" },
+  { domain: "nhta.neca.re.kr", label: "NECA NHTA", tier: "korea_official" },
+  { domain: "khis.kr", label: "KHIS", tier: "korea_official" },
+  { domain: "k-his.or.kr", label: "KHIS", tier: "korea_official" },
+  { domain: "kops.or.kr", label: "KOPS", tier: "korea_official" },
+  { domain: "koiha.or.kr", label: "KOIHA", tier: "korea_official" },
+  { domain: "koiha-kops.org", label: "KOPS", tier: "korea_official" },
+  { domain: "nmc.or.kr", label: "NMC", tier: "korea_official" },
+  { domain: "e-gen.or.kr", label: "E-Gen", tier: "korea_official" },
+  { domain: "ncc.re.kr", label: "NCC Korea", tier: "korea_official" },
+  { domain: "cancer.go.kr", label: "National Cancer Info", tier: "korea_official" },
+  { domain: "nrc.go.kr", label: "NRC Korea", tier: "korea_official" },
+  { domain: "nih.go.kr", label: "KNIH", tier: "korea_official" },
+  { domain: "konos.go.kr", label: "KONOS", tier: "korea_official" },
+  { domain: "ncmh.go.kr", label: "NCMH Korea", tier: "korea_official" },
+  { domain: "law.go.kr", label: "Korea Law", tier: "korea_official" },
+  { domain: "data.go.kr", label: "Korea Open Data", tier: "korea_official" },
+  { domain: "korea.kr", label: "Korea.kr", tier: "korea_official" },
+
+  { domain: "who.int", label: "WHO", tier: "global_official" },
+  { domain: "paho.org", label: "PAHO", tier: "global_official" },
+  { domain: "fda.gov", label: "FDA", tier: "global_official" },
+  { domain: "accessdata.fda.gov", label: "FDA", tier: "global_official" },
+  { domain: "cdc.gov", label: "CDC", tier: "global_official" },
+  { domain: "ahrq.gov", label: "AHRQ", tier: "global_official" },
+  { domain: "cms.gov", label: "CMS", tier: "global_official" },
+  { domain: "health.gov", label: "Health.gov", tier: "global_official" },
+  { domain: "samhsa.gov", label: "SAMHSA", tier: "global_official" },
+  { domain: "nih.gov", label: "NIH", tier: "global_official" },
+  { domain: "nlm.nih.gov", label: "NLM", tier: "global_official" },
+  { domain: "ncbi.nlm.nih.gov", label: "NCBI", tier: "global_official" },
+  { domain: "pubmed.ncbi.nlm.nih.gov", label: "PubMed", tier: "global_official" },
+  { domain: "pmc.ncbi.nlm.nih.gov", label: "PMC", tier: "global_official" },
+  { domain: "medlineplus.gov", label: "MedlinePlus", tier: "global_official" },
+  { domain: "clinicaltrials.gov", label: "ClinicalTrials", tier: "global_official" },
+  { domain: "dailymed.nlm.nih.gov", label: "DailyMed", tier: "global_official" },
+  { domain: "uspreventiveservicestaskforce.org", label: "USPSTF", tier: "global_official" },
+  { domain: "ema.europa.eu", label: "EMA", tier: "global_official" },
+  { domain: "ecdc.europa.eu", label: "ECDC", tier: "global_official" },
+  { domain: "health.ec.europa.eu", label: "European Commission Health", tier: "global_official" },
+  { domain: "ec.europa.eu", label: "European Commission", tier: "global_official" },
+  { domain: "edqm.eu", label: "EDQM", tier: "global_official" },
+  { domain: "gov.uk", label: "GOV.UK", tier: "global_official" },
+  { domain: "mhra-products.service.gov.uk", label: "MHRA", tier: "global_official" },
+  { domain: "nice.org.uk", label: "NICE", tier: "global_official" },
+  { domain: "nhs.uk", label: "NHS", tier: "global_official" },
+  { domain: "england.nhs.uk", label: "NHS England", tier: "global_official" },
+  { domain: "sps.nhs.uk", label: "NHS SPS", tier: "global_official" },
+  { domain: "healthcareimprovementscotland.scot", label: "HIS Scotland", tier: "global_official" },
+  { domain: "sign.ac.uk", label: "SIGN", tier: "global_official" },
+  { domain: "canada.ca", label: "Health Canada", tier: "global_official" },
+  { domain: "health-products.canada.ca", label: "Health Canada", tier: "global_official" },
+  { domain: "phac-aspc.gc.ca", label: "PHAC", tier: "global_official" },
+  { domain: "tga.gov.au", label: "TGA", tier: "global_official" },
+  { domain: "health.gov.au", label: "Australian Government Health", tier: "global_official" },
+  { domain: "safetyandquality.gov.au", label: "ACSQHC", tier: "global_official" },
+  { domain: "medsafe.govt.nz", label: "Medsafe NZ", tier: "global_official" },
+  { domain: "health.govt.nz", label: "NZ Ministry of Health", tier: "global_official" },
+  { domain: "pmda.go.jp", label: "PMDA", tier: "global_official" },
+  { domain: "mhlw.go.jp", label: "MHLW", tier: "global_official" },
+  { domain: "niid.go.jp", label: "NIID Japan", tier: "global_official" },
+  { domain: "hsa.gov.sg", label: "HSA Singapore", tier: "global_official" },
+  { domain: "moh.gov.sg", label: "MOH Singapore", tier: "global_official" },
+  { domain: "hpra.ie", label: "HPRA", tier: "global_official" },
+  { domain: "has-sante.fr", label: "HAS", tier: "global_official" },
+  { domain: "ansm.sante.fr", label: "ANSM", tier: "global_official" },
+  { domain: "rki.de", label: "RKI", tier: "global_official" },
+  { domain: "bfarm.de", label: "BfArM", tier: "global_official" },
+  { domain: "pei.de", label: "Paul-Ehrlich-Institut", tier: "global_official" },
+  { domain: "iqwig.de", label: "IQWiG", tier: "global_official" },
+  { domain: "aifa.gov.it", label: "AIFA", tier: "global_official" },
+  { domain: "iss.it", label: "ISS Italy", tier: "global_official" },
+  { domain: "sanidad.gob.es", label: "Spain Health Ministry", tier: "global_official" },
+  { domain: "aemps.gob.es", label: "AEMPS", tier: "global_official" },
+
+  { domain: "cochranelibrary.com", label: "Cochrane", tier: "public_medical" },
+  { domain: "cochrane.org", label: "Cochrane", tier: "public_medical" },
+  { domain: "cda-amc.ca", label: "CDA-AMC", tier: "public_medical" },
+  { domain: "cadth.ca", label: "CADTH", tier: "public_medical" },
+  { domain: "inahta.org", label: "INAHTA", tier: "public_medical" },
+  { domain: "gin.net", label: "GIN", tier: "public_medical" },
+  { domain: "g-i-n.net", label: "GIN", tier: "public_medical" },
+  { domain: "ismp.org", label: "ISMP", tier: "public_medical" },
+  { domain: "ismp-canada.org", label: "ISMP Canada", tier: "public_medical" },
+  { domain: "nps.org.au", label: "NPS MedicineWise", tier: "public_medical" },
+
+  { domain: "guideline.or.kr", label: "KAMS Guideline", tier: "trusted_professional" },
+  { domain: "kams.or.kr", label: "KAMS", tier: "trusted_professional" },
+  { domain: "koreanursing.or.kr", label: "KNA", tier: "trusted_professional" },
+  { domain: "koreanurse.or.kr", label: "KNA", tier: "trusted_professional" },
+  { domain: "khna.or.kr", label: "KHNA", tier: "trusted_professional" },
+  { domain: "kma.org", label: "KMA", tier: "trusted_professional" },
+  { domain: "kha.or.kr", label: "KHA", tier: "trusted_professional" },
+  { domain: "kpanet.or.kr", label: "KPA", tier: "trusted_professional" },
+  { domain: "health.kr", label: "KPIC", tier: "trusted_professional" },
+  { domain: "koreamed.org", label: "KoreaMed", tier: "trusted_professional" },
+  { domain: "kci.go.kr", label: "KCI", tier: "trusted_professional" },
+  { domain: "koreascience.or.kr", label: "KoreaScience", tier: "trusted_professional" },
+  { domain: "scienceon.kisti.re.kr", label: "ScienceON", tier: "trusted_professional" },
+  { domain: "rcn.org.uk", label: "RCN", tier: "trusted_professional" },
+  { domain: "rnao.ca", label: "RNAO", tier: "trusted_professional" },
+  { domain: "aacn.org", label: "AACN", tier: "trusted_professional" },
 ];
+
+export const MED_SAFETY_KOREA_OFFICIAL_DOMAINS = MED_SAFETY_SOURCE_DOMAIN_ENTRIES
+  .filter((entry) => entry.tier === "korea_official")
+  .map((entry) => entry.domain);
+
+export const MED_SAFETY_GLOBAL_OFFICIAL_DOMAINS = MED_SAFETY_SOURCE_DOMAIN_ENTRIES
+  .filter((entry) => entry.tier === "global_official")
+  .map((entry) => entry.domain);
+
+export const MED_SAFETY_PUBLIC_MEDICAL_DOMAINS = MED_SAFETY_SOURCE_DOMAIN_ENTRIES
+  .filter((entry) => entry.tier === "public_medical")
+  .map((entry) => entry.domain);
+
+export const MED_SAFETY_TRUSTED_PROFESSIONAL_DOMAINS = MED_SAFETY_SOURCE_DOMAIN_ENTRIES
+  .filter((entry) => entry.tier === "trusted_professional")
+  .map((entry) => entry.domain);
+
+function escapeDomainForRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const COMMON_LABEL_MAP: Array<[RegExp, string]> = [...MED_SAFETY_SOURCE_DOMAIN_ENTRIES]
+  .sort((a, b) => b.domain.length - a.domain.length)
+  .map((entry) => [new RegExp(`(^|\\.)${escapeDomainForRegExp(entry.domain)}$`, "i"), entry.label]);
 
 const MED_SAFETY_URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/gi;
 

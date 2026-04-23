@@ -778,7 +778,7 @@ export async function POST(req: NextRequest) {
           previewFlushTimer = setTimeout(() => {
             previewFlushTimer = null;
             flushPreviewDelta();
-          }, 64);
+          }, 24);
         };
 
         pushEvent("status", { stage: "routing" });
@@ -794,7 +794,7 @@ export async function POST(req: NextRequest) {
             async (delta) => {
               if (!delta) return;
               pendingPreviewDelta += delta;
-              if (pendingPreviewDelta.length >= 320) {
+              if (pendingPreviewDelta.length >= 96) {
                 if (previewFlushTimer) {
                   clearTimeout(previewFlushTimer);
                   previewFlushTimer = null;

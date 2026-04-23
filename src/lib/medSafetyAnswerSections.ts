@@ -53,8 +53,24 @@ function stripMarkdownDecorations(value: string) {
     .replace(/_([^_\n]+)_/g, "$1");
 }
 
+function stripMarkdownDisplayDecorations(value: string) {
+  return String(value ?? "")
+    .replace(/^\s{0,3}#{1,6}\s+/, "")
+    .replace(/^\s*>\s?/, "")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2")
+    .replace(/_([^_\n]+)_/g, "$1");
+}
+
 function cleanAnswerLine(value: string) {
   return stripMarkdownDecorations(normalizeAnswerRawLine(value))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanAnswerDisplayLine(value: string) {
+  return stripMarkdownDisplayDecorations(normalizeAnswerRawLine(value))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -88,7 +104,7 @@ function stripBulletPrefix(value: string) {
 }
 
 function extractLeadText(value: string) {
-  const match = cleanAnswerLine(value).match(/^리드\s*문장\s*[:：]\s*(.+)\s*$/i);
+  const match = cleanAnswerDisplayLine(value).match(/^리드\s*문장\s*[:：]\s*(.+)\s*$/i);
   return match?.[1]?.trim() ?? null;
 }
 
@@ -235,7 +251,7 @@ export function parseMedSafetyDisplayLine(value: string): MedSafetyAnswerDisplay
   if (bulletMatch) {
     return {
       kind: "bullet",
-      content: cleanAnswerLine(bulletMatch[2]),
+      content: cleanAnswerDisplayLine(bulletMatch[2]),
       level: getIndentLevel(bulletMatch[1]),
     };
   }
@@ -245,7 +261,7 @@ export function parseMedSafetyDisplayLine(value: string): MedSafetyAnswerDisplay
     return {
       kind: "number",
       marker: numberedMatch[2],
-      content: cleanAnswerLine(numberedMatch[3]),
+      content: cleanAnswerDisplayLine(numberedMatch[3]),
       level: getIndentLevel(numberedMatch[1]),
     };
   }
@@ -255,14 +271,14 @@ export function parseMedSafetyDisplayLine(value: string): MedSafetyAnswerDisplay
     return {
       kind: "label",
       marker: labelMatch[2],
-      content: cleanAnswerLine(labelMatch[3]),
+      content: cleanAnswerDisplayLine(labelMatch[3]),
       level: getIndentLevel(labelMatch[1]),
     };
   }
 
   return {
     kind: "text",
-    content: cleanAnswerLine(raw),
+    content: cleanAnswerDisplayLine(raw),
     level: getIndentLevel(raw),
   };
 }
@@ -369,7 +385,7 @@ export function canonicalizeMedSafetyAnswerText(value: unknown) {
 
   sections.forEach((section, index) => {
     const isImplicitConclusion = index === 0 && normalizeHeadingKey(section.title) === "결론";
-    const lead = cleanAnswerLine(section.lead);
+    const lead = cleanAnswerDisplayLine(section.lead);
     const body = section.bodyLines
       .map((line) => renderCanonicalDisplayLine(line))
       .filter((line) => line.trim().length > 0);

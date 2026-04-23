@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import type { SubscriptionApi } from "@/lib/billing/client";
 import { getPlanDefinition, getSearchCreditMeta, type SearchCreditType } from "@/lib/billing/plans";
@@ -23,8 +23,9 @@ import {
   type MedSafetyGroundingStatus,
   type MedSafetySource,
 } from "@/lib/medSafetySources";
-import { sanitizeMemoDocument } from "@/lib/notebook";
-import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
+import { sanitizeMemoDocument, type RNestMemoAttachment } from "@/lib/notebook";
+import { buildMedSafetyMemoBlocks, getMedSafetyMemoQuestionTypeLabel } from "@/lib/medSafetyMemo";
+import { seedNotebookImagePreview, uploadNotebookFile } from "@/lib/notebookFiles";
 import { MedSafetySourceRail } from "@/components/pages/tools/MedSafetySourceRail";
 import { MedSafetySourceButton } from "@/components/pages/tools/MedSafetySourceButton";
 import {
@@ -80,10 +81,12 @@ type Message = {
   model?: string;
   source?: "openai_live" | "openai_fallback";
   imageDataUrl?: string | null;
+  imageName?: string | null;
   sources?: MedSafetySource[];
   groundingMode?: MedSafetyGroundingMode;
   groundingStatus?: MedSafetyGroundingStatus;
   groundingError?: string | null;
+  searchType?: SearchCreditType;
   structuredAnswer?: MedSafetyStructuredAnswer | null;
   quality?: MedSafetyQualitySnapshot | null;
   verification?: MedSafetyVerificationReport | null;
@@ -364,6 +367,36 @@ async function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error("image_read_failed"));
     reader.readAsDataURL(file);
   });
+}
+
+function extensionForImageMime(mimeType: string) {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("gif")) return "gif";
+  if (normalized.includes("heic")) return "heic";
+  if (normalized.includes("heif")) return "heif";
+  return "png";
+}
+
+function ensureImageFileName(name: string, mimeType: string) {
+  const trimmed = String(name ?? "").trim() || "AI 임상검색 질문 이미지";
+  if (/\.[a-z0-9]{2,5}$/i.test(trimmed)) return trimmed;
+  return `${trimmed}.${extensionForImageMime(mimeType)}`;
+}
+
+function dataUrlToImageFile(dataUrl: string, name: string) {
+  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(String(dataUrl ?? ""));
+  if (!match) throw new Error("invalid_image_data_url");
+  const mimeType = match[1] || "image/png";
+  if (!mimeType.startsWith("image/")) throw new Error("invalid_image_data_url");
+  const rawPayload = match[3] ?? "";
+  const binary = match[2] ? atob(rawPayload) : decodeURIComponent(rawPayload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], ensureImageFileName(name, mimeType), { type: mimeType });
 }
 
 async function fetchAnalyzeWithTimeout(body: Record<string, unknown>, timeoutMs: number) {
@@ -714,17 +747,108 @@ function sectionTitleClass(tone: AnswerSectionTone) {
   return "text-ios-sub";
 }
 
+function tokenizeStreamingText(value: string) {
+  return String(value ?? "")
+    .split(/(\s+)/g)
+    .filter((token) => token.length > 0)
+    .flatMap((token) => {
+      if (/^\s+$/.test(token)) return [{ text: token, space: true }];
+      const chars = Array.from(token);
+      if (chars.length <= 12) return [{ text: token, space: false }];
+      const chunks: Array<{ text: string; space: false }> = [];
+      for (let index = 0; index < chars.length; index += 4) {
+        chunks.push({ text: chars.slice(index, index + 4).join(""), space: false });
+      }
+      return chunks;
+    });
+}
+
+function StreamingTokenText({ text }: { text: string }) {
+  const tokens = useMemo(() => tokenizeStreamingText(text), [text]);
+  let revealIndex = 0;
+  return (
+    <span>
+      {tokens.map((token, index) => {
+        if (token.space) return <span key={`${index}-space`}>{token.text}</span>;
+        const delay = (revealIndex % 12) * 10;
+        revealIndex += 1;
+        return (
+          <span
+            key={`${index}-${token.text}`}
+            className="rnest-med-safety-stream-token"
+            style={{ animationDelay: `${delay}ms` }}
+          >
+            {token.text}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function parseBoldAnswerSegments(value: string) {
+  const parts: Array<{ text: string; strong: boolean }> = [];
+  const input = String(value ?? "");
+  let cursor = 0;
+
+  while (cursor < input.length) {
+    const start = input.indexOf("**", cursor);
+    if (start < 0) {
+      parts.push({ text: input.slice(cursor), strong: false });
+      break;
+    }
+
+    const end = input.indexOf("**", start + 2);
+    if (end < 0) {
+      parts.push({ text: input.slice(cursor), strong: false });
+      break;
+    }
+
+    if (start > cursor) {
+      parts.push({ text: input.slice(cursor, start), strong: false });
+    }
+
+    const strongText = input.slice(start + 2, end);
+    if (strongText) {
+      parts.push({ text: strongText, strong: true });
+    }
+    cursor = end + 2;
+  }
+
+  return parts.filter((part) => part.text.length > 0);
+}
+
+function InlineFormattedAnswerText({ text, reveal }: { text: string; reveal: boolean }) {
+  const parts = useMemo(() => parseBoldAnswerSegments(text), [text]);
+  if (!parts.length) return null;
+  return (
+    <>
+      {parts.map((part, index) => {
+        const content = reveal ? <StreamingTokenText text={part.text} /> : part.text;
+        if (!part.strong) return <span key={`${index}-text`}>{content}</span>;
+        return (
+          <strong key={`${index}-strong`} className="font-extrabold text-ios-text">
+            {content}
+          </strong>
+        );
+      })}
+    </>
+  );
+}
+
 
 function InlineAnswerText({
   text,
   sources,
   className,
   style,
+  reveal = false,
 }: {
   text: string;
   sources: MedSafetySource[];
   className?: string;
   style?: React.CSSProperties;
+  reveal?: boolean;
 }) {
   const parsed = useMemo(() => extractMedSafetyInlineCitations(text, sources), [text, sources]);
 
@@ -732,7 +856,7 @@ function InlineAnswerText({
 
   return (
     <div className={cn("min-w-0 whitespace-pre-wrap break-words", className)} style={style}>
-      {parsed.text ? <span>{parsed.text}</span> : null}
+      {parsed.text ? <InlineFormattedAnswerText text={parsed.text} reveal={reveal} /> : null}
       {parsed.citations.length ? (
         <span className={cn("inline-flex flex-wrap items-center gap-1 align-middle", parsed.text ? "ml-2" : "")}>
           {parsed.citations.map((source) => (
@@ -1052,23 +1176,6 @@ function StructuredAssistantAnswer({
   );
 }
 
-function StreamingRevealText({
-  text,
-  className,
-}: {
-  text: string;
-  className?: string;
-}) {
-  if (!text.trim()) return null;
-  return (
-    <div className={cn("relative overflow-hidden", className)}>
-      <div className={cn("relative z-10 whitespace-pre-wrap break-words transition-opacity duration-300", className)}>{text}</div>
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-white via-white/82 to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 -right-10 w-24 bg-[linear-gradient(110deg,rgba(255,255,255,0)_0%,rgba(255,255,255,0.18)_28%,rgba(255,255,255,0.92)_50%,rgba(255,255,255,0.18)_72%,rgba(255,255,255,0)_100%)] animate-[pulse_1.8s_ease-in-out_infinite]" />
-    </div>
-  );
-}
-
 function StreamingAssistantPreview({
   content,
   streamPhase,
@@ -1085,7 +1192,7 @@ function StreamingAssistantPreview({
   }
 
   return (
-    <div className="min-w-0 py-1">
+    <div className="min-w-0 flex-1 py-1">
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)]">
           {streamPhase === "retrieving"
@@ -1095,7 +1202,7 @@ function StreamingAssistantPreview({
               : "실시간 반영 중"}
         </span>
       </div>
-      <StreamingRevealText text={content} className="text-[16px] leading-[1.85] tracking-[-0.01em] text-ios-text" />
+      <AssistantAnswerSections content={content} sources={[]} reveal />
     </div>
   );
 }
@@ -1104,10 +1211,12 @@ function SectionBodyLines({
   section,
   sources,
   bodyTextClass,
+  reveal,
 }: {
   section: AnswerSection;
   sources: MedSafetySource[];
   bodyTextClass: string;
+  reveal?: boolean;
 }) {
   if (!section.bodyLines.length) return null;
   const displayLines = buildMedSafetyDisplayLines(section.bodyLines);
@@ -1128,7 +1237,7 @@ function SectionBodyLines({
               style={indentStyle}
             >
               <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
-              <InlineAnswerText text={parsedLine.content} sources={sources} />
+              <InlineAnswerText text={parsedLine.content} sources={sources} reveal={reveal} />
             </div>
           );
         }
@@ -1141,7 +1250,7 @@ function SectionBodyLines({
               style={indentStyle}
             >
               <span className="min-w-[20px] shrink-0 font-semibold text-ios-text">{parsedLine.marker}</span>
-              <InlineAnswerText text={parsedLine.content} sources={sources} />
+              <InlineAnswerText text={parsedLine.content} sources={sources} reveal={reveal} />
             </div>
           );
         }
@@ -1154,7 +1263,7 @@ function SectionBodyLines({
               style={indentStyle}
             >
               <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{parsedLine.marker}</span>
-              <InlineAnswerText text={parsedLine.content} sources={sources} />
+              <InlineAnswerText text={parsedLine.content} sources={sources} reveal={reveal} />
             </div>
           );
         }
@@ -1166,6 +1275,7 @@ function SectionBodyLines({
             sources={sources}
             className={bodyTextClass}
             style={indentStyle}
+            reveal={reveal}
           />
         );
       })}
@@ -1173,11 +1283,19 @@ function SectionBodyLines({
   );
 }
 
-function AssistantAnswerSections({ content, sources }: { content: string; sources: MedSafetySource[] }) {
+function AssistantAnswerSections({
+  content,
+  sources,
+  reveal = false,
+}: {
+  content: string;
+  sources: MedSafetySource[];
+  reveal?: boolean;
+}) {
   const rawSections = parseMedSafetyAnswerSections(content);
   const sections = splitSectionSubHeadings(rawSections);
   if (!sections.length) {
-    return <InlineAnswerText text={content} sources={sources} className="text-[15px] leading-7 text-ios-text" />;
+    return <InlineAnswerText text={content} sources={sources} className="text-[15px] leading-7 text-ios-text" reveal={reveal} />;
   }
 
   const leadTextClass = "whitespace-pre-wrap break-words text-[15.5px] font-semibold leading-7 tracking-[-0.012em] text-ios-text";
@@ -1195,8 +1313,8 @@ function AssistantAnswerSections({ content, sources }: { content: string; source
                 {section.title}
               </div>
               <div className="mt-3">
-                {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} /> : null}
-                <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} />
+                {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} reveal={reveal} /> : null}
+                <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} reveal={reveal} />
               </div>
             </section>
           </div>
@@ -1362,6 +1480,7 @@ export function ToolMedSafetyPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamPhase, setStreamPhase] = useState<"idle" | "routing" | "retrieving" | "generating" | "verifying">("idle");
   const [streamingAnswerRaw, setStreamingAnswerRaw] = useState("");
+  const [isSavingMemo, setIsSavingMemo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState("");
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState("");
@@ -1408,8 +1527,7 @@ export function ToolMedSafetyPage() {
   const hasConversation = messages.length > 0;
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user") ?? null;
-  const deferredStreamingAnswerRaw = useDeferredValue(streamingAnswerRaw);
-  const hasStreamingPreview = Boolean(deferredStreamingAnswerRaw.trim());
+  const hasStreamingPreview = Boolean(streamingAnswerRaw.trim());
   const hasTypedInput = normalizeQuestionInput(input).length > 0;
   const isComposerLocked = showSessionDecisionPrompt;
   const canSubmit = !isComposerLocked && !isLoading && canAsk && (hasTypedInput || Boolean(selectedImage));
@@ -1518,7 +1636,7 @@ export function ToolMedSafetyPage() {
     if (!threadEndRef.current) return;
     if (userHasScrolledUpRef.current) return;
     threadEndRef.current.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages, error, deferredStreamingAnswerRaw]);
+  }, [messages, error, streamingAnswerRaw]);
 
   useEffect(() => {
     const textarea = composerInputRef.current;
@@ -1628,9 +1746,7 @@ export function ToolMedSafetyPage() {
       streamingAnswerFlushTimerRef.current = null;
     }
     const nextValue = streamingAnswerBufferRef.current;
-    startTransition(() => {
-      setStreamingAnswerRaw(nextValue);
-    });
+    setStreamingAnswerRaw(nextValue);
   }
 
   function scheduleStreamingAnswerFlush() {
@@ -1638,7 +1754,7 @@ export function ToolMedSafetyPage() {
     streamingAnswerFlushTimerRef.current = setTimeout(() => {
       streamingAnswerFlushTimerRef.current = null;
       flushStreamingAnswerBuffer();
-    }, 72);
+    }, 24);
   }
 
   function resetStreamingPreview() {
@@ -1680,6 +1796,7 @@ export function ToolMedSafetyPage() {
 
     const typedQuestion = normalizeQuestionInput(String(forcedQuery ?? input));
     const imageToSend = selectedImage;
+    const imageNameToSend = selectedImageName;
     const question = typedQuestion || (imageToSend ? t("첨부한 이미지를 임상적으로 설명하고 주의점과 대응 포인트를 알려 주세요.") : "");
     if (!question) {
       setError(t("질문을 입력해 주세요."));
@@ -1692,6 +1809,7 @@ export function ToolMedSafetyPage() {
       content: typedQuestion || t("이미지와 함께 질문을 보냈습니다."),
       timestamp: Date.now(),
       imageDataUrl: imageToSend,
+      imageName: imageToSend ? imageNameToSend || t("첨부 이미지") : null,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -1737,7 +1855,7 @@ export function ToolMedSafetyPage() {
               onDelta: (delta) => {
                 if (!delta) return;
                 streamingAnswerBufferRef.current += delta;
-                if (streamingAnswerBufferRef.current.length >= 420) {
+                if (streamingAnswerBufferRef.current.length >= 96) {
                   flushStreamingAnswerBuffer();
                   return;
                 }
@@ -1800,6 +1918,7 @@ export function ToolMedSafetyPage() {
         groundingMode: normalizedData.groundingMode,
         groundingStatus: normalizedData.groundingStatus,
         groundingError: normalizedData.groundingError ?? null,
+        searchType: normalizedData.searchType,
         structuredAnswer: normalizedData.structuredAnswer,
         quality: normalizedData.quality,
         verification: normalizedData.verification,
@@ -1884,41 +2003,70 @@ export function ToolMedSafetyPage() {
     );
   }
 
-  function saveLastAnswerToMemo() {
-    if (!lastAssistantMessage) return
-    const query = lastUserMessage?.content || lastSubmittedQuery || ""
-    const answer = lastAssistantMessage.content || ""
-    const summary = latestAnswerSummary || ""
-    const title = (lastSubmittedQuery || query || t("AI 임상 검색 결과")).slice(0, 80)
+  async function saveLastAnswerToMemo() {
+    if (!lastAssistantMessage || isSavingMemo) return
+    setIsSavingMemo(true)
+    setError(null)
 
-    const blocks = buildMedSafetyMemoBlocks({
-      layout: "brief",
-      query,
-      answer,
-      summary,
-      savedAt: lastAssistantMessage.timestamp,
-      model: lastAssistantMessage.model ?? null,
-    })
-    const doc = sanitizeMemoDocument({
-      title,
-      icon: "book",
-      blocks,
-      tags: ["AI검색"],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
+    try {
+      const query = lastSubmittedQuery || lastUserMessage?.content || ""
+      const answer = lastAssistantMessage.content || ""
+      const summary = latestAnswerSummary || ""
+      const structuredAnswer = lastAssistantMessage.verification?.corrected_answer ?? lastAssistantMessage.structuredAnswer ?? null
+      const questionType = structuredAnswer?.question_type ?? (lastUserMessage?.imageDataUrl ? "image" : null)
+      const categoryLabel = getMedSafetyMemoQuestionTypeLabel(questionType)
+      const title = `${categoryLabel} · ${lastSubmittedQuery || query || t("AI 임상 검색 결과")}`.slice(0, 80)
+      let imageAttachment: RNestMemoAttachment | null = null
 
-    const latestMemo = store.getState().memo
-    store.setMemoState({
-      ...latestMemo,
-      documents: { ...latestMemo.documents, [doc.id]: doc },
-      recent: [doc.id, ...latestMemo.recent.filter((id) => id !== doc.id)].slice(0, 20),
-    })
+      if (lastUserMessage?.imageDataUrl) {
+        const imageFile = dataUrlToImageFile(lastUserMessage.imageDataUrl, lastUserMessage.imageName || t("AI 임상검색 질문 이미지"))
+        imageAttachment = await uploadNotebookFile(imageFile, "image")
+        seedNotebookImagePreview(imageAttachment.storagePath, imageFile)
+      }
 
-    if (typeof window !== "undefined") {
-      try { sessionStorage.setItem("rnest_notebook_open", doc.id) } catch {}
+      const blocks = buildMedSafetyMemoBlocks({
+        layout: "brief",
+        query,
+        answer,
+        summary,
+        savedAt: lastAssistantMessage.timestamp,
+        model: lastAssistantMessage.model ?? null,
+        structuredAnswer,
+        sources: lastAssistantMessage.sources ?? [],
+        questionType,
+        triageLevel: structuredAnswer?.triage_level ?? null,
+        searchType: lastAssistantMessage.searchType ?? null,
+        imageAttachmentId: imageAttachment?.id ?? null,
+        imageAttachmentName: imageAttachment?.name ?? lastUserMessage?.imageName ?? null,
+      })
+      const tags = Array.from(new Set(["AI검색", categoryLabel, ...(lastUserMessage?.imageDataUrl ? ["이미지"] : [])]))
+      const doc = sanitizeMemoDocument({
+        title,
+        icon: lastUserMessage?.imageDataUrl ? "clip" : "book",
+        blocks,
+        tags,
+        attachments: imageAttachment ? [imageAttachment] : [],
+        attachmentStoragePaths: imageAttachment ? [imageAttachment.storagePath] : [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+
+      const latestMemo = store.getState().memo
+      store.setMemoState({
+        ...latestMemo,
+        documents: { ...latestMemo.documents, [doc.id]: doc },
+        recent: [doc.id, ...latestMemo.recent.filter((id) => id !== doc.id)].slice(0, 20),
+      })
+
+      if (typeof window !== "undefined") {
+        try { sessionStorage.setItem("rnest_notebook_open", doc.id) } catch {}
+      }
+      router.push("/tools/notebook")
+    } catch {
+      setError(t("메모 저장에 실패했습니다. 이미지 첨부 권한 또는 네트워크 상태를 확인한 뒤 다시 시도해 주세요."))
+    } finally {
+      setIsSavingMemo(false)
     }
-    router.push("/tools/notebook")
   }
 
   return (
@@ -2036,8 +2184,13 @@ export function ToolMedSafetyPage() {
                   </button>
                 ) : null}
                 {hasConversation && lastAssistantMessage ? (
-                  <button type="button" onClick={saveLastAnswerToMemo} className={PRIMARY_FLAT_BTN}>
-                    {t("메모에 정리하기")}
+                  <button
+                    type="button"
+                    onClick={() => void saveLastAnswerToMemo()}
+                    disabled={isSavingMemo}
+                    className={`${PRIMARY_FLAT_BTN} disabled:cursor-wait disabled:opacity-60`}
+                  >
+                    {isSavingMemo ? t("메모 저장 중...") : t("메모에 정리하기")}
                   </button>
                 ) : null}
                 {hasConversation ? (
@@ -2162,15 +2315,16 @@ export function ToolMedSafetyPage() {
                           {message.role === "assistant" && message.id === lastAssistantMessage?.id ? (
                             <button
                               type="button"
-                              onClick={saveLastAnswerToMemo}
-                              className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition hover:opacity-80"
+                              onClick={() => void saveLastAnswerToMemo()}
+                              disabled={isSavingMemo}
+                              className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-[color:var(--rnest-accent-border)] bg-[color:var(--rnest-accent-soft)] px-3 py-1 text-[11px] font-semibold text-[color:var(--rnest-accent)] transition hover:opacity-80 disabled:cursor-wait disabled:opacity-60"
                             >
                               <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" aria-hidden="true">
                                 <path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
                                 <path d="M10 2v3H6V2" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
                                 <path d="M4 11h8M4 13h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                               </svg>
-                              {t("메모에 정리하기")}
+                              {isSavingMemo ? t("저장 중") : t("메모에 정리하기")}
                             </button>
                           ) : null}
                         </div>
@@ -2194,7 +2348,7 @@ export function ToolMedSafetyPage() {
                             <span className="absolute inset-0 animate-[spin_3s_linear_infinite] rounded-full border-2 border-transparent border-t-[color:var(--rnest-accent)] opacity-60" />
                           </div>
                           {hasStreamingPreview ? (
-                            <StreamingAssistantPreview content={deferredStreamingAnswerRaw} streamPhase={streamPhase} query={lastSubmittedQuery} />
+                            <StreamingAssistantPreview content={streamingAnswerRaw} streamPhase={streamPhase} query={lastSubmittedQuery} />
                           ) : (
                             <ThinkingIndicator streamPhase={streamPhase} query={lastSubmittedQuery} />
                           )}

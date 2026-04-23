@@ -739,6 +739,14 @@ button:not([class*="rnest-nav"]):active {
   animation: rnestShimmer 1.8s var(--rnest-ease-decel) infinite;
 }
 
+.rnest-med-safety-stream-token {
+  display: inline;
+  opacity: 0;
+  filter: brightness(1.45);
+  animation: rnestMedSafetyStreamToken 360ms var(--rnest-ease-soft) forwards;
+  will-change: opacity, filter;
+}
+
 /* ===================================
    Smooth content transitions
    =================================== */
@@ -784,4 +792,27 @@ a[aria-label="Back"]:active {
 
 .rnest-recovery-static :active {
   transform: none !important;
+}
+
+@keyframes rnestMedSafetyStreamToken {
+  0% {
+    opacity: 0;
+    filter: brightness(1.45);
+  }
+  65% {
+    opacity: 0.88;
+    filter: brightness(1.08);
+  }
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rnest-med-safety-stream-token {
+    opacity: 1;
+    filter: none;
+    animation: none;
+  }
 }
