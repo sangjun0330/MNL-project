@@ -278,13 +278,14 @@ function appendTableBlock(blocks: RNestMemoBlock[], columns: string[], rows: RNe
 function addSectionBreak(blocks: RNestMemoBlock[]) {
   if (!blocks.length) return
   blocks.push(createMemoBlock("divider"))
-  blocks.push(createMemoBlock("pageSpacer", { spacerMode: "blank-space", spacerHeight: 1 }))
+  blocks.push(createMemoBlock("pageSpacer", { spacerMode: "blank-space", spacerHeight: 2 }))
 }
 
 function addSectionHeading(blocks: RNestMemoBlock[], text: string, shouldRender: boolean) {
   if (!shouldRender) return
   addSectionBreak(blocks)
   blocks.push(createMemoBlock("heading", { text: cleanLine(text) }))
+  blocks.push(createMemoBlock("pageSpacer", { spacerMode: "blank-space", spacerHeight: 1 }))
 }
 
 function sanitizeMemoTableRow(row: RNestMemoTableRow): RNestMemoTableRow {
@@ -413,7 +414,7 @@ function appendFreeformSectionBlocks(blocks: RNestMemoBlock[], section: MedSafet
 
 function addBookmarks(blocks: RNestMemoBlock[], urls: string[]) {
   if (urls.length === 0) return
-  blocks.push(createMemoBlock("heading", { text: "참고 링크" }))
+  addSectionHeading(blocks, "참고 링크", true)
   for (const url of urls.slice(0, 6)) {
     let label = url
     try {
@@ -449,21 +450,9 @@ function addSourceBlocks(blocks: RNestMemoBlock[], sources: MedSafetySource[]) {
   const merged = mergeMedSafetySources(sources, MAX_MEMO_SOURCE_COUNT)
   if (!merged.length) return [] as string[]
 
-  blocks.push(createMemoBlock("divider"))
-  blocks.push(createMemoBlock("heading", { text: "공식 출처/근거" }))
-  appendTableBlock(
-    blocks,
-    ["기관", "문서", "날짜"],
-    merged.slice(0, 6).map((source) =>
-      createMemoTableRowV2([
-        getMedSafetySourceLabel(source),
-        cleanLine(source.title) || cleanLine(source.domain) || "공식 자료",
-        cleanLine(source.effectiveDate ?? source.retrievedAt ?? ""),
-      ])
-    )
-  )
+  addSectionHeading(blocks, "공식 출처/근거", true)
 
-  for (const source of merged.slice(0, 5)) {
+  for (const source of merged.slice(0, 6)) {
     const url = normalizeMedSafetySourceUrl(source.url) || sanitizeNotebookUrl(source.url)
     if (!url) continue
     blocks.push(
@@ -498,21 +487,9 @@ function buildStructuredMemoBlocks(input: BuildMedSafetyMemoInput, structuredAns
   const query = cleanLine(input.query)
   const answer = cleanMemoText(sanitizeMedSafetyTextUrls(String(input.answer ?? "").trim()))
   const questionType = structuredAnswer.question_type || input.questionType || (input.imageAttachmentId ? "image" : "general")
-  const triageLevel = structuredAnswer.triage_level || input.triageLevel || "routine"
   const category = getMemoCategoryConfig(questionType)
   const blocks: RNestMemoBlock[] = []
-  const bottomLine = truncateText(sanitizeMedSafetyTextUrls(structuredAnswer.bottom_line), 280)
   const allSources = mergeMedSafetySources([...(structuredAnswer.citations ?? []), ...(input.sources ?? [])], MAX_MEMO_SOURCE_COUNT)
-
-  blocks.push(
-    createMemoBlock("callout", {
-      text: `${getMedSafetyMemoTriageLabel(triageLevel)} · ${bottomLine || "핵심 결론을 확인하세요."}`,
-    })
-  )
-
-  if (query) {
-    blocks.push(createMemoBlock("quote", { text: query }))
-  }
   appendQuestionImageBlock(blocks, input)
 
   addHeadingIfNeeded(blocks, category.keyHeading, structuredAnswer.key_points.length > 0)
@@ -556,20 +533,9 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
   const sections =
     answer.trim().length > 0 ? parseMedSafetyAnswerSections(answer) : summary ? parseMedSafetyAnswerSections(summary) : []
   const blocks: RNestMemoBlock[] = []
-  const summaryCallout = buildSummaryCalloutText(sections, summary, answer)
 
   if (layout !== "brief") return blocks
   if (input.structuredAnswer) return buildStructuredMemoBlocks(input, input.structuredAnswer)
-
-  blocks.push(
-    createMemoBlock("callout", {
-      text: `핵심 결론 · ${summaryCallout}`,
-    })
-  )
-
-  if (query) {
-    blocks.push(createMemoBlock("quote", { text: query }))
-  }
   appendQuestionImageBlock(blocks, input)
 
   if (answer && sections.length === 0) {
