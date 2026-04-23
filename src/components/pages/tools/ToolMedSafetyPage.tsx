@@ -2029,7 +2029,6 @@ export function ToolMedSafetyPage() {
         answer,
         summary,
         savedAt: lastAssistantMessage.timestamp,
-        model: lastAssistantMessage.model ?? null,
         structuredAnswer,
         sources: lastAssistantMessage.sources ?? [],
         questionType,

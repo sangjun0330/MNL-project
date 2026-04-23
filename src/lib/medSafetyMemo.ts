@@ -38,7 +38,6 @@ export type BuildMedSafetyMemoInput = {
   mode?: string | null
   situation?: string | null
   queryIntent?: string | null
-  model?: string | null
   structuredAnswer?: MedSafetyStructuredAnswer | null
   sources?: MedSafetySource[]
   questionType?: MedSafetyQuestionType | null
@@ -49,10 +48,8 @@ export type BuildMedSafetyMemoInput = {
 }
 
 const URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/gi
-const MAX_RAW_DETAIL_LENGTH = 3600
 const MAX_CALLOUT_TEXT_LENGTH = 220
 const MAX_MEMO_SOURCE_COUNT = 8
-const RAW_DETAIL_LABEL = "원문/세부 근거"
 const AI_NOTE_TEXT = "AI 참고용 메모입니다. 실제 처치와 보고는 환자 상태, 기관 기준, 담당자 판단으로 최종 확인하세요."
 
 type MemoCategoryConfig = {
@@ -136,6 +133,23 @@ function cleanLine(value: string) {
     .replace(/\u0000/g, "")
     .replace(/\u2060/g, "")
     .replace(/\r/g, "")
+    .replace(/\*\*([\s\S]*?)\*\*/g, "$1")
+    .replace(/__([\s\S]*?)__/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .trim()
+}
+
+function cleanMemoText(value: string) {
+  return String(value ?? "")
+    .replace(/\u0000/g, "")
+    .replace(/\u2060/g, "")
+    .replace(/\r/g, "")
+    .replace(/\*\*([\s\S]*?)\*\*/g, "$1")
+    .replace(/__([\s\S]*?)__/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .replace(/[ \t]+\n/g, "\n")
     .trim()
 }
 
@@ -220,12 +234,6 @@ function appendNarrativeBlocks(blocks: RNestMemoBlock[], lines: DisplayBodyLine[
   }
 }
 
-function pushUnique(target: string[], value: string) {
-  const cleaned = cleanLine(value)
-  if (!cleaned) return
-  if (!target.includes(cleaned)) target.push(cleaned)
-}
-
 function truncateText(value: string, maxLength: number) {
   const cleaned = cleanLine(value)
   if (!cleaned) return ""
@@ -247,16 +255,6 @@ function getMemoCategoryConfig(questionType?: MedSafetyQuestionType | null) {
   return MEMO_CATEGORY_CONFIG[questionType || "general"] ?? MEMO_CATEGORY_CONFIG.general
 }
 
-function formatMemoSavedAt(value?: number) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(
-    2,
-    "0"
-  )} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
-}
-
 function createMemoTableRowV2(cells: string[]) {
   return createMemoTableRow(cells[0] ?? "", cells[1] ?? "", {
     cells: cells.map((cell) => createMemoTableCell(cleanLine(cell), { align: "left" })),
@@ -275,6 +273,51 @@ function appendTableBlock(blocks: RNestMemoBlock[], columns: string[], rows: RNe
       },
     })
   )
+}
+
+function addSectionBreak(blocks: RNestMemoBlock[]) {
+  if (!blocks.length) return
+  blocks.push(createMemoBlock("divider"))
+  blocks.push(createMemoBlock("pageSpacer", { spacerMode: "blank-space", spacerHeight: 1 }))
+}
+
+function addSectionHeading(blocks: RNestMemoBlock[], text: string, shouldRender: boolean) {
+  if (!shouldRender) return
+  addSectionBreak(blocks)
+  blocks.push(createMemoBlock("heading", { text: cleanLine(text) }))
+}
+
+function sanitizeMemoTableRow(row: RNestMemoTableRow): RNestMemoTableRow {
+  return {
+    ...row,
+    left: cleanLine(row.left),
+    leftHtml: undefined,
+    right: cleanLine(row.right),
+    rightHtml: undefined,
+    cells: row.cells?.map((cell) => ({
+      ...cell,
+      text: cleanLine(cell.text),
+      textHtml: undefined,
+    })),
+  }
+}
+
+function sanitizeMedSafetyMemoBlocks(blocks: RNestMemoBlock[]) {
+  return blocks.map((block) => ({
+    ...block,
+    text: block.text != null ? cleanMemoText(block.text) : block.text,
+    textHtml: undefined,
+    detailText: block.detailText != null ? cleanMemoText(block.detailText) : block.detailText,
+    detailTextHtml: undefined,
+    table: block.table
+      ? {
+          ...block.table,
+          columns: block.table.columns.map((column) => cleanLine(column)),
+          columnHtml: undefined,
+          rows: block.table.rows.map(sanitizeMemoTableRow),
+        }
+      : block.table,
+  }))
 }
 
 function answerItemText(item: MedSafetyStructuredAnswer["key_points"][number]) {
@@ -307,34 +350,12 @@ function appendWarningCallouts(blocks: RNestMemoBlock[], label: string, items: M
   }
 }
 
-function buildRawDetailText(answer: string) {
-  const normalized = String(answer ?? "").replace(/\u0000/g, "").replace(/\r/g, "").trim()
-  if (!normalized) return ""
-  if (normalized.length <= MAX_RAW_DETAIL_LENGTH) return normalized
-  return `${normalized.slice(0, MAX_RAW_DETAIL_LENGTH).trim()}\n\n[일부 원문이 길어 뒤쪽 내용은 생략되었습니다.]`
-}
-
 function firstContentLine(lines: DisplayBodyLine[]) {
   for (const line of lines) {
     const text = toChecklistText(line)
     if (text) return text
   }
   return ""
-}
-
-function removeFirstContentLine(lines: DisplayBodyLine[]) {
-  const remaining: DisplayBodyLine[] = []
-  let removed = false
-
-  for (const line of lines) {
-    if (!removed && toChecklistText(line)) {
-      removed = true
-      continue
-    }
-    remaining.push(line)
-  }
-
-  return remaining
 }
 
 function buildSummaryCalloutText(sections: MedSafetySection[], summary: string, answer: string) {
@@ -357,7 +378,37 @@ function buildSummaryCalloutText(sections: MedSafetySection[], summary: string, 
 
 function addHeadingIfNeeded(blocks: RNestMemoBlock[], text: string, shouldRender: boolean) {
   if (!shouldRender) return
-  blocks.push(createMemoBlock("heading", { text }))
+  addSectionHeading(blocks, text, shouldRender)
+}
+
+function appendFreeformSectionBlocks(blocks: RNestMemoBlock[], section: MedSafetySection) {
+  const title = cleanLine(section.title) || "내용 정리"
+  const lead = cleanLine(section.lead)
+  const parsedLines = buildMedSafetyDisplayLines(section.bodyLines)
+  const hasBody = parsedLines.some((line) => Boolean(toChecklistText(line)))
+  if (!lead && !hasBody) return
+
+  addSectionHeading(blocks, title, true)
+
+  if (lead) {
+    blocks.push(createMemoBlock(section.tone === "warning" ? "callout" : "paragraph", { text: lead }))
+  }
+
+  if (!hasBody) return
+
+  if (section.tone === "action") {
+    appendChecklistBlocks(blocks, parsedLines)
+    return
+  }
+
+  if (section.tone === "compare") {
+    const { rows, remaining } = buildComparisonRows(parsedLines)
+    if (rows.length >= 2) appendTableBlock(blocks, ["항목", "내용"], rows)
+    appendNarrativeBlocks(blocks, remaining.length >= 2 ? remaining : parsedLines)
+    return
+  }
+
+  appendNarrativeBlocks(blocks, parsedLines)
 }
 
 function addBookmarks(blocks: RNestMemoBlock[], urls: string[]) {
@@ -392,21 +443,6 @@ function appendQuestionImageBlock(blocks: RNestMemoBlock[], input: BuildMedSafet
       mediaOffsetX: 0,
     })
   )
-}
-
-function buildMemoMetaRows(input: BuildMedSafetyMemoInput, questionType?: MedSafetyQuestionType | null, triageLevel?: MedSafetyTriageLevel | null) {
-  const rows: RNestMemoTableRow[] = []
-  rows.push(createMemoTableRowV2(["카테고리", getMedSafetyMemoQuestionTypeLabel(questionType)]))
-  rows.push(createMemoTableRowV2(["긴급도", getMedSafetyMemoTriageLabel(triageLevel)]))
-  const savedAt = formatMemoSavedAt(input.savedAt)
-  if (savedAt) rows.push(createMemoTableRowV2(["분석 시각", savedAt]))
-  if (input.searchType) rows.push(createMemoTableRowV2(["검색 방식", input.searchType === "premium" ? "프리미엄 공식 근거 검색" : "기본 검색"]))
-  if (input.model) rows.push(createMemoTableRowV2(["모델", input.model]))
-  return rows
-}
-
-function addMemoMetaTable(blocks: RNestMemoBlock[], input: BuildMedSafetyMemoInput, questionType?: MedSafetyQuestionType | null, triageLevel?: MedSafetyTriageLevel | null) {
-  appendTableBlock(blocks, ["항목", "내용"], buildMemoMetaRows(input, questionType, triageLevel))
 }
 
 function addSourceBlocks(blocks: RNestMemoBlock[], sources: MedSafetySource[]) {
@@ -460,7 +496,7 @@ function appendStructuredComparisonTable(blocks: RNestMemoBlock[], rows: MedSafe
 
 function buildStructuredMemoBlocks(input: BuildMedSafetyMemoInput, structuredAnswer: MedSafetyStructuredAnswer) {
   const query = cleanLine(input.query)
-  const answer = sanitizeMedSafetyTextUrls(String(input.answer ?? "").trim())
+  const answer = cleanMemoText(sanitizeMedSafetyTextUrls(String(input.answer ?? "").trim()))
   const questionType = structuredAnswer.question_type || input.questionType || (input.imageAttachmentId ? "image" : "general")
   const triageLevel = structuredAnswer.triage_level || input.triageLevel || "routine"
   const category = getMemoCategoryConfig(questionType)
@@ -478,7 +514,6 @@ function buildStructuredMemoBlocks(input: BuildMedSafetyMemoInput, structuredAns
     blocks.push(createMemoBlock("quote", { text: query }))
   }
   appendQuestionImageBlock(blocks, input)
-  addMemoMetaTable(blocks, input, questionType, triageLevel)
 
   addHeadingIfNeeded(blocks, category.keyHeading, structuredAnswer.key_points.length > 0)
   appendAnswerItemBullets(blocks, structuredAnswer.key_points)
@@ -505,29 +540,18 @@ function buildStructuredMemoBlocks(input: BuildMedSafetyMemoInput, structuredAns
     blocks.push(createMemoBlock("callout", { text: `최신성 · ${truncateText(structuredAnswer.freshness.note, MAX_CALLOUT_TEXT_LENGTH)}` }))
   }
 
-  const rawDetailText = buildRawDetailText(answer || structuredAnswer.bottom_line)
-  if (rawDetailText) {
-    blocks.push(
-      createMemoBlock("toggle", {
-        text: RAW_DETAIL_LABEL,
-        detailText: rawDetailText,
-        collapsed: true,
-      })
-    )
-  }
-
   const sourceUrls = addSourceBlocks(blocks, allSources)
   const urls = extractUrls(query, answer, structuredAnswer.bottom_line).filter((url) => !sourceUrls.includes(url))
   addBookmarks(blocks, urls)
   blocks.push(createMemoBlock("paragraph", { text: AI_NOTE_TEXT }))
 
-  return blocks
+  return sanitizeMedSafetyMemoBlocks(blocks)
 }
 
 export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
   const layout = input.layout ?? "brief"
   const query = cleanLine(input.query)
-  const answer = sanitizeMedSafetyTextUrls(String(input.answer ?? "").trim())
+  const answer = cleanMemoText(sanitizeMedSafetyTextUrls(String(input.answer ?? "").trim()))
   const summary = cleanLine(sanitizeMedSafetyTextUrls(input.summary ?? ""))
   const sections =
     answer.trim().length > 0 ? parseMedSafetyAnswerSections(answer) : summary ? parseMedSafetyAnswerSections(summary) : []
@@ -536,79 +560,6 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
 
   if (layout !== "brief") return blocks
   if (input.structuredAnswer) return buildStructuredMemoBlocks(input, input.structuredAnswer)
-
-  const actionLines: DisplayBodyLine[] = []
-  const warningNarrativeLines: DisplayBodyLine[] = []
-  const warningCallouts: string[] = []
-  const compareTables: RNestMemoTableRow[][] = []
-  const compareNarrativeLines: DisplayBodyLine[] = []
-  const extraLines: DisplayBodyLine[] = []
-
-  for (const section of sections) {
-    const parsedLines = buildMedSafetyDisplayLines(section.bodyLines)
-
-    if (section.tone === "summary") {
-      if (section.lead && cleanLine(section.lead) !== summaryCallout) {
-        extraLines.push({
-          kind: "text",
-          content: cleanLine(section.lead),
-          level: 0,
-        })
-      }
-      if (section.bodyLines.length > 0) {
-        const firstLine = firstContentLine(parsedLines)
-        extraLines.push(...(cleanLine(firstLine) === summaryCallout ? removeFirstContentLine(parsedLines) : parsedLines))
-      }
-      continue
-    }
-
-    if (section.tone === "action") {
-      if (section.lead) {
-        actionLines.push({
-          kind: "text",
-          content: cleanLine(section.lead),
-          level: 0,
-        })
-      }
-      actionLines.push(...parsedLines)
-      continue
-    }
-
-    if (section.tone === "warning") {
-      if (section.lead) pushUnique(warningCallouts, section.lead)
-      if (!section.lead && parsedLines.length > 0) {
-        const firstLine = firstContentLine(parsedLines)
-        if (firstLine) pushUnique(warningCallouts, firstLine)
-        warningNarrativeLines.push(...removeFirstContentLine(parsedLines))
-        continue
-      }
-      warningNarrativeLines.push(...parsedLines)
-      continue
-    }
-
-    if (section.tone === "compare") {
-      if (section.lead) {
-        compareNarrativeLines.push({
-          kind: "text",
-          content: cleanLine(section.lead),
-          level: 0,
-        })
-      }
-      const { rows, remaining } = buildComparisonRows(parsedLines)
-      if (rows.length >= 2) compareTables.push(rows)
-      compareNarrativeLines.push(...remaining)
-      continue
-    }
-
-    if (section.lead) {
-      extraLines.push({
-        kind: "text",
-        content: cleanLine(section.lead),
-        level: 0,
-      })
-    }
-    extraLines.push(...parsedLines)
-  }
 
   blocks.push(
     createMemoBlock("callout", {
@@ -620,52 +571,14 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
     blocks.push(createMemoBlock("quote", { text: query }))
   }
   appendQuestionImageBlock(blocks, input)
-  addMemoMetaTable(blocks, input, input.questionType ?? (input.imageAttachmentId ? "image" : "general"), input.triageLevel ?? null)
-
-  addHeadingIfNeeded(blocks, "지금 할 일", actionLines.length > 0)
-  appendChecklistBlocks(blocks, actionLines)
-
-  addHeadingIfNeeded(blocks, "주의/보고 포인트", warningCallouts.length > 0 || warningNarrativeLines.length > 0)
-  for (const text of warningCallouts) {
-    if (!text) continue
-    blocks.push(createMemoBlock("callout", { text: `주의 · ${text}` }))
-  }
-  appendNarrativeBlocks(blocks, warningNarrativeLines)
-
-  addHeadingIfNeeded(blocks, "비교/판단 근거", compareTables.length > 0 || compareNarrativeLines.length > 0)
-  for (const rows of compareTables) {
-    blocks.push(
-      createMemoBlock("table", {
-        table: {
-          version: 2,
-          columns: ["항목", "내용"],
-          rows,
-          headerRow: true,
-        },
-      })
-    )
-  }
-  appendNarrativeBlocks(blocks, compareNarrativeLines)
 
   if (answer && sections.length === 0) {
-    extraLines.push({
-      kind: "text",
-      content: answer,
-      level: 0,
-    })
-  }
-  addHeadingIfNeeded(blocks, "추가 설명", extraLines.length > 0)
-  appendNarrativeBlocks(blocks, extraLines)
-
-  const rawDetailText = buildRawDetailText(answer || summary)
-  if (rawDetailText) {
-    blocks.push(
-      createMemoBlock("toggle", {
-        text: RAW_DETAIL_LABEL,
-        detailText: rawDetailText,
-        collapsed: true,
-      })
-    )
+    addSectionHeading(blocks, "내용 정리", true)
+    blocks.push(createMemoBlock("paragraph", { text: answer }))
+  } else {
+    for (const section of sections) {
+      appendFreeformSectionBlocks(blocks, section)
+    }
   }
 
   const sourceUrls = addSourceBlocks(blocks, input.sources ?? [])
@@ -673,5 +586,5 @@ export function buildMedSafetyMemoBlocks(input: BuildMedSafetyMemoInput) {
   addBookmarks(blocks, urls)
   blocks.push(createMemoBlock("paragraph", { text: AI_NOTE_TEXT }))
 
-  return blocks
+  return sanitizeMedSafetyMemoBlocks(blocks)
 }

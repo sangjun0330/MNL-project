@@ -1,17 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserAuthHeaders, useAuthState } from "@/lib/auth";
 import { useI18n } from "@/lib/useI18n";
 import { buildStructuredCopyText, copyTextToClipboard } from "@/lib/structuredCopy";
-import { buildMedSafetySourcesCopyLines, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
+import {
+  buildMedSafetySourcesCopyLines,
+  extractMedSafetyInlineCitations,
+  mergeMedSafetySources,
+  type MedSafetyGroundingMode,
+  type MedSafetyGroundingStatus,
+  type MedSafetySource,
+} from "@/lib/medSafetySources";
 import { AnimatedCopyLabel } from "@/components/ui/AnimatedCopyLabel";
 import { sanitizeMemoDocument } from "@/lib/notebook";
-import { buildMedSafetyMemoBlocks } from "@/lib/medSafetyMemo";
+import { buildMedSafetyMemoBlocks, getMedSafetyMemoQuestionTypeLabel } from "@/lib/medSafetyMemo";
 import { useAppStore } from "@/lib/store";
 import { MedSafetySourceRail } from "@/components/pages/tools/MedSafetySourceRail";
+import { MedSafetySourceButton } from "@/components/pages/tools/MedSafetySourceButton";
+import {
+  buildMedSafetyDisplayLines,
+  parseMedSafetyAnswerSections,
+  type MedSafetyAnswerDisplayLine,
+  type MedSafetyAnswerSection,
+  type MedSafetyAnswerSectionTone,
+} from "@/lib/medSafetyAnswerSections";
+import type {
+  MedSafetyQualitySnapshot,
+  MedSafetyStructuredAnswer,
+  MedSafetyVerificationReport,
+} from "@/lib/medSafetyStructured";
+import type { SearchCreditType } from "@/lib/billing/plans";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 
 /* ── Types ── */
@@ -34,16 +55,15 @@ type MedSafetyRecentItem = {
     resultKind: "medication" | "device" | "scenario";
     model?: string | null;
     source?: "openai_live" | "openai_fallback";
+    searchType?: SearchCreditType;
+    structuredAnswer?: MedSafetyStructuredAnswer | null;
+    quality?: MedSafetyQualitySnapshot | null;
+    verification?: MedSafetyVerificationReport | null;
     sources: MedSafetySource[];
     groundingMode: MedSafetyGroundingMode;
     groundingStatus: MedSafetyGroundingStatus;
     groundingError?: string | null;
   };
-};
-
-type NarrativeSection = {
-  title: string;
-  items: string[];
 };
 
 type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
@@ -58,105 +78,7 @@ const BTN_PRIMARY =
 const BTN_SECONDARY =
   "inline-flex h-9 items-center justify-center rounded-full border border-gray-200 bg-gray-50 px-4 text-[11px] font-semibold text-gray-500 transition-colors hover:bg-gray-100 active:bg-gray-200";
 
-/* ── Utility functions (unchanged) ── */
-
-function isHeadingLine(value: string) {
-  const line = String(value ?? "").trim();
-  if (!line) return false;
-  if (!/[:：]$/.test(line)) return false;
-  const noColon = line.replace(/[:：]$/, "").trim();
-  if (!noColon) return false;
-  if (noColon.length > 56) return false;
-  return true;
-}
-
-function cleanNarrativeLine(value: string) {
-  return String(value ?? "")
-    .replace(/\u0000/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function stripBulletPrefix(value: string) {
-  return String(value ?? "")
-    .replace(/^[-*•·]\s+/, "")
-    .replace(/^\d+[.)]\s+/, "")
-    .trim();
-}
-
-function splitSectionItems(lines: string[]) {
-  const out: string[] = [];
-  let buffer: string[] = [];
-
-  const flush = () => {
-    if (!buffer.length) return;
-    out.push(buffer.join(" ").trim());
-    buffer = [];
-  };
-
-  for (const raw of lines) {
-    const line = cleanNarrativeLine(raw);
-    if (!line) {
-      flush();
-      continue;
-    }
-    const normalized = stripBulletPrefix(line);
-    if (!normalized) continue;
-    if (/^[-*•·]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) {
-      flush();
-      buffer.push(normalized);
-      flush();
-      continue;
-    }
-    buffer.push(normalized);
-  }
-  flush();
-  return out.filter(Boolean);
-}
-
-function parseNarrativeSections(value: string): NarrativeSection[] {
-  const lines = String(value ?? "")
-    .replace(/\r/g, "")
-    .split("\n");
-
-  const sections: NarrativeSection[] = [];
-  let currentTitle = "상세 결과";
-  let currentLines: string[] = [];
-
-  const pushCurrent = () => {
-    const items = splitSectionItems(currentLines);
-    if (!items.length) {
-      currentLines = [];
-      return;
-    }
-    sections.push({
-      title: currentTitle,
-      items,
-    });
-    currentLines = [];
-  };
-
-  for (const rawLine of lines) {
-    const line = cleanNarrativeLine(rawLine);
-    if (!line) {
-      currentLines.push("");
-      continue;
-    }
-    if (isHeadingLine(line)) {
-      pushCurrent();
-      currentTitle = line.replace(/[:：]$/, "").trim();
-      continue;
-    }
-    currentLines.push(line);
-  }
-  pushCurrent();
-
-  if (sections.length) return sections;
-
-  const fallbackItems = splitSectionItems(lines);
-  if (!fallbackItems.length) return [];
-  return [{ title: "상세 결과", items: fallbackItems }];
-}
+/* ── Utility functions ── */
 
 function formatDateTime(value: number) {
   const d = new Date(value);
@@ -224,6 +146,343 @@ function queryIntentLabel(intent: "medication" | "device" | "scenario" | null | 
   if (intent === "scenario") return "상황질문";
   if (intent === "medication") return "의약품";
   return "";
+}
+
+function sectionToneStyles(tone: MedSafetyAnswerSectionTone) {
+  if (tone === "warning") {
+    return {
+      shell: "border-[#F0DEC4] bg-[#FFF9F1]",
+      title: "text-[#9A5B1B]",
+      marker: "bg-[#D88A1D]",
+    };
+  }
+  if (tone === "action") {
+    return {
+      shell: "border-[#D8E9D9] bg-[#F5FBF6]",
+      title: "text-[#2E6A35]",
+      marker: "bg-[#4F9F58]",
+    };
+  }
+  if (tone === "summary") {
+    return {
+      shell: "border-[#D4E0F3] bg-[#F6F9FE]",
+      title: "text-[#31598B]",
+      marker: "bg-[#4E78B9]",
+    };
+  }
+  if (tone === "compare") {
+    return {
+      shell: "border-[#DADDEA] bg-[#F7F8FC]",
+      title: "text-[#48627E]",
+      marker: "bg-[#6D7790]",
+    };
+  }
+  return {
+    shell: "border-gray-100 bg-white",
+    title: "text-gray-500",
+    marker: "bg-gray-300",
+  };
+}
+
+function displayLineIndentStyle(level: number): CSSProperties | undefined {
+  if (level <= 0) return undefined;
+  return { paddingLeft: `${Math.min(3, level) * 14}px` };
+}
+
+function InlineRecentAnswerText({
+  text,
+  sources,
+  className,
+  style,
+}: {
+  text: string;
+  sources: MedSafetySource[];
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const parsed = useMemo(() => extractMedSafetyInlineCitations(text, sources), [text, sources]);
+  if (!parsed.text && !parsed.citations.length) return null;
+  return (
+    <div className={["min-w-0 whitespace-pre-wrap break-words", className].filter(Boolean).join(" ")} style={style}>
+      {parsed.text ? <span>{parsed.text}</span> : null}
+      {parsed.citations.length ? (
+        <span className={["inline-flex flex-wrap items-center gap-1 align-middle", parsed.text ? "ml-2" : ""].join(" ")}>
+          {parsed.citations.map((source) => (
+            <MedSafetySourceButton key={`${source.url}-recent-inline`} source={source} variant="inline" />
+          ))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function RecentDisplayLine({
+  line,
+  sources,
+}: {
+  line: MedSafetyAnswerDisplayLine;
+  sources: MedSafetySource[];
+}) {
+  if (line.kind === "blank") return null;
+  const indentStyle = displayLineIndentStyle(line.level);
+
+  if (line.kind === "bullet") {
+    return (
+      <div className="flex min-w-0 items-start gap-2.5 text-[14px] leading-7 text-gray-700" style={indentStyle}>
+        <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-current opacity-50" aria-hidden="true" />
+        <InlineRecentAnswerText text={line.content} sources={sources} />
+      </div>
+    );
+  }
+
+  if (line.kind === "number") {
+    return (
+      <div className="flex min-w-0 items-start gap-2.5 text-[14px] leading-7 text-gray-700" style={indentStyle}>
+        <span className="min-w-[20px] shrink-0 font-semibold text-gray-900">{line.marker}</span>
+        <InlineRecentAnswerText text={line.content} sources={sources} />
+      </div>
+    );
+  }
+
+  if (line.kind === "label") {
+    return (
+      <div className="flex min-w-0 items-start gap-2.5 text-[14px] leading-7 text-gray-700" style={indentStyle}>
+        <span className="min-w-[24px] shrink-0 font-semibold text-[color:var(--rnest-accent)]">{line.marker}</span>
+        <InlineRecentAnswerText text={line.content} sources={sources} />
+      </div>
+    );
+  }
+
+  return (
+    <InlineRecentAnswerText
+      text={line.content}
+      sources={sources}
+      className="text-[14px] leading-7 text-gray-700"
+      style={indentStyle}
+    />
+  );
+}
+
+function RecentAnswerSections({ content, sources }: { content: string; sources: MedSafetySource[] }) {
+  const sections = useMemo(() => parseMedSafetyAnswerSections(content), [content]);
+  if (!sections.length) {
+    return <InlineRecentAnswerText text={content} sources={sources} className="text-[14.5px] leading-7 text-gray-700" />;
+  }
+
+  return (
+    <div className="space-y-4">
+      {sections.map((section: MedSafetyAnswerSection, index: number) => {
+        const styles = sectionToneStyles(section.tone);
+        const lines = buildMedSafetyDisplayLines(section.bodyLines);
+        return (
+          <section key={`${section.title}-${index}`} className={`rounded-2xl border px-4 py-4 ${styles.shell}`}>
+            <div className={`mb-2 flex items-center gap-2 text-[11.5px] font-bold uppercase tracking-[0.06em] ${styles.title}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${styles.marker}`} aria-hidden="true" />
+              {section.title || "상세 결과"}
+            </div>
+            {section.lead ? (
+              <InlineRecentAnswerText
+                text={section.lead}
+                sources={sources}
+                className="text-[15px] font-semibold leading-7 text-gray-900"
+              />
+            ) : null}
+            {lines.length ? (
+              <div className={section.lead ? "mt-2.5 space-y-1.5" : "space-y-1.5"}>
+                {lines.map((line, lineIndex) => (
+                  <RecentDisplayLine key={`${section.title}-${lineIndex}`} line={line} sources={sources} />
+                ))}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function structuredTriageLabel(answer: MedSafetyStructuredAnswer) {
+  if (answer.triage_level === "critical") return "즉시 대응";
+  if (answer.triage_level === "urgent") return "우선 확인";
+  return "일반 확인";
+}
+
+function structuredTriageClass(answer: MedSafetyStructuredAnswer) {
+  if (answer.triage_level === "critical") return "border-[#F2C9C9] bg-[#FFF1F1] text-[#A33636]";
+  if (answer.triage_level === "urgent") return "border-[#F0DEC4] bg-[#FFF7EE] text-[#9A5B1B]";
+  return "border-[#D8E0EC] bg-[#F1F5FA] text-[#48627E]";
+}
+
+function collectCitationIds(items: Array<{ citation_ids?: string[] }>) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    for (const id of item.citation_ids ?? []) {
+      const normalized = String(id ?? "").trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+    }
+  }
+  return out;
+}
+
+function citationLookupFromStructuredAnswer(answer: MedSafetyStructuredAnswer, sources: MedSafetySource[]) {
+  const merged = mergeMedSafetySources([...answer.citations, ...sources], 12);
+  const byId = new Map<string, MedSafetySource>();
+  merged.forEach((source, index) => {
+    const id = typeof source.id === "string" && source.id ? source.id : `src_${index + 1}`;
+    byId.set(id, { ...source, id });
+  });
+  return byId;
+}
+
+function StructuredCitationButtons({ ids, lookup }: { ids: string[]; lookup: Map<string, MedSafetySource> }) {
+  const sources = ids.map((id) => lookup.get(id)).filter((item): item is MedSafetySource => Boolean(item));
+  if (!sources.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {sources.map((source) => (
+        <MedSafetySourceButton key={`${source.url}-${source.id ?? ""}`} source={source} variant="inline" />
+      ))}
+    </div>
+  );
+}
+
+function RecentStructuredItems({
+  title,
+  items,
+  lookup,
+  tone = "neutral",
+  checklist = false,
+}: {
+  title: string;
+  items: MedSafetyStructuredAnswer["key_points"];
+  lookup: Map<string, MedSafetySource>;
+  tone?: MedSafetyAnswerSectionTone;
+  checklist?: boolean;
+}) {
+  if (!items.length) return null;
+  const styles = sectionToneStyles(tone);
+  return (
+    <section className={`rounded-2xl border px-4 py-4 ${styles.shell}`}>
+      <div className={`mb-2 flex items-center gap-2 text-[11.5px] font-bold uppercase tracking-[0.06em] ${styles.title}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${styles.marker}`} aria-hidden="true" />
+        {title}
+      </div>
+      <div className="space-y-2">
+        {items.map((item, index) => (
+          <div key={`${title}-${index}`} className="flex items-start gap-2.5">
+            {checklist ? (
+              <span className="mt-[7px] flex h-4 w-4 shrink-0 items-center justify-center rounded border border-[color:var(--rnest-accent-border)] bg-white" aria-hidden="true" />
+            ) : (
+              <span className="mt-[11px] h-[5px] w-[5px] shrink-0 rounded-full bg-gray-400" aria-hidden="true" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-gray-800">{item.text}</div>
+              {item.evidence_status === "needs_review" ? (
+                <span className="mt-1 inline-flex rounded-full border border-[#F0DEC4] bg-[#FFF7EE] px-2 py-0.5 text-[10.5px] font-semibold text-[#9A5B1B]">
+                  근거 확인 필요
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+      <StructuredCitationButtons ids={collectCitationIds(items)} lookup={lookup} />
+    </section>
+  );
+}
+
+function RecentStructuredComparison({
+  answer,
+  lookup,
+}: {
+  answer: MedSafetyStructuredAnswer;
+  lookup: Map<string, MedSafetySource>;
+}) {
+  if (!answer.comparison_table.length) return null;
+  return (
+    <section className="rounded-2xl border border-[#DADDEA] bg-[#F7F8FC] px-4 py-4">
+      <div className="mb-3 flex items-center gap-2 text-[11.5px] font-bold uppercase tracking-[0.06em] text-[#48627E]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#6D7790]" aria-hidden="true" />
+        비교 포인트
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-white/80 bg-white">
+        <table className="min-w-[720px] w-full border-collapse text-left text-[13px]">
+          <thead className="bg-gray-50 text-[11px] uppercase tracking-[0.05em] text-gray-500">
+            <tr>
+              <th className="px-3 py-2 font-semibold">항목</th>
+              <th className="px-3 py-2 font-semibold">언제</th>
+              <th className="px-3 py-2 font-semibold">효과</th>
+              <th className="px-3 py-2 font-semibold">한계</th>
+              <th className="px-3 py-2 font-semibold">실무</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 text-gray-700">
+            {answer.comparison_table.map((row, index) => (
+              <tr key={`recent-compare-${index}`}>
+                <td className="px-3 py-3 align-top font-semibold text-gray-900">{row.role}</td>
+                <td className="px-3 py-3 align-top">{row.when_to_use}</td>
+                <td className="px-3 py-3 align-top">{row.effect_onset}</td>
+                <td className="px-3 py-3 align-top">{row.limitations}</td>
+                <td className="px-3 py-3 align-top">{row.bedside_points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <StructuredCitationButtons ids={collectCitationIds(answer.comparison_table)} lookup={lookup} />
+    </section>
+  );
+}
+
+function RecentStructuredAnswer({
+  answer,
+  sources,
+  quality,
+}: {
+  answer: MedSafetyStructuredAnswer;
+  sources: MedSafetySource[];
+  quality?: MedSafetyQualitySnapshot | null;
+}) {
+  const lookup = citationLookupFromStructuredAnswer(answer, sources);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${structuredTriageClass(answer)}`}>
+          {structuredTriageLabel(answer)}
+        </span>
+        <span className={PILL_GRAY}>{getMedSafetyMemoQuestionTypeLabel(answer.question_type)}</span>
+        {quality?.grounded ? (
+          <span className="inline-flex items-center rounded-full border border-[#D4E0F3] bg-[#EEF4FF] px-2.5 py-1 text-[11px] font-semibold text-[#31598B]">
+            공식 근거 확인됨
+          </span>
+        ) : null}
+      </div>
+
+      <div className="rounded-2xl border border-[#D4E0F3] bg-[#F6F9FE] px-4 py-4">
+        <div className="text-[11.5px] font-bold uppercase tracking-[0.06em] text-[#31598B]">핵심 결론</div>
+        <div className="mt-2 whitespace-pre-wrap break-words text-[16px] font-semibold leading-8 text-gray-900">
+          {answer.bottom_line}
+        </div>
+        <StructuredCitationButtons ids={answer.bottom_line_citation_ids} lookup={lookup} />
+      </div>
+
+      <RecentStructuredItems title="핵심 포인트" items={answer.key_points} lookup={lookup} tone="summary" />
+      <RecentStructuredItems title="지금 할 일" items={answer.recommended_actions} lookup={lookup} tone="action" checklist />
+      <RecentStructuredItems title="하지 말아야 할 것" items={answer.do_not_do} lookup={lookup} tone="warning" />
+      <RecentStructuredItems title="즉시 보고 상황" items={answer.when_to_escalate} lookup={lookup} tone="warning" />
+      <RecentStructuredItems title="환자별 주의사항" items={answer.patient_specific_caveats} lookup={lookup} />
+      <RecentStructuredComparison answer={answer} lookup={lookup} />
+
+      {answer.uncertainty.needs_verification && answer.uncertainty.summary ? (
+        <div className="rounded-2xl border border-[#F0DEC4] bg-[#FFF7EE] px-4 py-3 text-[13px] leading-6 text-[#9A5B1B]">
+          {answer.uncertainty.summary}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function buildRecentCopyText(item: MedSafetyRecentItem, t: TranslateFn) {
@@ -358,7 +617,10 @@ export function ToolMedSafetyRecentPage() {
   }, [items, t]);
 
   const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? null, [items, selectedId]);
-  const selectedSections = useMemo(() => parseNarrativeSections(selected?.result.answer ?? ""), [selected]);
+  const selectedStructuredAnswer = useMemo(
+    () => selected?.result.verification?.corrected_answer ?? selected?.result.structuredAnswer ?? null,
+    [selected]
+  );
   const selectedCopyText = useMemo(() => {
     if (!selected) return "";
     return buildRecentCopyText(selected, t);
@@ -401,7 +663,9 @@ export function ToolMedSafetyRecentPage() {
     const query = item.request.query || "";
     const answer = item.result.answer || "";
     const summary = item.result.summary || "";
-    const title = (item.result.title || query).slice(0, 80);
+    const structuredAnswer = item.result.verification?.corrected_answer ?? item.result.structuredAnswer ?? null;
+    const categoryLabel = getMedSafetyMemoQuestionTypeLabel(structuredAnswer?.question_type ?? null);
+    const title = `${categoryLabel} · ${item.result.title || query}`.slice(0, 80);
     const blocks = buildMedSafetyMemoBlocks({
       layout: "brief",
       query,
@@ -412,14 +676,18 @@ export function ToolMedSafetyRecentPage() {
       mode: item.request.mode ?? null,
       situation: item.request.situation ?? null,
       queryIntent: item.request.queryIntent ?? null,
-      model: item.result.model ?? null,
+      structuredAnswer,
+      sources: item.result.sources ?? [],
+      questionType: structuredAnswer?.question_type ?? null,
+      triageLevel: structuredAnswer?.triage_level ?? null,
+      searchType: item.result.searchType ?? null,
     });
 
     const doc = sanitizeMemoDocument({
       title,
       icon: "book",
       blocks,
-      tags: ["AI검색"],
+      tags: Array.from(new Set(["AI검색", categoryLabel])),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
@@ -567,34 +835,17 @@ export function ToolMedSafetyRecentPage() {
                   <div className="mt-1.5 text-[14px] leading-6 text-gray-900">{selected.request.query || "-"}</div>
                 </div>
 
-                {/* Summary */}
-                <div className="mt-5">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-400">{t("요약")}</div>
-                  <div className="mt-1.5 text-[15px] leading-7 text-gray-800">{selected.result.summary}</div>
-                </div>
-
                 <hr className="my-5 border-gray-100" />
 
-                {/* Parsed sections */}
-                {selectedSections.length ? (
-                  <div className="space-y-5">
-                    {selectedSections.map((section, index) => (
-                      <section key={`${section.title}-${index}`}>
-                        <h3 className="text-[15px] font-semibold text-gray-900">{t(section.title || "상세 결과")}</h3>
-                        <div className="mt-2 space-y-1.5">
-                          {section.items.map((entry, entryIndex) => (
-                            <p key={`${section.title}-${entryIndex}`} className="text-[14px] leading-7 text-gray-700">
-                              {entry}
-                            </p>
-                          ))}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
+                {/* 화면 답변과 같은 구조화 렌더링 */}
+                {selectedStructuredAnswer ? (
+                  <RecentStructuredAnswer
+                    answer={selectedStructuredAnswer}
+                    sources={selected.result.sources}
+                    quality={selected.result.quality ?? null}
+                  />
                 ) : (
-                  <div className="whitespace-pre-wrap break-words text-[14px] leading-7 text-gray-700">
-                    {selected.result.answer}
-                  </div>
+                  <RecentAnswerSections content={selected.result.answer} sources={selected.result.sources} />
                 )}
 
                 <MedSafetySourceRail
