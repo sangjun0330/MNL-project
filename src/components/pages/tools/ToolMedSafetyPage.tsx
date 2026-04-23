@@ -739,29 +739,12 @@ function splitSectionSubHeadings(sections: AnswerSection[]): AnswerSection[] {
   });
 }
 
-function sectionCardClass(tone: AnswerSectionTone) {
-  const base = "rounded-[22px] border bg-white/94 px-4 py-5 shadow-[0_12px_32px_rgba(15,23,42,0.045)] sm:px-5 sm:py-6";
-  if (tone === "warning") return `${base} border-[#F1D7B8] border-l-4 border-l-[#D97706]`;
-  if (tone === "action") return `${base} border-[#CFE7D5] border-l-4 border-l-[#2E7D45]`;
-  if (tone === "summary") return `${base} border-[#D6E2F3] border-l-4 border-l-[#3B6EA8]`;
-  if (tone === "compare") return `${base} border-[#D9E2EC] border-l-4 border-l-[#5B7188]`;
-  return `${base} border-[#E4E7EF] border-l-4 border-l-[#9CA3AF]`;
-}
-
 function sectionTitleClass(tone: AnswerSectionTone) {
   if (tone === "warning") return "text-[#9A5B1B]";
   if (tone === "action") return "text-[#2E6A35]";
   if (tone === "summary") return "text-[#31598B]";
   if (tone === "compare") return "text-[#48627E]";
   return "text-ios-sub";
-}
-
-function sectionTitlePillClass(tone: AnswerSectionTone) {
-  if (tone === "warning") return "border-[#F1D7B8] bg-[#FFF8ED]";
-  if (tone === "action") return "border-[#CFE7D5] bg-[#F1FAF3]";
-  if (tone === "summary") return "border-[#D6E2F3] bg-[#F4F8FF]";
-  if (tone === "compare") return "border-[#D9E2EC] bg-[#F5F8FB]";
-  return "border-[#E3E7EF] bg-[#F7F9FC]";
 }
 
 function tokenizeStreamingText(value: string) {
@@ -1319,22 +1302,21 @@ function AssistantAnswerSections({
   const bodyTextClass = "text-[15px] leading-[1.78] text-ios-text/90";
 
   return (
-    <div className="flex flex-col gap-5 sm:gap-6">
+    <div className="flex flex-col">
       {sections.map((section, sectionIndex) => {
         return (
-          <div key={`${section.title}-${sectionIndex}`}>
-            <section className={sectionCardClass(section.tone)}>
-              <div
-                className={`inline-flex items-center rounded-full border px-3 py-1.5 text-[12px] font-bold uppercase tracking-[0.06em] ${sectionTitlePillClass(section.tone)} ${sectionTitleClass(section.tone)}`}
-              >
-                {section.title}
-              </div>
-              <div className="mt-4">
-                {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} reveal={reveal} /> : null}
-                <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} reveal={reveal} />
-              </div>
-            </section>
-          </div>
+          <section
+            key={`${section.title}-${sectionIndex}`}
+            className={sectionIndex === 0 ? "pb-1" : "mt-10 pt-1 pb-1 sm:mt-11"}
+          >
+            <div className={`text-[13px] font-extrabold tracking-[0.02em] ${sectionTitleClass(section.tone)}`}>
+              {section.title}
+            </div>
+            <div className="mt-4">
+              {section.lead ? <InlineAnswerText text={section.lead} sources={sources} className={leadTextClass} reveal={reveal} /> : null}
+              <SectionBodyLines section={section} sources={sources} bodyTextClass={bodyTextClass} reveal={reveal} />
+            </div>
+          </section>
         );
       })}
     </div>
