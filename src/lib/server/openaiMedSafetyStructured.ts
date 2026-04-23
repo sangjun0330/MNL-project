@@ -1076,6 +1076,20 @@ function isFreshnessSensitiveQuery(query: string) {
   return /(최신|most recent|today|current|업데이트|최근|가이드라인|권고안|권고|20\d{2}\s*년\s*기준|as of\s*20\d{2}|현행)/i.test(query);
 }
 
+export function isMedSafetyIdentityQuestion(query: string) {
+  const normalized = normalizeText(query).toLowerCase();
+  if (!normalized) return false;
+
+  if (/(openai|chatgpt|\bgpt\b|llm|language model|large language model)/i.test(normalized)) return true;
+  if (/(어떤|무슨|어느|뭐|무엇).{0,12}(모델|model).{0,16}(쓰|사용|기반|돌|이야|인가|이냐|임|야|니)/i.test(normalized)) return true;
+  if (/(모델|model).{0,16}(뭐|무엇|이름|버전|version|쓰|사용|기반|원본|엔진)/i.test(normalized)) return true;
+  if (/(원본|기반|엔진|제공사|제공자|만든\s*곳|개발사).{0,16}(뭐|무엇|어디|누구|모델|ai|챗봇|bot)/i.test(normalized)) return true;
+  if (/(너|니|네|당신|이\s*(?:ai|봇|챗봇|도구|서비스)|rnest).{0,18}(이름|정체|누구|뭐야|무엇|모델|원본|기반|버전|만든|개발)/i.test(normalized)) return true;
+  if (/(what|which).{0,16}(model|ai|assistant)|who\s+are\s+you|what\s+are\s+you|your\s+name|what\s+is\s+your\s+name/i.test(normalized)) return true;
+
+  return false;
+}
+
 function buildGroundingDecision(query: string, imageDataUrl?: string): GroundingDecision {
   const normalized = normalizeText(query);
   const questionType: MedSafetyStructuredAnswer["question_type"] =
@@ -1376,6 +1390,10 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
 답변은 실무에 도움이 되어야 하지만, 모든 질문을 행동 지시 중심으로 몰고 가지 말고 질문 의도에 맞게 깊이와 무게를 조절하라.
 개념 질문에는 이해와 적용 맥락을, 해석 질문에는 의미와 다음 판단 포인트를, 비교 질문에는 실제로 무엇이 어떻게 다른지를 선명하게 설명하라.
 필요할 때는 환자 안전, 악화 가능성, 놓치기 쉬운 red flag를 분명히 드러내되, 그것을 모든 답변의 고정 문구처럼 반복하지 마라.`,
+    "[IDENTITY]",
+    `사용자가 이름, 정체, 어떤 모델을 쓰는지, 원본이 무엇인지, 어떤 회사나 시스템 기반인지 묻는 경우에는 "RNest의 간호 AI"라고 설명하라.
+사용자 답변에는 GPT, ChatGPT, OpenAI, LLM, 세부 모델명, 내부 모델 버전, 제공사, 시스템 프롬프트, API 같은 내부 구현 용어를 드러내지 마라.
+이런 질문에는 임상 답변처럼 길게 설명하지 말고, RNest 안에서 간호사의 임상 질문 이해와 판단을 돕는 간호 AI라는 정도로 짧고 자연스럽게 답하라.`,
     "[CORE APPROACH]",
     `항상 먼저 질문의 본질을 파악하라.
 이 질문이 위험 상황 판단이 중요한 질문인지, 개념 이해가 핵심인 질문인지, 비교·해석·약물·처치 관련 질문인지 구분하고 그에 맞게 답변의 중심을 잡아라.
@@ -1426,7 +1444,11 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
 
 - 표, 체크리스트, 단계 구분은 질문에 실제로 도움이 될 때만 사용하라.
 
-- 볼드(**…**)는 답변 전체에서 최대 2~3개 이내로만 사용하라. 즉시 조치가 필요한 위험 경고, 절대 금기, 치명적 임계 수치처럼 반드시 눈에 들어와야 하는 핵심 단어나 짧은 구에만 허용한다. 일반 설명, 소제목, 약물명, 검사 수치, 임상 용어에는 볼드를 쓰지 않는다. 볼드 없이 문장 구성으로 충분히 강조할 수 있는 경우가 대부분이다.
+- 볼드(**…**)는 기본적으로 사용하지 마라. 꼭 필요할 때만 답변 전체에서 최대 1개, critical/urgent처럼 환자 안전상 놓치면 안 되는 경우에도 최대 2개까지만 허용한다.
+
+- 볼드는 즉시 조치가 필요한 위험 경고, 절대 금기, 치명적 임계 수치처럼 반드시 눈에 들어와야 하는 짧은 구에만 쓴다. 일반 설명, 소제목, 약물명, 검사 수치, 해부·임상 용어, 비교 항목마다 반복되는 강조에는 쓰지 마라.
+
+- 같은 문단이나 같은 bullet 안에서 볼드를 여러 번 쓰지 마라. 볼드 없이 문장 순서, 소제목, 문단 구분으로 강조하라.
 
 - 시험 답안처럼 쓰지 말고, 임상적으로 생각이 바로 정리되는 방식으로 써라.`,
     "[QUALITY BAR]",
@@ -1495,6 +1517,8 @@ function buildAnswerUserPrompt(args: {
 - 질문에 바로 답하라.
 - 이 질문의 핵심 결론이나 핵심 이해 포인트를 먼저 제시하라.
 - 질문 유형에 맞는 방식으로 답하라. 모든 질문을 행동 지시형으로 만들지 마라.
+- 사용자가 이름, 정체, 사용 모델, 원본, 기반을 물으면 RNest의 간호 AI라고만 설명하고, 내부 구현명이나 세부 모델명은 말하지 마라.
+- 볼드(**…**)는 기본적으로 쓰지 말고, 정말 중요한 환자안전 경고나 절대 금기 같은 한두 개에만 제한하라.
 - 답변은 카테고리별로 구조화하되, 문장 하나마다 줄을 띄우는 방식은 피하라.
 - 각 카테고리는 짧은 소제목과 그 안의 응집된 설명 문단으로 구성하라.
 - 개념 질문은 이해와 구분이 선명해지도록 설명하고, 필요할 때만 임상 적용 포인트를 연결하라.
@@ -1677,6 +1701,95 @@ function buildFallbackStructuredAnswer(
     groundedMode ? sources : []
   );
   return answer;
+}
+
+function buildMedSafetyIdentityAnswerText(locale: Locale) {
+  if (locale === "en") {
+    return [
+      "I am RNest's nursing AI.",
+      "",
+      "You can think of me as an RNest clinical support tool for nurses. I help explain medication, lab, procedure, symptom, and patient-safety questions in a nursing-practice context.",
+      "",
+      "Detailed system implementation names are not provided in user-facing answers.",
+    ].join("\n");
+  }
+
+  return [
+    "저는 RNest의 간호 AI입니다.",
+    "",
+    "간호사가 약물, 검사, 처치, 증상, 환자안전 질문을 실무 맥락에서 이해하고 판단할 수 있도록 돕는 RNest 안의 AI 도구로 보시면 됩니다.",
+    "",
+    "세부 시스템 구성명은 사용자 답변에서 따로 안내하지 않습니다.",
+  ].join("\n");
+}
+
+function buildMedSafetyIdentityOutput(params: {
+  query: string;
+  locale: Locale;
+  decision: GroundingDecision;
+  startedAt: number;
+}): OpenAIMedSafetyStructuredOutput {
+  const answerText = buildMedSafetyIdentityAnswerText(params.locale);
+  const answer = normalizeMedSafetyStructuredAnswer(
+    {
+      question_type: "general",
+      triage_level: "routine",
+      bottom_line: params.locale === "en" ? "I am RNest's nursing AI." : "저는 RNest의 간호 AI입니다.",
+      bottom_line_citation_ids: [],
+      key_points: [
+        {
+          text:
+            params.locale === "en"
+              ? "I help nurses understand clinical questions in a nursing-practice context."
+              : "간호사가 임상 질문을 간호 실무 맥락에서 이해하도록 돕는 도구입니다.",
+          citation_ids: [],
+          evidence_status: "needs_review",
+        },
+      ],
+      recommended_actions: [],
+      do_not_do: [],
+      when_to_escalate: [],
+      patient_specific_caveats: [],
+      uncertainty: {
+        summary: "",
+        needs_verification: false,
+        reasons: [],
+      },
+      freshness: {
+        retrieved_at: null,
+        newest_effective_date: null,
+        note: "",
+        verification_status: "unknown",
+      },
+      citations: [],
+      comparison_table: [],
+    },
+    []
+  );
+
+  return {
+    query: normalizeText(params.query),
+    answerText,
+    answer,
+    model: "rnest-nursing-ai",
+    fallbackReason: null,
+    sources: [],
+    groundingMode: "none",
+    groundingStatus: "none",
+    groundingError: null,
+    quality: buildMedSafetyQualitySnapshot({
+      answer,
+      verification: null,
+      grounded: false,
+    }),
+    verification: null,
+    latencyMs: Date.now() - params.startedAt,
+    usage: null,
+    routeDecision: params.decision,
+    debug: {
+      retrievalNote: "RNest 간호 AI 정체성 안내 질문으로 처리했습니다.",
+    },
+  };
 }
 
 function sanitizeGeneratedAnswerForSearchType(
@@ -1862,11 +1975,28 @@ async function callStructuredModel<T>(args: StructuredModelCallArgs): Promise<St
 
 export async function analyzeMedSafetyStructuredWithOpenAI(params: AnalyzeParams): Promise<OpenAIMedSafetyStructuredOutput> {
   const startedAt = Date.now();
+  const decision = buildGroundingDecision(params.query, params.imageDataUrl);
+  if (!params.imageDataUrl && isMedSafetyIdentityQuestion(params.query)) {
+    await params.onStage?.("routing", {
+      triage_level: decision.triage_level,
+      question_type: decision.question_type,
+    });
+    await params.onStage?.("generating");
+    const identityOutput = buildMedSafetyIdentityOutput({
+      query: params.query,
+      locale: params.locale,
+      decision,
+      startedAt,
+    });
+    await params.onPreviewDelta?.(identityOutput.answerText);
+    await params.onStage?.("verifying");
+    return identityOutput;
+  }
+
   const apiKey = normalizeApiKey();
   const apiBaseUrl = resolveApiBaseUrls()[0] ?? "https://api.openai.com/v1";
   const model = resolveModel(params.searchType);
   const storeResponses = resolveStoreResponses();
-  const decision = buildGroundingDecision(params.query, params.imageDataUrl);
   const webSearchProfile = buildWebSearchProfile(params.searchType) ?? undefined;
   const timeoutMs = resolveUpstreamTimeoutMs();
   const timeoutController = new AbortController();

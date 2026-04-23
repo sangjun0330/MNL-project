@@ -3,7 +3,7 @@ import { todayISO, type ISODate } from "@/lib/date";
 import type { Language } from "@/lib/i18n";
 import { getDefaultSearchTypeForTier, getPlanDefinition, type SearchCreditType } from "@/lib/billing/plans";
 import { buildPrivateNoStoreHeaders, jsonNoStore, sameOriginRequestError } from "@/lib/server/requestSecurity";
-import { analyzeMedSafetyStructuredWithOpenAI } from "@/lib/server/openaiMedSafetyStructured";
+import { analyzeMedSafetyStructuredWithOpenAI, isMedSafetyIdentityQuestion } from "@/lib/server/openaiMedSafetyStructured";
 import { mergeMedSafetySources, type MedSafetyGroundingMode, type MedSafetyGroundingStatus, type MedSafetySource } from "@/lib/medSafetySources";
 import type {
   MedSafetyQualitySnapshot,
@@ -612,30 +612,33 @@ export async function POST(req: NextRequest) {
 
     const subscription = await safeReadSubscription(userId);
     const searchType = pickSearchType(bodyRaw.searchType, getDefaultSearchTypeForTier(subscription?.tier ?? "free"));
+    const skipCreditConsume = !imageDataUrl && isMedSafetyIdentityQuestion(query);
     let consumedBucket: "included" | "extra" | null = null;
-    try {
-      const creditUse = await safeConsumeMedSafetyCredit(userId, searchType);
-      if (!creditUse.allowed) {
-        return jsonNoStore(
-          {
-            ok: false,
-            error: safeErrorString(creditUse.reason ?? "insufficient_med_safety_credits"),
-            quota: creditUse.quota,
-          },
-          { status: 402 }
-        );
-      }
-      consumedBucket = creditUse.bucket;
-    } catch (error) {
+    if (!skipCreditConsume) {
       try {
-        console.error("[MedSafetyAnalyze] credit_consume_failed_allowing_request", {
-          userId: userId.slice(0, 8),
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } catch {
-        // ignore logging failure
+        const creditUse = await safeConsumeMedSafetyCredit(userId, searchType);
+        if (!creditUse.allowed) {
+          return jsonNoStore(
+            {
+              ok: false,
+              error: safeErrorString(creditUse.reason ?? "insufficient_med_safety_credits"),
+              quota: creditUse.quota,
+            },
+            { status: 402 }
+          );
+        }
+        consumedBucket = creditUse.bucket;
+      } catch (error) {
+        try {
+          console.error("[MedSafetyAnalyze] credit_consume_failed_allowing_request", {
+            userId: userId.slice(0, 8),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } catch {
+          // ignore logging failure
+        }
+        consumedBucket = null;
       }
-      consumedBucket = null;
     }
 
     const abort = new AbortController();
