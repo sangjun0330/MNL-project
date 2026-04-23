@@ -185,6 +185,27 @@ export const MED_SAFETY_TRUSTED_PROFESSIONAL_DOMAINS = MED_SAFETY_SOURCE_DOMAIN_
   .filter((entry) => entry.tier === "trusted_professional")
   .map((entry) => entry.domain);
 
+export const MED_SAFETY_KOREAN_PROFESSIONAL_DOMAINS = [
+  "guideline.or.kr",
+  "kams.or.kr",
+  "koreanursing.or.kr",
+  "koreanurse.or.kr",
+  "khna.or.kr",
+  "kma.org",
+  "kha.or.kr",
+  "kpanet.or.kr",
+  "health.kr",
+  "koreamed.org",
+  "kci.go.kr",
+  "koreascience.or.kr",
+  "scienceon.kisti.re.kr",
+] as const;
+
+export const MED_SAFETY_KOREA_PRIORITY_DOMAINS = [
+  ...MED_SAFETY_KOREA_OFFICIAL_DOMAINS,
+  ...MED_SAFETY_KOREAN_PROFESSIONAL_DOMAINS,
+];
+
 function escapeDomainForRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -279,6 +300,29 @@ export function formatMedSafetySourceDomain(domain: string) {
   return normalizeText(domain).replace(/^www\./i, "");
 }
 
+function medSafetyDomainMatches(host: string, domain: string) {
+  const normalizedHost = formatMedSafetySourceDomain(host).toLowerCase();
+  const normalizedDomain = formatMedSafetySourceDomain(domain).toLowerCase();
+  if (!normalizedHost || !normalizedDomain) return false;
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+}
+
+export function getMedSafetySourceDomainTier(domain: string): MedSafetySourceDomainTier | null {
+  const host = formatMedSafetySourceDomain(domain);
+  if (!host) return null;
+  const match = [...MED_SAFETY_SOURCE_DOMAIN_ENTRIES]
+    .sort((a, b) => b.domain.length - a.domain.length)
+    .find((entry) => medSafetyDomainMatches(host, entry.domain));
+  return match?.tier ?? null;
+}
+
+export function isKoreanMedSafetySourceDomain(domain: string) {
+  const host = formatMedSafetySourceDomain(domain);
+  if (!host) return false;
+  if (getMedSafetySourceDomainTier(host) === "korea_official") return true;
+  return MED_SAFETY_KOREAN_PROFESSIONAL_DOMAINS.some((item) => medSafetyDomainMatches(host, item));
+}
+
 export function isOfficialMedSafetyDomain(domain: string) {
   const host = formatMedSafetySourceDomain(domain);
   return COMMON_LABEL_MAP.some(([pattern]) => pattern.test(host));
@@ -339,6 +383,16 @@ export function buildMedSafetySource(input: MedSafetySourceInput): MedSafetySour
   };
 }
 
+function getMedSafetySourceSortRank(source: MedSafetySource) {
+  const tier = getMedSafetySourceDomainTier(source.domain);
+  if (tier === "korea_official") return 0;
+  if (isKoreanMedSafetySourceDomain(source.domain)) return 1;
+  if (tier === "global_official") return 2;
+  if (tier === "public_medical") return 3;
+  if (tier === "trusted_professional") return 4;
+  return 5;
+}
+
 export function mergeMedSafetySources(values: MedSafetySourceInput[], limit = 8) {
   const normalizedLimit = Math.max(0, Math.min(24, Math.round(limit)));
   if (!normalizedLimit) return [] as MedSafetySource[];
@@ -379,9 +433,19 @@ export function mergeMedSafetySources(values: MedSafetySourceInput[], limit = 8)
     .map((key) => byUrl.get(key))
     .filter((value): value is MedSafetySource => Boolean(value));
 
-  const cited = ordered.filter((item) => item.cited);
-  const uncited = ordered.filter((item) => !item.cited);
-  return [...cited, ...uncited].slice(0, normalizedLimit);
+  return ordered
+    .map((source, index) => ({ source, index }))
+    .sort((a, b) => {
+      const rankDiff = getMedSafetySourceSortRank(a.source) - getMedSafetySourceSortRank(b.source);
+      if (rankDiff !== 0) return rankDiff;
+      if (a.source.cited !== b.source.cited) return a.source.cited ? -1 : 1;
+      if ((a.source.supportStrength ?? "direct") !== (b.source.supportStrength ?? "direct")) {
+        return (a.source.supportStrength ?? "direct") === "direct" ? -1 : 1;
+      }
+      return a.index - b.index;
+    })
+    .map((item) => item.source)
+    .slice(0, normalizedLimit);
 }
 
 export function getMedSafetySourceLabel(source: Pick<MedSafetySource, "domain" | "title">) {

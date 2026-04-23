@@ -10,6 +10,7 @@ import {
 import {
   MED_SAFETY_GLOBAL_OFFICIAL_DOMAINS,
   MED_SAFETY_KOREA_OFFICIAL_DOMAINS,
+  MED_SAFETY_KOREA_PRIORITY_DOMAINS,
   MED_SAFETY_PUBLIC_MEDICAL_DOMAINS,
   MED_SAFETY_TRUSTED_PROFESSIONAL_DOMAINS,
   mergeMedSafetySources,
@@ -105,17 +106,45 @@ type MedSafetyWebSearchProfile = {
   searchContextSize: WebSearchContextSize;
   toolChoice: "required" | "auto";
   includeSourceList: boolean;
+  allowedDomains: string[];
+  userLocation: {
+    type: "approximate";
+    country: "KR";
+    region: string;
+    city: string;
+    timezone: "Asia/Seoul";
+  };
 };
 
 const DEFAULT_STANDARD_MODEL = "gpt-5.2";
 const DEFAULT_PREMIUM_MODEL = "gpt-5.4";
 
-const ALLOWED_DOMAINS = [
-  ...MED_SAFETY_KOREA_OFFICIAL_DOMAINS,
+function uniqueDomains(domains: readonly string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const domain of domains) {
+    const normalized = String(domain ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/g, "");
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+const ALLOWED_DOMAINS = uniqueDomains([
+  ...MED_SAFETY_KOREA_PRIORITY_DOMAINS,
   ...MED_SAFETY_GLOBAL_OFFICIAL_DOMAINS,
   ...MED_SAFETY_PUBLIC_MEDICAL_DOMAINS,
   ...MED_SAFETY_TRUSTED_PROFESSIONAL_DOMAINS,
-];
+]);
+
+const MED_SAFETY_WEB_SEARCH_ALLOWED_DOMAIN_LIMIT = 100;
+const MED_SAFETY_WEB_SEARCH_ALLOWED_DOMAINS = uniqueDomains([
+  ...MED_SAFETY_KOREA_PRIORITY_DOMAINS,
+  ...MED_SAFETY_GLOBAL_OFFICIAL_DOMAINS,
+  ...MED_SAFETY_PUBLIC_MEDICAL_DOMAINS,
+  ...MED_SAFETY_TRUSTED_PROFESSIONAL_DOMAINS,
+]).slice(0, MED_SAFETY_WEB_SEARCH_ALLOWED_DOMAIN_LIMIT);
 
 function formatPreferredDomainList(domains: readonly string[], limit: number) {
   return domains.slice(0, limit).join(", ");
@@ -615,12 +644,17 @@ function buildStructuredModelRequestBody(args: StructuredModelCallArgs) {
   }
 
   if (args.webSearchProfile) {
-    body.tools = [
-      {
-        type: args.webSearchProfile.toolType,
-        search_context_size: args.webSearchProfile.searchContextSize,
-      },
-    ];
+    const webSearchTool: Record<string, unknown> = {
+      type: args.webSearchProfile.toolType,
+      search_context_size: args.webSearchProfile.searchContextSize,
+      user_location: args.webSearchProfile.userLocation,
+    };
+    if (args.webSearchProfile.toolType === "web_search" && args.webSearchProfile.allowedDomains.length) {
+      webSearchTool.filters = {
+        allowed_domains: args.webSearchProfile.allowedDomains,
+      };
+    }
+    body.tools = [webSearchTool];
     body.tool_choice = args.webSearchProfile.toolChoice;
     body.max_tool_calls = resolveMaxToolCalls();
     if (args.webSearchProfile.includeSourceList) {
@@ -1069,6 +1103,14 @@ function buildWebSearchProfile(searchType: SearchCreditType): MedSafetyWebSearch
     searchContextSize: "medium",
     toolChoice: resolveWebSearchToolChoice(),
     includeSourceList: true,
+    allowedDomains: MED_SAFETY_WEB_SEARCH_ALLOWED_DOMAINS,
+    userLocation: {
+      type: "approximate",
+      country: "KR",
+      region: "Seoul",
+      city: "Seoul",
+      timezone: "Asia/Seoul",
+    },
   };
 }
 
@@ -1283,6 +1325,8 @@ function buildAnswerStylePrompt(decision: GroundingDecision) {
 function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType, decision: GroundingDecision, query: string) {
   const maxToolCalls = resolveMaxToolCalls();
   const preferredDomainCount = new Set(ALLOWED_DOMAINS).size;
+  const searchAllowedDomainCount = new Set(MED_SAFETY_WEB_SEARCH_ALLOWED_DOMAINS).size;
+  const koreaPriorityDomains = formatPreferredDomainList(MED_SAFETY_KOREA_PRIORITY_DOMAINS, 80);
   const koreaOfficialDomains = formatPreferredDomainList(MED_SAFETY_KOREA_OFFICIAL_DOMAINS, 80);
   const globalOfficialDomains = formatPreferredDomainList(MED_SAFETY_GLOBAL_OFFICIAL_DOMAINS, 80);
   const publicMedicalDomains = formatPreferredDomainList(MED_SAFETY_PUBLIC_MEDICAL_DOMAINS, 40);
@@ -1296,7 +1340,10 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
           "같은 의미의 검색을 반복하지 말고, 이미 충분한 근거가 있으면 추가 검색 대신 바로 답변을 완성하라.",
           "검색을 했다면 검색 결과를 소화해서 질문에 직접 답하라. 검색 결과 요약본이나 출처 목록만 늘어놓지 말고, 확인한 근거를 바탕으로 질문에 대한 해설을 재구성하라.",
           `우선 근거 도메인은 총 ${preferredDomainCount}개이며, 아래 공식·공공·전문 근거 도메인을 먼저 사용하라.`,
-          "한국어 질문, 한국 임상·간호·의료제도·보험·약물 허가·감염관리·환자안전·응급의료·법령 관련 질문은 한국 공식 출처를 최우선으로 검색하라. 한국 공식 근거가 충분하면 해외 근거는 보조로만 사용하라.",
+          `검색 도구에는 한국 사용자 위치와 우선 허용 도메인 ${searchAllowedDomainCount}개가 설정되어 있다. 검색어를 만들 때도 한국어 핵심어와 한국 기관 맥락을 먼저 사용하라.`,
+          "한국어 질문, 한국 임상·간호·의료제도·보험·약물 허가·감염관리·환자안전·응급의료·법령 관련 질문은 한국 공식/공공/전문 출처를 먼저 검색하라. 한국 근거가 직접 관련되고 충분하면 해외 근거는 보조로만 사용하라.",
+          "답변 하단 출처가 2개 이상이면, 질문과 직접 관련된 한국 공식/공공/전문 출처가 확인된 경우 최소 1개 이상 포함하라. 단, 직접 관련성이 약한 한국 자료를 억지로 끼워 넣지는 마라.",
+          `한국 우선 도메인: ${koreaPriorityDomains}`,
           `한국 1차 공식/공공 도메인: ${koreaOfficialDomains}`,
           `해외 1차 공식/공공 도메인: ${globalOfficialDomains}`,
           `2차 공공 의학·근거평가 도메인: ${publicMedicalDomains}`,
@@ -1306,7 +1353,7 @@ function buildAnswerDeveloperPrompt(locale: Locale, searchType: SearchCreditType
           "문서 날짜, 기관명, URL, 수치, 용량, claim은 실제로 확인된 경우만 써라.",
           "출처는 답변 하단에 실제로 사용한 핵심 문서만 간단히 정리하라.",
           "같은 URL 또는 같은 문서를 반복 나열하지 말고 하나로 통합하라.",
-          "출처는 unique URL 기준으로 2~3개 정도만 남기고, 출처 나열이 답변 내용보다 길어지지 않게 하라.",
+          "출처는 unique URL 기준으로 보통 3~4개를 남기고, 가이드라인·약물 허가·제도·환자안전처럼 근거 맥락이 중요한 질문은 5개까지 사용할 수 있다. 한국 출처가 직접 관련되면 한국 출처를 앞쪽에 배치하라.",
         ]
       : [
           "[근거 사용]",
@@ -1441,7 +1488,7 @@ function buildAnswerUserPrompt(args: {
     memory ? `직전 문맥:\n${memory}` : "",
     args.decision.freshness_sensitive ? "최신성 민감 질문이므로 문서 날짜와 확인 시점을 반영하라." : "",
     args.searchType === "premium"
-      ? "웹 검색 내용을 바탕으로, 간호사에게 실제로 도움이 되는 완성도 높은 답변을 작성하라."
+      ? "웹 검색 내용을 바탕으로, 간호사에게 실제로 도움이 되는 완성도 높은 답변을 작성하라. 한국 사용자에게 적용 가능한 질문이면 한국 공식·공공·전문 출처를 먼저 확인하고, 직접 관련성이 확인된 한국 출처를 답변 하단에 우선 포함하라."
       : "이번 모드에서는 웹 검색 없이 답하므로, 최신 근거나 기관별 세부 기준을 확인한 것처럼 쓰지 말고 안전한 일반 원칙과 불확실성을 분명히 반영하라.",
     `이번 답변에서는 아래를 특히 지켜라.
 
